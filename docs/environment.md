@@ -1,4 +1,4 @@
-<!-- # Environment Verification -->
+# Environment Verification 
 
 - Check date: 2026-09-19
 - Operating system: Windows 10.0.26200.9457
