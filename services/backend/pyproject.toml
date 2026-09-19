@@ -1,0 +1,44 @@
+[project]
+name = "evidencesoc"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "YG", email = "200405gyff@gmail.com" }
+]
+requires-python = ">=3.12.14"
+dependencies = [
+    "alembic==1.20.0",
+    "fastapi[standard]==0.141.1",
+    "httpx==0.28.1",
+    "langchain==1.4.1",
+    "langchain-mcp-adapters==0.3.2",
+    "langchain-openai==1.6.2",
+    "langchain-postgres==0.0.18",
+    "langgraph==1.2.11",
+    "langgraph-checkpoint-postgres==3.1.2",
+    "mcp==1.30.0",
+    "opensearch-py==3.2.0",
+    "pgvector==0.3.6",
+    "psycopg[binary,pool]==3.3.5",
+    "pydantic==2.13.5",
+    "pydantic-settings==2.15.0",
+    "sqlalchemy==2.0.54",
+    "sse-starlette==3.4.11",
+    "structlog==26.1.0",
+]
+
+[project.scripts]
+evidencesoc = "evidencesoc:main"
+
+[build-system]
+requires = ["uv_build>=0.12.16,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "mypy==2.3.1",
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
+    "ruff==0.16.8",
+]
