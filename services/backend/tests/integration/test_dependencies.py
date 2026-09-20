@@ -4,7 +4,6 @@ from pathlib import Path
 import httpx
 import psycopg
 
-
 REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 
 
@@ -43,23 +42,27 @@ def opensearch_url() -> str:
 
 
 def test_postgres_and_pgvector_versions() -> None:
-    with psycopg.connect(postgres_dsn(), connect_timeout=5) as connection:
-        with connection.cursor() as cursor:
-            cursor.execute("SELECT 1")
-            assert cursor.fetchone() == (1,)
+    with (
+        psycopg.connect(
+            postgres_dsn(),
+            connect_timeout=5,
+        ) as connection,
+        connection.cursor() as cursor,
+    ):
+        cursor.execute("SELECT 1")
+        assert cursor.fetchone() == (1,)
 
-            cursor.execute("SHOW server_version")
-            server_version = cursor.fetchone()
-            assert server_version is not None
-            assert server_version[0].startswith("17.")
+        cursor.execute("SHOW server_version")
+        server_version = cursor.fetchone()
+        assert server_version is not None
+        assert server_version[0].startswith("17.")
 
-            cursor.execute(
-                "SELECT extversion "
-                "FROM pg_extension "
-                "WHERE extname = 'vector'"
-            )
-            assert cursor.fetchone() == ("0.8.6",)
-
+        cursor.execute(
+            "SELECT extversion "
+            "FROM pg_extension "
+            "WHERE extname = 'vector'"
+        )
+        assert cursor.fetchone() == ("0.8.6",)
 
 def test_opensearch_version_and_health() -> None:
     root_response = httpx.get(opensearch_url(), timeout=10)
