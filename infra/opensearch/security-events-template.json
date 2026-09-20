@@ -1,0 +1,96 @@
+{
+  "index_patterns": [
+    "security-events-*"
+  ],
+  "priority": 100,
+  "version": 1,
+  "_meta": {
+    "description": "EvidenceSOC normalized security event template",
+    "schema_version": 1
+  },
+  "template": {
+    "settings": {
+      "number_of_shards": 1,
+      "number_of_replicas": 0
+    },
+    "mappings": {
+      "dynamic": false,
+      "_source": {
+        "enabled": true
+      },
+      "properties": {
+        "event_id": {
+          "type": "keyword"
+        },
+        "external_id": {
+          "type": "keyword"
+        },
+        "source": {
+          "type": "keyword"
+        },
+        "event_type": {
+          "type": "keyword"
+        },
+        "severity": {
+          "type": "keyword"
+        },
+        "observed_at": {
+          "type": "date"
+        },
+        "ingested_at": {
+          "type": "date"
+        },
+        "source_ip": {
+          "type": "ip"
+        },
+        "destination_ip": {
+          "type": "ip"
+        },
+        "source_port": {
+          "type": "integer"
+        },
+        "destination_port": {
+          "type": "integer"
+        },
+        "host": {
+          "type": "keyword"
+        },
+        "service": {
+          "type": "keyword"
+        },
+        "content_sha256": {
+          "type": "keyword"
+        },
+        "tags": {
+          "type": "keyword"
+        },
+        "message": {
+          "type": "text",
+          "fields": {
+            "keyword": {
+              "type": "keyword",
+              "ignore_above": 256
+            }
+          }
+        },
+        "http": {
+          "properties": {
+            "method": {
+              "type": "keyword"
+            },
+            "path": {
+              "type": "wildcard"
+            },
+            "status_code": {
+              "type": "integer"
+            }
+          }
+        },
+        "raw_event": {
+          "type": "object",
+          "enabled": false
+        }
+      }
+    }
+  }
+}
