@@ -1,6 +1,9 @@
-from fastapi import FastAPI
+from evidencesoc.openapi import EvidenceSOCApp
 
-app = FastAPI(title="EvidenceSOC API", version="0.1.0")
+app = EvidenceSOCApp(
+    title="EvidenceSOC API",
+    version="0.1.0",
+)
 
 
 @app.get("/health/live")
