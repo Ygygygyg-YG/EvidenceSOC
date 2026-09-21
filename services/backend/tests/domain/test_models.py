@@ -197,6 +197,7 @@ def test_evidence_item_contains_audit_information() -> None:
 
     evidence = EvidenceItem(
         evidence_id=EVIDENCE_ID,
+        event_id="EVENT-001",
         source="nginx",
         observed_at=NOW,
         query={"event_id": "EVENT-001"},
@@ -205,6 +206,8 @@ def test_evidence_item_contains_audit_information() -> None:
     )
 
     assert evidence.evidence_id == EVIDENCE_ID
+
+    assert evidence.event_id == "EVENT-001"
     assert evidence.query == {"event_id": "EVENT-001"}
     assert evidence.content_sha256 == "a" * 64
 
@@ -214,6 +217,7 @@ def test_evidence_item_rejects_missing_evidence_id() -> None:
 
     with pytest.raises(ValidationError) as exc_info:
         EvidenceItem(
+            event_id="EVENT-001",
             source="nginx",
             observed_at=NOW,
             query={"event_id": "EVENT-001"},
@@ -230,6 +234,7 @@ def test_evidence_item_rejects_invalid_sha256() -> None:
     with pytest.raises(ValidationError) as exc_info:
         EvidenceItem(
             evidence_id=EVIDENCE_ID,
+            event_id="EVENT-001",
             source="nginx",
             observed_at=NOW,
             query={"event_id": "EVENT-001"},

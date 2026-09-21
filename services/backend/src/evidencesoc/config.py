@@ -1,4 +1,4 @@
-﻿from functools import lru_cache
+from functools import lru_cache
 from typing import Literal
 
 from pydantic import SecretStr
@@ -11,6 +11,13 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
+    database_url: str = (
+        "postgresql+psycopg://"
+        "evidencesoc:change-me-local-only@127.0.0.1:5432/evidencesoc"
+    )
+    opensearch_url: str = "http://127.0.0.1:9200"
+    opensearch_index: str = "security-events-v1"
 
     llm_mode: Literal["fixture", "deepseek"] = "fixture"
     deepseek_api_key: SecretStr | None = None

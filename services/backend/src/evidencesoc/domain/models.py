@@ -14,6 +14,13 @@ class Severity(StrEnum):
     HIGH = "high"
     CRITICAL = "critical"
 
+
+class EventIndexStatus(StrEnum):
+    PENDING = "pending"
+    INDEXED = "indexed"
+    FAILED = "failed"
+
+
 class IncidentStatus(StrEnum):
     RECEIVED = "received"
     TRIAGED = "triaged"
@@ -25,6 +32,7 @@ class IncidentStatus(StrEnum):
     VALIDATING = "validating"
     COMPLETED = "completed"
     FAILED = "failed"
+
 
 class AgentRunStatus(StrEnum):
     PENDING = "pending"
@@ -40,14 +48,18 @@ class ApprovalDecision(StrEnum):
 
 class SecurityEvent(BaseModel):
     event_id: str
-    source: str
-    external_id: str | None = None
+    source: str = Field(min_length=1, max_length=128)
+    external_id: str | None = Field(default=None, max_length=255)
+    deduplication_key: str = Field(min_length=1, max_length=320)
     observed_at: datetime
     ingested_at: datetime
     severity: Severity
-    event_type: str
+    event_type: str = Field(min_length=1, max_length=128)
     raw: dict[str, Any]
     content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    index_status: EventIndexStatus = EventIndexStatus.PENDING
+    indexed_at: datetime | None = None
+    index_error: str | None = None
 
 
 class AttackOrigin(BaseModel):
@@ -71,13 +83,8 @@ class AgentRun(BaseModel):
 
     @model_validator(mode="after")
     def validate_time_order(self) -> Self:
-        if (
-            self.finished_at is not None
-            and self.finished_at < self.started_at
-        ):
-            raise ValueError(
-                "finished_at must be greater than or equal to started_at"
-            )
+        if self.finished_at is not None and self.finished_at < self.started_at:
+            raise ValueError("finished_at must be greater than or equal to started_at")
 
         return self
 
@@ -110,21 +117,23 @@ class AttackClassification(BaseModel):
     confidence: float = Field(ge=0, le=1)
     evidence_ids: list[str] = Field(min_length=1)
 
+
 class Incident(BaseModel):
     incident_id: str
     alert_id: str
     status: IncidentStatus = IncidentStatus.RECEIVED
     created_at: datetime
 
+
 class EvidenceItem(BaseModel):
-    evidence_id: str = Field(
-        pattern=r"^EV-[0-9A-HJKMNP-TV-Z]{26}$"
-    )
+    evidence_id: str = Field(pattern=r"^EV-[0-9A-HJKMNP-TV-Z]{26}$")
+    event_id: str = Field(min_length=1, max_length=64)
     source: str = Field(min_length=1)
     observed_at: datetime
     query: dict[str, Any]
     summary: str = Field(min_length=1)
     content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
 
 class Alert(BaseModel):
     alert_id: str
@@ -132,6 +141,7 @@ class Alert(BaseModel):
     severity: Severity
     created_at: datetime
     event_ids: list[str] = Field(min_length=1)
+
 
 class ResponsePlan(BaseModel):
     response_plan_id: str
@@ -141,6 +151,7 @@ class ResponsePlan(BaseModel):
     created_at: datetime
     requires_approval: Literal[True] = True
     evidence_ids: list[str] = Field(min_length=1)
+
 
 class ValidationOutcome(StrEnum):
     SUCCESS = "success"

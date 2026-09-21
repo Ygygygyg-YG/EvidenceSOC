@@ -25,17 +25,20 @@ class SecurityEventTable(Base):
     __table_args__ = (
         UniqueConstraint(
             "source",
-            "external_id",
-            name="uq_security_events_source_external_id",
+            "deduplication_key",
+            name="uq_security_events_source_deduplication_key",
         ),
         CheckConstraint(
-            "severity IN "
-            "('info', 'low', 'medium', 'high', 'critical')",
+            "severity IN ('info', 'low', 'medium', 'high', 'critical')",
             name="ck_security_events_severity",
         ),
         CheckConstraint(
             "content_sha256 ~ '^[0-9a-f]{64}$'",
             name="ck_security_events_content_sha256",
+        ),
+        CheckConstraint(
+            "index_status IN ('pending', 'indexed', 'failed')",
+            name="ck_security_events_index_status",
         ),
     )
 
@@ -48,24 +51,37 @@ class SecurityEventTable(Base):
         String(255),
         nullable=True,
     )
-    observed_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True)
+    deduplication_key: Mapped[str] = mapped_column(
+        String(320),
+        nullable=False,
     )
-    ingested_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True)
-    )
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    ingested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     severity: Mapped[str] = mapped_column(String(16))
     event_type: Mapped[str] = mapped_column(String(128))
     raw: Mapped[dict[str, Any]] = mapped_column(JSONB)
     content_sha256: Mapped[str] = mapped_column(String(64))
+    index_status: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="pending",
+        server_default="pending",
+    )
+    indexed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    index_error: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
 
 
 class AlertTable(Base):
     __tablename__ = "alerts"
     __table_args__ = (
         CheckConstraint(
-            "severity IN "
-            "('info', 'low', 'medium', 'high', 'critical')",
+            "severity IN ('info', 'low', 'medium', 'high', 'critical')",
             name="ck_alerts_severity",
         ),
     )
@@ -76,9 +92,7 @@ class AlertTable(Base):
     )
     title: Mapped[str] = mapped_column(Text)
     severity: Mapped[str] = mapped_column(String(16))
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True)
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     event_ids: Mapped[list[str]] = mapped_column(JSONB)
 
 
@@ -110,9 +124,7 @@ class IncidentTable(Base):
         ForeignKey("alerts.alert_id", ondelete="CASCADE")
     )
     status: Mapped[str] = mapped_column(String(32))
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True)
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class EvidenceItemTable(Base):
@@ -130,10 +142,15 @@ class EvidenceItemTable(Base):
     incident_id: Mapped[str] = mapped_column(
         ForeignKey("incidents.incident_id", ondelete="CASCADE")
     )
-    source: Mapped[str] = mapped_column(String(128))
-    observed_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True)
+    event_id: Mapped[str] = mapped_column(
+        ForeignKey(
+            "security_events.event_id",
+            ondelete="RESTRICT",
+            name="fk_evidence_items_event_id_security_events",
+        )
     )
+    source: Mapped[str] = mapped_column(String(128))
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     query: Mapped[dict[str, Any]] = mapped_column(JSONB)
     summary: Mapped[str] = mapped_column(Text)
     content_sha256: Mapped[str] = mapped_column(String(64))
@@ -177,8 +194,7 @@ class AgentRunTable(Base):
     __tablename__ = "agent_runs"
     __table_args__ = (
         CheckConstraint(
-            "status IN "
-            "('pending', 'running', 'completed', 'failed')",
+            "status IN ('pending', 'running', 'completed', 'failed')",
             name="ck_agent_runs_status",
         ),
         CheckConstraint(
@@ -195,9 +211,7 @@ class AgentRunTable(Base):
     )
     agent_name: Mapped[str] = mapped_column(String(128))
     status: Mapped[str] = mapped_column(String(32))
-    started_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True)
-    )
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
@@ -226,9 +240,7 @@ class ToolCallTable(Base):
         JSONB,
         nullable=True,
     )
-    started_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True)
-    )
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
@@ -257,9 +269,7 @@ class ResponsePlanTable(Base):
     )
     summary: Mapped[str] = mapped_column(Text)
     actions: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True)
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     requires_approval: Mapped[bool] = mapped_column(
         Boolean,
         default=True,
@@ -292,17 +302,14 @@ class ApprovalTable(Base):
     decision: Mapped[str] = mapped_column(String(16))
     reason: Mapped[str] = mapped_column(Text)
     decided_by: Mapped[str] = mapped_column(String(128))
-    decided_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True)
-    )
+    decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class ValidationResultTable(Base):
     __tablename__ = "validation_results"
     __table_args__ = (
         CheckConstraint(
-            "outcome IN "
-            "('success', 'failure', 'insufficient_evidence')",
+            "outcome IN ('success', 'failure', 'insufficient_evidence')",
             name="ck_validation_results_outcome",
         ),
     )
@@ -318,9 +325,7 @@ class ValidationResultTable(Base):
     )
     outcome: Mapped[str] = mapped_column(String(32))
     summary: Mapped[str] = mapped_column(Text)
-    checked_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True)
-    )
+    checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     evidence_ids: Mapped[list[str]] = mapped_column(JSONB)
 
 
@@ -347,8 +352,7 @@ class EvaluationRunTable(Base):
     __tablename__ = "evaluation_runs"
     __table_args__ = (
         CheckConstraint(
-            "status IN "
-            "('pending', 'running', 'completed', 'failed')",
+            "status IN ('pending', 'running', 'completed', 'failed')",
             name="ck_evaluation_runs_status",
         ),
         CheckConstraint(
@@ -365,9 +369,7 @@ class EvaluationRunTable(Base):
     configuration: Mapped[dict[str, Any]] = mapped_column(JSONB)
     metrics: Mapped[dict[str, Any]] = mapped_column(JSONB)
     status: Mapped[str] = mapped_column(String(32))
-    started_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True)
-    )
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,

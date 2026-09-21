@@ -36,17 +36,22 @@ def test_metadata_contains_all_required_tables() -> None:
     assert hasattr(module, "Base"), "SQLAlchemy Base 尚未实现"
     assert set(module.Base.metadata.tables) == EXPECTED_TABLES
 
+
 CORE_REQUIRED_COLUMNS = {
     "security_events": {
         "event_id",
         "source",
         "external_id",
+        "deduplication_key",
         "observed_at",
         "ingested_at",
         "severity",
         "event_type",
         "raw",
         "content_sha256",
+        "index_status",
+        "indexed_at",
+        "index_error",
     },
     "alerts": {
         "alert_id",
@@ -69,6 +74,7 @@ CORE_REQUIRED_COLUMNS = {
         "query",
         "summary",
         "content_sha256",
+        "event_id",
     },
     "response_plans": {
         "response_plan_id",
@@ -102,6 +108,11 @@ EXPECTED_CORE_FOREIGN_KEYS = {
     ("incidents", "alert_id", "alerts.alert_id"),
     ("evidence_items", "incident_id", "incidents.incident_id"),
     (
+        "evidence_items",
+        "event_id",
+        "security_events.event_id",
+    ),
+    (
         "response_plans",
         "incident_id",
         "incidents.incident_id",
@@ -127,9 +138,7 @@ def test_core_tables_have_required_columns() -> None:
         actual_columns = set(table.columns.keys())
         missing_columns = required_columns - actual_columns
 
-        assert not missing_columns, (
-            f"{table_name} 缺少字段：{sorted(missing_columns)}"
-        )
+        assert not missing_columns, f"{table_name} 缺少字段：{sorted(missing_columns)}"
 
 
 def test_core_tables_have_required_foreign_keys() -> None:
@@ -147,6 +156,7 @@ def test_core_tables_have_required_foreign_keys() -> None:
             )
 
     assert EXPECTED_CORE_FOREIGN_KEYS <= actual_foreign_keys
+
 
 SUPPORT_REQUIRED_COLUMNS = {
     "attack_steps": {
@@ -220,16 +230,12 @@ EXPECTED_SUPPORT_FOREIGN_KEYS = {
 def test_support_tables_have_required_columns() -> None:
     module = tables_module()
 
-    for table_name, required_columns in (
-        SUPPORT_REQUIRED_COLUMNS.items()
-    ):
+    for table_name, required_columns in SUPPORT_REQUIRED_COLUMNS.items():
         table = module.Base.metadata.tables[table_name]
         actual_columns = set(table.columns.keys())
         missing_columns = required_columns - actual_columns
 
-        assert not missing_columns, (
-            f"{table_name} 缺少字段：{sorted(missing_columns)}"
-        )
+        assert not missing_columns, f"{table_name} 缺少字段：{sorted(missing_columns)}"
 
 
 def test_support_tables_have_required_foreign_keys() -> None:
@@ -248,11 +254,13 @@ def test_support_tables_have_required_foreign_keys() -> None:
 
     assert EXPECTED_SUPPORT_FOREIGN_KEYS <= actual_foreign_keys
 
+
 EXPECTED_CONSTRAINT_NAMES = {
     "security_events": {
-        "uq_security_events_source_external_id",
         "ck_security_events_severity",
         "ck_security_events_content_sha256",
+        "uq_security_events_source_deduplication_key",
+        "ck_security_events_index_status",
     },
     "alerts": {
         "ck_alerts_severity",
@@ -293,9 +301,7 @@ EXPECTED_CONSTRAINT_NAMES = {
 def test_tables_define_required_database_constraints() -> None:
     module = tables_module()
 
-    for table_name, expected_names in (
-        EXPECTED_CONSTRAINT_NAMES.items()
-    ):
+    for table_name, expected_names in EXPECTED_CONSTRAINT_NAMES.items():
         table = module.Base.metadata.tables[table_name]
         actual_names = {
             constraint.name
@@ -304,6 +310,4 @@ def test_tables_define_required_database_constraints() -> None:
         }
         missing_names = expected_names - actual_names
 
-        assert not missing_names, (
-            f"{table_name} 缺少约束：{sorted(missing_names)}"
-        )
+        assert not missing_names, f"{table_name} 缺少约束：{sorted(missing_names)}"
