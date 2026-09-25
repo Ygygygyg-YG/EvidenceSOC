@@ -2,6 +2,7 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
+
 from evidencesoc.domain.models import EvidenceItem
 from evidencesoc.tools import security_events
 from evidencesoc.tools.policy import PolicyDeniedError
@@ -133,7 +134,7 @@ async def test_backend_result_over_limit_is_rejected() -> None:
     )
     start = datetime(2026, 9, 21, 12, 0, tzinfo=UTC)
 
-    with pytest.raises(RuntimeError, match="limit") as error:
+    with pytest.raises(RuntimeError, match="too many results") as error:
         await tool.search_security_events(
             time_from=start,
             time_to=start + timedelta(minutes=5),
@@ -170,7 +171,7 @@ async def test_wrong_result_type_is_rejected() -> None:
     )
     start = datetime(2026, 9, 21, 12, 0, tzinfo=UTC)
 
-    with pytest.raises(RuntimeError, match="EvidenceItem") as error:
+    with pytest.raises(RuntimeError, match="invalid evidence item") as error:
         await tool.search_security_events(
             start, start + timedelta(minutes=5), {}, limit=2
         )
@@ -263,3 +264,30 @@ async def test_work_dependency_error_is_audited() -> None:
     assert record.success is False
     assert record.error_code == "DEPENDENCY_UNAVAILABLE"
     assert record.result["trace_id"] == "TRACE-unit-test"
+
+
+@pytest.mark.asyncio
+async def test_unexpected_work_failure_is_coded_and_audited_once() -> None:
+    def broken_work(**_kwargs: object) -> list[object]:
+        raise RuntimeError("private database connection string")
+
+    audit = AuditSpy()
+    tool = security_events.SecurityEventTools(
+        context=SimpleNamespace(
+            run_id="AR-unit-test",
+            incident_id="IN-unit-test",
+            trace_id="TRACE-unit-test",
+        ),
+        work=broken_work,
+        audit=audit,
+    )
+    start = datetime(2026, 9, 21, 12, 0, tzinfo=UTC)
+
+    with pytest.raises(security_events.ToolDependencyError, match="dependency unavailable"):
+        await tool.search_security_events(
+            start, start + timedelta(minutes=5), {}, limit=2
+        )
+
+    assert len(audit.records) == 1
+    assert audit.records[0].error_code == "DEPENDENCY_UNAVAILABLE"
+    assert "private database connection string" not in audit.records[0].result["reason"]

@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from importlib import import_module
 from types import SimpleNamespace
 from typing import Self
 
 import pytest
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import Session, sessionmaker
+
 from evidencesoc.tools.audit import ToolCallRecord
 from evidencesoc.tools.policy import PolicyDeniedError
 from evidencesoc.tools.security_events import SecurityEventTools
@@ -121,3 +125,48 @@ def test_generated_tool_call_id_has_prefix() -> None:
     module = import_module("evidencesoc.tools.audit_sql")
 
     assert module.new_tool_call_id().startswith("TC-")
+
+
+@pytest.mark.asyncio
+async def test_successful_event_search_persists_json_safe_arguments(tmp_path) -> None:
+    module = import_module("evidencesoc.tools.audit_sql")
+    engine = create_engine(f"sqlite+pysqlite:///{(tmp_path / 'audit.db').as_posix()}")
+    with engine.begin() as connection:
+        connection.exec_driver_sql(
+            "CREATE TABLE tool_calls ("
+            "tool_call_id VARCHAR(64) PRIMARY KEY, "
+            "run_id VARCHAR(64) NOT NULL, "
+            "tool_name VARCHAR(128) NOT NULL, "
+            "arguments JSON NOT NULL, "
+            "result JSON, "
+            "started_at DATETIME NOT NULL, "
+            "finished_at DATETIME, "
+            "success BOOLEAN NOT NULL, "
+            "error_code VARCHAR(64))"
+        )
+    sessions = sessionmaker(bind=engine, class_=Session)
+    tool = SecurityEventTools(
+        context=SimpleNamespace(
+            run_id="AR-unit-test",
+            incident_id="IN-unit-test",
+            trace_id="TRACE-unit-test",
+        ),
+        work=lambda **_kwargs: [],
+        audit=module.SqlAuditWriter(
+            session_factory=sessions,
+            tool_call_id_factory=lambda: "TC-json-test",
+        ),
+    )
+
+    await tool.search_security_events(NOW, NOW + timedelta(minutes=5), {}, limit=2)
+
+    with engine.connect() as connection:
+        row = connection.execute(
+            text("SELECT arguments FROM tool_calls WHERE tool_call_id = 'TC-json-test'")
+        ).one()
+    arguments = json.loads(row.arguments)
+    assert arguments["time_from"] == NOW.isoformat()
+    assert arguments["time_to"] == (NOW + timedelta(minutes=5)).isoformat()
+    assert isinstance(arguments["time_from"], str)
+    assert isinstance(arguments["time_to"], str)
+    engine.dispose()

@@ -28,15 +28,11 @@ from evidencesoc.persistence.event_search import (
     OpenSearchEventQuery,
     OpenSearchEventStore,
 )
-from evidencesoc.tools.security_events import ToolDependencyError
-
-
-class ToolDependencyTimeout(ToolDependencyError):
-    code = "DEPENDENCY_TIMEOUT"
-
-
-class ToolNotFoundError(ToolDependencyError):
-    code = "NOT_FOUND"
+from evidencesoc.tools.errors import (
+    ToolDependencyError,
+    ToolDependencyTimeout,
+    ToolNotFoundError,
+)
 
 
 class EventSearchWork:

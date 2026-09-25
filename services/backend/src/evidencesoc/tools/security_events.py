@@ -1,23 +1,15 @@
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import datetime
 
 from evidencesoc.domain.models import EvidenceItem
-from evidencesoc.tools.audit import (
-    AuditWriter,
-    ToolCallRecord,
-    ToolExecutionContext,
-)
-from evidencesoc.tools.policy import (
-    PolicyDeniedError,
-    validate_event_search,
-)
+from evidencesoc.tools.audit import AuditWriter, ToolExecutionContext
+from evidencesoc.tools.errors import ToolDependencyError
+from evidencesoc.tools.policy import validate_event_search
+from evidencesoc.tools.runtime import run_audited_tool, validate_evidence_items
 
-
-class ToolDependencyError(RuntimeError):
-    code = "DEPENDENCY_UNAVAILABLE"
+__all__ = ("SecurityEventTools", "ToolDependencyError")
 
 
 class SecurityEventTools:
@@ -39,115 +31,24 @@ class SecurityEventTools:
         filters: dict[str, str],
         limit: int = 100,
     ) -> list[EvidenceItem]:
-        started_at = datetime.now(UTC)
-
-        try:
-            validate_event_search(time_from, time_to, filters, limit)
-        except PolicyDeniedError as exc:
-            record = ToolCallRecord(
-                run_id=self._context.run_id,
-                tool_name="search_security_events",
-                arguments={
-                    "time_from": time_from.isoformat(),
-                    "time_to": time_to.isoformat(),
-                    "filters": filters,
-                    "limit": limit,
-                },
-                result={
-                    "trace_id": self._context.trace_id,
-                    "reason": str(exc),
-                },
-                started_at=started_at,
-                finished_at=datetime.now(UTC),
-                success=False,
-                error_code=exc.code,
-            )
-            await asyncio.to_thread(self._audit.record, record)
-            raise
-
-        try:
-            events = await asyncio.to_thread(
-                self._work,
+        audit_arguments = {
+            "time_from": time_from.isoformat(),
+            "time_to": time_to.isoformat(),
+            "filters": dict(filters),
+            "limit": limit,
+        }
+        return await run_audited_tool(
+            context=self._context,
+            audit=self._audit,
+            tool_name="search_security_events",
+            arguments=audit_arguments,
+            validate=lambda: validate_event_search(time_from, time_to, filters, limit),
+            work=lambda: self._work(
                 time_from=time_from,
                 time_to=time_to,
                 filters=filters,
                 limit=limit,
                 incident_id=self._context.incident_id,
-            )
-        except ToolDependencyError as exc:
-            failure = ToolCallRecord(
-                run_id=self._context.run_id,
-                tool_name="search_security_events",
-                arguments={
-                    "time_from": time_from.isoformat(),
-                    "time_to": time_to.isoformat(),
-                    "filters": filters,
-                    "limit": limit,
-                },
-                result={
-                    "trace_id": self._context.trace_id,
-                    "reason": str(exc),
-                },
-                started_at=started_at,
-                finished_at=datetime.now(UTC),
-                success=False,
-                error_code=exc.code,
-            )
-            await asyncio.to_thread(self._audit.record, failure)
-            raise
-        if not isinstance(events, list):
-            reason = "event search returned a non-list result"
-            result_count = None
-        elif len(events) > limit:
-            reason = f"event search returned {len(events)} results above limit {limit}"
-            result_count = len(events)
-        elif any(not isinstance(event, EvidenceItem) for event in events):
-            reason = "event search returned a non-EvidenceItem result"
-            result_count = len(events)
-        else:
-            reason = None
-            result_count = len(events)
-
-        if reason is not None:
-            error = ToolDependencyError(reason)
-            failure = ToolCallRecord(
-                run_id=self._context.run_id,
-                tool_name="search_security_events",
-                arguments={
-                    "time_from": time_from.isoformat(),
-                    "time_to": time_to.isoformat(),
-                    "filters": filters,
-                    "limit": limit,
-                },
-                result={
-                    "trace_id": self._context.trace_id,
-                    "reason": reason,
-                    "result_count": result_count,
-                },
-                started_at=started_at,
-                finished_at=datetime.now(UTC),
-                success=False,
-                error_code=error.code,
-            )
-            await asyncio.to_thread(self._audit.record, failure)
-            raise error
-
-        record = ToolCallRecord(
-            run_id=self._context.run_id,
-            tool_name="search_security_events",
-            arguments={
-                "time_from": time_from.isoformat(),
-                "time_to": time_to.isoformat(),
-                "filters": filters,
-                "limit": limit,
-            },
-            result={
-                "trace_id": self._context.trace_id,
-                "result_count": len(events),
-            },
-            started_at=started_at,
-            finished_at=datetime.now(UTC),
-            success=True,
+            ),
+            validate_result=lambda value: validate_evidence_items(value, limit=limit),
         )
-        await asyncio.to_thread(self._audit.record, record)
-        return [event for event in events if isinstance(event, EvidenceItem)]
