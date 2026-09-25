@@ -22,4 +22,3 @@ def create_llm(settings: Settings | None = None) -> ChatOpenAI:
         timeout=60,
         max_retries=2,
     )
-

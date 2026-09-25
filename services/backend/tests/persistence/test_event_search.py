@@ -5,11 +5,13 @@ from typing import Any
 
 import pytest
 from evidencesoc.domain.models import SecurityEvent, Severity
+from evidencesoc.persistence import event_search
 from evidencesoc.persistence.event_search import (
     OpenSearchEventStore,
     build_event_document,
     create_opensearch_client,
 )
+from evidencesoc.tools.policy import PolicyDeniedError
 from opensearchpy.exceptions import NotFoundError
 
 NOW = datetime(2026, 9, 21, 12, 0, tzinfo=UTC)
@@ -153,3 +155,151 @@ def test_opensearch_client_factory_creates_an_instance_without_module_global(
 
     assert isinstance(client, FakeOpenSearch)
     assert captured == {"hosts": ["http://127.0.0.1:9200"]}
+
+
+def test_event_query_reads_bounded_event_ids() -> None:
+    class SearchSpy:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def search(self, **kwargs: object) -> dict[str, Any]:
+            self.calls.append(kwargs)
+            return {"hits": {"hits": [{"_id": "SE-first"}, {"_id": "SE-second"}]}}
+
+    client = SearchSpy()
+    end = datetime(2026, 9, 21, 12, 5, tzinfo=UTC)
+    query = event_search.OpenSearchEventQuery(client, index_name="security-events-v1")
+
+    event_ids = query.search_event_ids(
+        time_from=NOW,
+        time_to=end,
+        filters={"source_ip": "203.0.113.10", "source": "web"},
+        limit=2,
+    )
+
+    assert event_ids == ["SE-first", "SE-second"]
+    assert client.calls == [
+        {
+            "index": "security-events-v1",
+            "body": {
+                "size": 2,
+                "_source": False,
+                "query": {
+                    "bool": {
+                        "filter": [
+                            {
+                                "range": {
+                                    "observed_at": {
+                                        "gte": NOW.isoformat(),
+                                        "lt": end.isoformat(),
+                                    }
+                                }
+                            },
+                            {"term": {"source": "web"}},
+                            {"term": {"source_ip": "203.0.113.10"}},
+                        ]
+                    }
+                },
+                "sort": [
+                    {"observed_at": {"order": "asc"}},
+                    {"event_id": {"order": "asc"}},
+                ],
+            },
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    "hits",
+    [
+        "not-a-list",
+        [{"_id": "SE-1"}, {"_id": "SE-2"}, {"_id": "SE-3"}],
+        [{"_id": "SE-1"}, {"_id": "SE-1"}],
+        [{"_id": ""}],
+    ],
+    ids=["malformed", "over-limit", "duplicate", "blank-id"],
+)
+def test_event_query_rejects_untrusted_search_hits(hits: object) -> None:
+    class SearchClient:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def search(self, **_kwargs: object) -> dict[str, Any]:
+            self.calls += 1
+            return {"hits": {"hits": hits}}
+
+    client = SearchClient()
+    query = event_search.OpenSearchEventQuery(client, index_name="security-events-v1")
+    end = datetime(2026, 9, 21, 12, 5, tzinfo=UTC)
+
+    with pytest.raises(RuntimeError, match="invalid event search response") as error:
+        query.search_event_ids(
+            time_from=NOW,
+            time_to=end,
+            filters={},
+            limit=2,
+        )
+
+    assert isinstance(error.value, event_search.EventSearchResponseError)
+    assert client.calls == 1
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"limit": 201},
+        {"filters": {"query_string": "*"}},
+        {"time_to": NOW},
+        {"time_from": NOW.replace(tzinfo=None)},
+    ],
+    ids=["limit-201", "unknown-filter", "equal-time", "naive-time"],
+)
+def test_event_query_rejects_invalid_args_before_search(
+    changes: dict[str, Any],
+) -> None:
+    class SearchSpy:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def search(self, **_kwargs: object) -> dict[str, Any]:
+            self.calls += 1
+            return {"hits": {"hits": []}}
+
+    client = SearchSpy()
+    query = event_search.OpenSearchEventQuery(client, index_name="security-events-v1")
+    arguments: dict[str, Any] = {
+        "time_from": NOW,
+        "time_to": datetime(2026, 9, 21, 12, 5, tzinfo=UTC),
+        "filters": {},
+        "limit": 2,
+    }
+    arguments.update(changes)
+
+    with pytest.raises(PolicyDeniedError) as error:
+        query.search_event_ids(**arguments)
+
+    assert error.value.code == "POLICY_DENIED"
+    assert client.calls == 0
+
+
+def test_event_query_forwards_request_timeout() -> None:
+    class SearchSpy:
+        def __init__(self) -> None:
+            self.kwargs: dict[str, object] = {}
+
+        def search(self, **kwargs: object) -> dict[str, Any]:
+            self.kwargs = kwargs
+            return {"hits": {"hits": []}}
+
+    client = SearchSpy()
+    query = event_search.OpenSearchEventQuery(client, index_name="security-events-v1")
+
+    query.search_event_ids(
+        time_from=NOW,
+        time_to=datetime(2026, 9, 21, 12, 5, tzinfo=UTC),
+        filters={},
+        limit=2,
+        request_timeout=1.5,
+    )
+
+    assert client.kwargs["request_timeout"] == 1.5

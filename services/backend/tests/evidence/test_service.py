@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
+from contextlib import nullcontext
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta, timezone
+from importlib import import_module
 from typing import Any
 
 import pytest
@@ -18,6 +20,7 @@ from evidencesoc.persistence.event_repository import (
     EventNotFoundError,
     EvidenceNotFoundError,
 )
+from opensearchpy.exceptions import ConnectionError as OpenSearchConnectionError
 
 NOW = datetime(2026, 9, 21, 12, 0, tzinfo=UTC)
 EVENT_ID = "SE-01J8ZW4AAA0ABCDEFGHJKMNPQR"
@@ -364,3 +367,132 @@ def test_create_for_events_validates_the_whole_batch_before_writing() -> None:
     assert event_repository.calls == [first.event_id, second.event_id]
     assert search_store.calls == [first.event_id, second.event_id]
     assert evidence_repository.add_calls == []
+
+
+def test_event_work_retries_id_query_and_persists_one_batch() -> None:
+    module = import_module("evidencesoc.tools.event_work")
+    event = make_event()
+    service, _, evidence_repository, _ = make_service(event)
+
+    class Query:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def search_event_ids(self, **_kwargs: object) -> list[str]:
+            self.calls += 1
+            if self.calls < 3:
+                raise OpenSearchConnectionError("N/A", "offline")
+            return [event.event_id]
+
+    query = Query()
+    work = module.EventSearchWork(
+        query=query,
+        evidence_factory=lambda: nullcontext(service),
+    )
+
+    result = work(
+        time_from=NOW,
+        time_to=NOW + timedelta(minutes=5),
+        filters={},
+        limit=2,
+        incident_id=INCIDENT_ID,
+    )
+
+    assert query.calls == 3
+    assert len(evidence_repository.add_calls) == 1
+    assert evidence_repository.add_calls == [(INCIDENT_ID, result)]
+
+
+def test_event_work_exhausted_query_never_persists() -> None:
+    module = import_module("evidencesoc.tools.event_work")
+    event = make_event()
+    service, _, evidence_repository, _ = make_service(event)
+
+    class Query:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def search_event_ids(self, **_kwargs: object) -> list[str]:
+            self.calls += 1
+            raise OpenSearchConnectionError("N/A", "offline")
+
+    query = Query()
+    work = module.EventSearchWork(
+        query=query,
+        evidence_factory=lambda: nullcontext(service),
+    )
+
+    with pytest.raises(module.ToolDependencyError):
+        work(
+            time_from=NOW,
+            time_to=NOW + timedelta(minutes=5),
+            filters={},
+            limit=2,
+            incident_id=INCIDENT_ID,
+        )
+
+    assert query.calls == 3
+    assert evidence_repository.add_calls == []
+
+
+def test_event_work_deadline_prevents_starting_evidence_write() -> None:
+    module = import_module("evidencesoc.tools.event_work")
+    event = make_event()
+    service, _, evidence_repository, _ = make_service(event)
+
+    class Clock:
+        def __init__(self) -> None:
+            self.now = 0.0
+
+        def __call__(self) -> float:
+            return self.now
+
+    clock = Clock()
+
+    class Query:
+        def search_event_ids(self, **_kwargs: object) -> list[str]:
+            clock.now = 10.1
+            return [event.event_id]
+
+    work = module.EventSearchWork(
+        query=Query(),
+        evidence_factory=lambda: nullcontext(service),
+        clock=clock,
+    )
+
+    with pytest.raises(module.ToolDependencyTimeout):
+        work(
+            time_from=NOW,
+            time_to=NOW + timedelta(minutes=5),
+            filters={},
+            limit=2,
+            incident_id=INCIDENT_ID,
+        )
+
+    assert evidence_repository.add_calls == []
+
+
+def test_event_work_builder_disables_hidden_opensearch_retries(
+    monkeypatch: Any,
+) -> None:
+    module = import_module("evidencesoc.tools.event_work")
+    captured: dict[str, object] = {}
+
+    class FakeOpenSearch:
+        def __init__(self, **kwargs: object) -> None:
+            captured.update(kwargs)
+
+    monkeypatch.setattr(module, "OpenSearch", FakeOpenSearch)
+    work = module.build_event_search_work(
+        opensearch_url="http://127.0.0.1:9200",
+        index_name="security-events-v1",
+        session_factory=lambda: None,
+    )
+
+    assert isinstance(work, module.EventSearchWork)
+    assert captured == {
+        "hosts": ["http://127.0.0.1:9200"],
+        "max_retries": 0,
+        "retry_on_status": (),
+        "retry_on_timeout": False,
+    }
