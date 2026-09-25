@@ -25,7 +25,7 @@ class SecurityEventTools:
         self,
         *,
         context: ToolExecutionContext,
-        work: Callable[..., list[object]],
+        work: Callable[..., list[EvidenceItem]],
         audit: AuditWriter,
     ) -> None:
         self._context = context

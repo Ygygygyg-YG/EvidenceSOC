@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
@@ -18,9 +18,14 @@ class ToolCallRecord:
 
 
 class ToolExecutionContext(Protocol):
-    run_id: str
-    incident_id: str
-    trace_id: str
+    @property
+    def run_id(self) -> str: ...
+
+    @property
+    def incident_id(self) -> str: ...
+
+    @property
+    def trace_id(self) -> str: ...
 
 
 class AuditWriter(Protocol):
