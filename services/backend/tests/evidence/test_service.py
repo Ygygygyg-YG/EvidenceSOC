@@ -9,6 +9,8 @@ from importlib import import_module
 from typing import Any
 
 import pytest
+from opensearchpy.exceptions import ConnectionError as OpenSearchConnectionError
+
 from evidencesoc.domain.models import EvidenceItem, SecurityEvent, Severity
 from evidencesoc.evidence.service import (
     EvidenceIntegrityError,
@@ -20,7 +22,6 @@ from evidencesoc.persistence.event_repository import (
     EventNotFoundError,
     EvidenceNotFoundError,
 )
-from opensearchpy.exceptions import ConnectionError as OpenSearchConnectionError
 
 NOW = datetime(2026, 9, 21, 12, 0, tzinfo=UTC)
 EVENT_ID = "SE-01J8ZW4AAA0ABCDEFGHJKMNPQR"

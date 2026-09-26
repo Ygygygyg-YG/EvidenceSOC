@@ -1,5 +1,6 @@
-from evidencesoc.main import app
 from fastapi.testclient import TestClient
+
+from evidencesoc.main import app
 
 
 def test_live_health() -> None:

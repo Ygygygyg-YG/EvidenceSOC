@@ -63,6 +63,19 @@ def _database_with_agent_run(path: Path) -> None:
             "INSERT INTO agent_runs (run_id, incident_id) VALUES (?, ?)",
             ("AR-42", "IN-42"),
         )
+        connection.execute(
+            "CREATE TABLE tool_calls ("
+            "tool_call_id VARCHAR(64) PRIMARY KEY, "
+            "run_id VARCHAR(64) NOT NULL, "
+            "tool_name VARCHAR(128) NOT NULL, "
+            "arguments JSON NOT NULL, "
+            "result JSON, "
+            "started_at DATETIME NOT NULL, "
+            "finished_at DATETIME, "
+            "success BOOLEAN NOT NULL, "
+            "error_code VARCHAR(64)"
+            ")"
+        )
         connection.commit()
     finally:
         connection.close()
@@ -85,7 +98,7 @@ def agent_run_database() -> Iterator[Path]:
 
 
 @pytest.mark.asyncio
-async def test_stdio_process_initializes_and_discovers_only_real_tool(
+async def test_stdio_process_initializes_and_discovers_exactly_three_tools(
     agent_run_database: Path,
 ) -> None:
     client = importlib.import_module("evidencesoc.mcp_server.client")
@@ -100,15 +113,35 @@ async def test_stdio_process_initializes_and_discovers_only_real_tool(
         ) as session:
             first = await session.list_tools()
             second = await session.list_tools()
+            denial = await session.call_tool("run_shell", {})
 
-    assert [tool.name for tool in first.tools] == ["search_security_events"]
-    assert [tool.name for tool in second.tools] == ["search_security_events"]
-    assert set(first.tools[0].inputSchema["properties"]) == {
-        "time_from",
-        "time_to",
-        "filters",
-        "limit",
+    assert {tool.name for tool in first.tools} == {
+        "search_security_events",
+        "get_alert_context",
+        "lookup_attack_technique",
     }
+    assert {tool.name for tool in second.tools} == {
+        "search_security_events",
+        "get_alert_context",
+        "lookup_attack_technique",
+    }
+    assert len(first.tools) == len(second.tools) == 3
+    assert denial.isError is True
+    assert denial.structuredContent["error"]["code"] == "POLICY_DENIED"
+    assert denial.structuredContent["error"]["trace_id"] == "TRACE-42"
+    assert all(
+        not ({"run_id", "incident_id", "trace_id"} & set(tool.inputSchema["properties"]))
+        for tool in first.tools
+    )
+
+    connection = sqlite3.connect(agent_run_database)
+    try:
+        row = connection.execute(
+            "SELECT tool_name, success, error_code FROM tool_calls"
+        ).fetchone()
+    finally:
+        connection.close()
+    assert row == ("run_shell", 0, "POLICY_DENIED")
 
 
 @pytest.mark.asyncio

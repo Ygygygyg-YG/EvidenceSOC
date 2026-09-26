@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from typing import Any, Protocol, cast
 
 from evidencesoc.domain.models import EvidenceItem, SecurityEvent
+from evidencesoc.execution import check_execution
 from evidencesoc.ids import new_evidence_id
 from evidencesoc.ingestion.jsonl import ParsedLogRecord
 from evidencesoc.ingestion.normalize import (
@@ -123,12 +124,14 @@ class EvidenceService:
             )
             for event in verified_events
         ]
+        check_execution()
         return self._evidence_repository.add_many(incident_id, items)
 
     def get(self, evidence_id: str) -> EvidenceItem:
         return self._evidence_repository.get(evidence_id)
 
     def _verify_event(self, event_id: str) -> SecurityEvent:
+        check_execution()
         try:
             event = self._event_repository.get(event_id)
         except EventNotFoundError as exc:

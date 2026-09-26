@@ -15,6 +15,8 @@ from evidencesoc.domain.models import (
     SecurityEvent,
     Severity,
 )
+from evidencesoc.execution import check_execution
+from evidencesoc.persistence.json_encoding import restore_json, safe_json
 from evidencesoc.persistence.tables import (
     EvidenceItemTable,
     IncidentTable,
@@ -113,7 +115,7 @@ def _to_evidence(row: EvidenceItemTable) -> EvidenceItem:
         event_id=row.event_id,
         source=row.source,
         observed_at=row.observed_at,
-        query=row.query,
+        query=restore_json(row.query),
         summary=row.summary,
         content_sha256=row.content_sha256,
     )
@@ -263,13 +265,14 @@ class EvidenceRepository:
                 "event_id": item.event_id,
                 "source": item.source,
                 "observed_at": item.observed_at,
-                "query": item.query,
+                "query": safe_json(item.query),
                 "summary": item.summary,
                 "content_sha256": item.content_sha256,
             }
             for item in items
         ]
         self._session.execute(insert(EvidenceItemTable).values(values))
+        check_execution()
         self._session.commit()
         return list(items)
 

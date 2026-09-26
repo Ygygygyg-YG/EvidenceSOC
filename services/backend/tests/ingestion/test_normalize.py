@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
 from evidencesoc.ingestion.jsonl import ParsedLogRecord
 
 INGESTED_AT = datetime(2026, 9, 21, 12, 0, tzinfo=UTC)
@@ -126,6 +127,15 @@ def test_normalize_record_returns_security_event() -> None:
     assert event.raw == raw
     assert event.index_status.value == "pending"
     assert len(event.content_sha256) == 64
+
+
+def test_normalize_accepts_utc_z_suffix() -> None:
+    raw = valid_raw()
+    raw["observed_at"] = "2026-09-21T12:00:00Z"
+
+    event = normalize(raw)
+
+    assert event.observed_at == datetime(2026, 9, 21, 12, 0, tzinfo=UTC)
 
 
 def test_missing_external_id_uses_content_hash() -> None:

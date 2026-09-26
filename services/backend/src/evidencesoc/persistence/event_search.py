@@ -9,6 +9,7 @@ from opensearchpy.exceptions import NotFoundError
 
 from evidencesoc.domain.event_search_policy import validate_event_search
 from evidencesoc.domain.models import SecurityEvent
+from evidencesoc.execution import check_execution
 
 
 class OpenSearchIndexClient(Protocol):
@@ -72,10 +73,12 @@ class OpenSearchEventStore:
         )
 
     def get_document(self, event_id: str) -> dict[str, Any] | None:
+        remaining = check_execution()
         try:
             response = self._client.get(
                 index=self._index_name,
                 id=event_id,
+                **({"request_timeout": remaining} if remaining is not None else {}),
             )
         except NotFoundError:
             return None

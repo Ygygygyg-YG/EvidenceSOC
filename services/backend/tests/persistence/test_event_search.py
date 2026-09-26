@@ -4,6 +4,8 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+from opensearchpy.exceptions import NotFoundError
+
 from evidencesoc.domain.models import SecurityEvent, Severity
 from evidencesoc.persistence import event_search
 from evidencesoc.persistence.event_search import (
@@ -12,7 +14,6 @@ from evidencesoc.persistence.event_search import (
     create_opensearch_client,
 )
 from evidencesoc.tools.policy import PolicyDeniedError
-from opensearchpy.exceptions import NotFoundError
 
 NOW = datetime(2026, 9, 21, 12, 0, tzinfo=UTC)
 SHA256 = "a" * 64

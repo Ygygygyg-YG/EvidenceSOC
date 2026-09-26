@@ -123,7 +123,7 @@ def _observed_at(
         parsed = value
     elif isinstance(value, str) and value.strip():
         try:
-            parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+            parsed = datetime.fromisoformat(value.strip())
         except ValueError as exc:
             raise NormalizationError(
                 code="INVALID_OBSERVED_AT",

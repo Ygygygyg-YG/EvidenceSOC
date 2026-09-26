@@ -3,8 +3,9 @@ from logging.config import fileConfig
 from pathlib import Path
 
 from alembic import context
-from evidencesoc.persistence.tables import Base
 from sqlalchemy import engine_from_config, pool
+
+from evidencesoc.persistence.tables import Base
 
 config = context.config
 

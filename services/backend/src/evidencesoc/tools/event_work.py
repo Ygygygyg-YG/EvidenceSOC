@@ -18,6 +18,7 @@ from evidencesoc.evidence.service import (
     EvidenceService,
     EvidenceSourceNotFoundError,
 )
+from evidencesoc.execution import check_execution
 from evidencesoc.persistence.event_repository import (
     EventRepository,
     EvidenceRepository,
@@ -62,7 +63,7 @@ class EventSearchWork:
         search_filters = dict(filters)
 
         for attempt in range(3):
-            remaining = deadline - self._clock()
+            remaining = min(deadline - self._clock(), check_execution() or 10.0)
             if remaining <= 0:
                 raise ToolDependencyTimeout("event search deadline exceeded")
 
@@ -109,6 +110,7 @@ class EventSearchWork:
 
         # 不能重试：数据库提交失败时，提交结果可能不明确。
         try:
+            check_execution()
             with self._evidence_factory() as service:
                 return service.create_for_events(
                     incident_id=incident_id,

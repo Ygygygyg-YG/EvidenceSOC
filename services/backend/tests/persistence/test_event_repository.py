@@ -5,6 +5,8 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from sqlalchemy.dialects import postgresql
+
 from evidencesoc.domain.models import (
     EventIndexStatus,
     EvidenceItem,
@@ -24,7 +26,6 @@ from evidencesoc.persistence.event_repository import (
     IncidentNotFoundError,
     PersistResult,
 )
-from sqlalchemy.dialects import postgresql
 
 NOW = datetime(2026, 9, 21, 12, 0, tzinfo=UTC)
 SHA256 = "a" * 64
