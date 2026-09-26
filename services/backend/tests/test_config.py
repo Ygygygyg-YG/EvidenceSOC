@@ -32,8 +32,7 @@ def test_environment_value_overrides_explicit_dotenv() -> None:
     with pytest.MonkeyPatch.context() as monkeypatch:
         monkeypatch.setenv("OPENSEARCH_URL", value)
         assert (
-            Settings(_env_file=REPOSITORY_ROOT / ".env.example").opensearch_url
-            == value
+            Settings(_env_file=REPOSITORY_ROOT / ".env.example").opensearch_url == value
         )
 
 
@@ -43,3 +42,21 @@ def test_env_file_none_ignores_dotenv() -> None:
         settings = Settings(_env_file=None)
 
     assert settings.opensearch_url == "http://127.0.0.1:9200"
+
+
+def test_rag_data_directory_defaults_to_repository_local_offline_assets() -> None:
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.delenv("RAG_DATA_DIRECTORY", raising=False)
+        assert (
+            Settings(_env_file=None).rag_data_directory
+            == REPOSITORY_ROOT / "data" / "knowledge"
+        )
+
+
+def test_relative_rag_data_directory_is_resolved_against_repository_root() -> None:
+    assert (
+        Settings(
+            _env_file=None, rag_data_directory="data/custom-knowledge"
+        ).rag_data_directory
+        == REPOSITORY_ROOT / "data/custom-knowledge"
+    )

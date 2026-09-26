@@ -107,3 +107,18 @@ def test_attack_lookup_work_builder_does_not_query_during_construction() -> None
 
 def test_repository_symbol_is_importable() -> None:
     assert AttackKnowledgeRepository.__name__ == "AttackKnowledgeRepository"
+
+
+def test_production_builder_uses_hybrid_repository_without_loading_model_or_querying() -> (
+    None
+):
+    from evidencesoc.rag.retriever import HybridAttackKnowledgeRepository
+    from evidencesoc.tools.attack_work import build_attack_lookup_work
+
+    class SessionFactory:
+        def __call__(self) -> object:
+            raise AssertionError("construction must not open a database session")
+
+    work = build_attack_lookup_work(session_factory=SessionFactory())  # type: ignore[arg-type]
+    repository = work._repository_factory(None)
+    assert isinstance(repository, HybridAttackKnowledgeRepository)

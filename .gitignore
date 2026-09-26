@@ -38,3 +38,7 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Verified RAG corpus and local model assets (recreated by the preparation CLI)
+data/knowledge/
+pytest-cache-files-*/

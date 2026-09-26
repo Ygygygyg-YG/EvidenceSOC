@@ -2,7 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import SecretStr
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -22,6 +22,12 @@ class Settings(BaseSettings):
     )
     opensearch_url: str = "http://127.0.0.1:9200"
     opensearch_index: str = "security-events-v1"
+    rag_data_directory: Path = REPOSITORY_ROOT / "data" / "knowledge"
+
+    @field_validator("rag_data_directory")
+    @classmethod
+    def absolute_knowledge_directory(cls, value: Path) -> Path:
+        return value if value.is_absolute() else REPOSITORY_ROOT / value
 
     llm_mode: Literal["fixture", "deepseek"] = "fixture"
     deepseek_api_key: SecretStr | None = None

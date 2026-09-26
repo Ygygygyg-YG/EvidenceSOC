@@ -125,7 +125,10 @@ def build_server(
     )
     attack_tools = AttackTools(
         context=context,
-        work=build_attack_lookup_work(session_factory=session_factory),
+        work=build_attack_lookup_work(
+            session_factory=session_factory,
+            model_path=settings.rag_data_directory / "model",
+        ),
         audit=audit,
     )
     return create_server(

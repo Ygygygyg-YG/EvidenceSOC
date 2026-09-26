@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
+from pathlib import Path
 from time import monotonic
-from typing import Any
+from typing import Any, Protocol
 
 from sqlalchemy import case, func, or_, select, text
 from sqlalchemy.exc import OperationalError
@@ -57,9 +58,11 @@ class AttackKnowledgeRepository:
         eligible = [
             object_type == "attack-pattern",
             technique_id.regexp_match(r"^T[0-9]{4}(\.[0-9]{3})?$"),
-            KnowledgeChunkTable.source == (
+            KnowledgeChunkTable.source
+            == (
                 "https://attack.mitre.org/techniques/"
-                + func.replace(technique_id, ".", "/") + "/"
+                + func.replace(technique_id, ".", "/")
+                + "/"
             ),
             or_(revoked.is_(None), revoked.is_(False)),
             or_(deprecated.is_(None), deprecated.is_(False)),
@@ -127,15 +130,29 @@ class AttackKnowledgeRepository:
         return results
 
 
+class AttackKnowledgeLookup(Protocol):
+    def lookup(
+        self,
+        *,
+        query: str,
+        limit: int,
+        timeout_seconds: float | None = None,
+    ) -> list[dict[str, str]]: ...
+
+
 class AttackLookupWork:
     def __init__(
         self,
         *,
         session_factory: sessionmaker[Session],
         clock: Callable[[], float] = monotonic,
+        repository_factory: Callable[
+            [Session], AttackKnowledgeLookup
+        ] = AttackKnowledgeRepository,
     ) -> None:
         self._session_factory = session_factory
         self._clock = clock
+        self._repository_factory = repository_factory
 
     def __call__(self, *, query: str, limit: int) -> list[dict[str, str]]:
         deadline = self._clock() + 10.0
@@ -145,7 +162,7 @@ class AttackLookupWork:
                 raise ToolDependencyTimeout("attack lookup deadline exceeded")
             try:
                 with self._session_factory() as session:
-                    return AttackKnowledgeRepository(session).lookup(
+                    return self._repository_factory(session).lookup(
                         query=query,
                         limit=limit,
                         timeout_seconds=remaining,
@@ -161,5 +178,20 @@ class AttackLookupWork:
 def build_attack_lookup_work(
     *,
     session_factory: sessionmaker[Session],
+    model_path: Path | None = None,
 ) -> AttackLookupWork:
-    return AttackLookupWork(session_factory=session_factory)
+    from evidencesoc.rag.embeddings import LocalEmbeddingProvider
+    from evidencesoc.rag.retriever import HybridAttackKnowledgeRepository
+
+    # The provider is lazy and offline: discovery opens neither the model nor DB.
+    embedder = (
+        LocalEmbeddingProvider(model_path=model_path)
+        if model_path is not None
+        else LocalEmbeddingProvider()
+    )
+    return AttackLookupWork(
+        session_factory=session_factory,
+        repository_factory=lambda session: HybridAttackKnowledgeRepository(
+            session, embedder
+        ),
+    )

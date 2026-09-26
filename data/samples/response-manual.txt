@@ -1,0 +1,24 @@
+Internal simulated response playbook, version 1.0
+
+Investigators must distinguish observed facts from hypotheses. Every factual
+statement must cite incident-owned evidence or retrieved knowledge. If the
+sources are insufficient, report unknown and request human review.
+
+DNS data exfiltration: collect resolver queries and security events around the
+alert. Look for repeated long subdomains, unusual domains, abnormal query volume
+and connections from the same observed source. ATT&CK T1048.003 describes
+exfiltration over unencrypted non-command-and-control protocols, including DNS.
+T1071.004 describes a DNS command-and-control channel; distinguish these purposes
+using evidence rather than treating a DNS observation as proof of exfiltration.
+
+SQL injection: inspect web request payloads, application errors, timestamps and
+access logs. T1190 covers exploitation of public-facing applications. The observed
+source IP and entry service identify an observed entry point, not a real person's
+identity. A suspicious request alone cannot prove successful data access.
+
+All actions require a human approval record. Only block_ip_simulated,
+isolate_host_simulated and disable_account_simulated are allowed. Preview scope,
+impact, rollback and verification queries before approval. Simulation changes
+only local investigation state and must never call a firewall or account API.
+After approval, re-query evidence and report success, failure or insufficient
+evidence. Rejection stops the simulation and records the reason.
