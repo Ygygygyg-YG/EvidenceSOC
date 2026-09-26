@@ -573,23 +573,23 @@ git commit -m "feat: add auditable event ingestion"
 - Consumes: OpenSearch、PostgreSQL、ATT&CK 知识库。
 - Produces: 第 4.3 节三个异步工具。
 
-- [ ] **Step 1: 编写权限边界测试**
+- [x] **Step 1: 编写权限边界测试**
 
 覆盖 201 条结果、901 秒时间窗、负数时间窗、未知工具、空 Alert ID、超时和 OpenSearch 失败。
 
-- [ ] **Step 2: 实现纯函数策略校验器**
+- [x] **Step 2: 实现纯函数策略校验器**
 
 校验必须在调用存储层之前执行；拒绝结果写入 `tool_calls`，包括原因和 trace ID。
 
-- [ ] **Step 3: 实现三个工具和 MCP Server**
+- [x] **Step 3: 实现三个工具和 MCP Server**
 
 所有结果先转换成 `EvidenceItem`；错误返回结构化代码 `POLICY_DENIED`、`NOT_FOUND`、`DEPENDENCY_TIMEOUT` 或 `DEPENDENCY_UNAVAILABLE`。
 
-- [ ] **Step 4: 验证工具列表**
+- [x] **Step 4: 验证工具列表**
 
 Expected：MCP 客户端只能发现 `search_security_events`、`get_alert_context` 和 `lookup_attack_technique` 三个工具。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```powershell
 git add services/backend/src/evidencesoc/tools services/backend/src/evidencesoc/mcp_server services/backend/tests/tools
