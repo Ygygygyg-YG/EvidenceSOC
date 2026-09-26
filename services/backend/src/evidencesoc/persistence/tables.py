@@ -110,7 +110,9 @@ class IncidentTable(Base):
             "'simulating', "
             "'validating', "
             "'completed', "
-            "'failed'"
+            "'failed', "
+            "'manual_review', "
+            "'rejected'"
             ")",
             name="ck_incidents_status",
         ),

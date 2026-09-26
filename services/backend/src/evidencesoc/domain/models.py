@@ -32,6 +32,8 @@ class IncidentStatus(StrEnum):
     VALIDATING = "validating"
     COMPLETED = "completed"
     FAILED = "failed"
+    MANUAL_REVIEW = "manual_review"
+    REJECTED = "rejected"
 
 
 class AgentRunStatus(StrEnum):
@@ -90,11 +92,11 @@ class AgentRun(BaseModel):
 
 
 class ApprovalRecord(BaseModel):
-    approval_id: str
-    response_plan_id: str
+    approval_id: str = Field(min_length=1, max_length=64)
+    response_plan_id: str = Field(min_length=1, max_length=64)
     decision: ApprovalDecision
     reason: str
-    decided_by: str
+    decided_by: str = Field(min_length=1, max_length=128)
     decided_at: datetime
 
     @field_validator("reason")
@@ -144,8 +146,8 @@ class Alert(BaseModel):
 
 
 class ResponsePlan(BaseModel):
-    response_plan_id: str
-    incident_id: str
+    response_plan_id: str = Field(min_length=1, max_length=64)
+    incident_id: str = Field(min_length=1, max_length=64)
     summary: str
     actions: list[dict[str, Any]] = Field(min_length=1)
     created_at: datetime

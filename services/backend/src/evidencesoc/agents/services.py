@@ -1,0 +1,546 @@
+"""Production workflow boundaries: persisted runs and incident-bound MCP tools."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from collections.abc import Callable, Mapping, Sequence
+from copy import deepcopy
+from datetime import UTC, datetime, timedelta
+from hashlib import sha256
+from typing import Any
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from evidencesoc.agents.models import SimulatedAction
+from evidencesoc.config import BACKEND_ROOT, Settings
+from evidencesoc.domain.models import (
+    Alert,
+    ApprovalRecord,
+    EvidenceItem,
+    IncidentStatus,
+    ResponsePlan,
+    ValidationResult,
+)
+from evidencesoc.ids import new_ulid
+from evidencesoc.ingestion.normalize import calculate_content_sha256
+from evidencesoc.mcp_server.client import open_stdio_session
+from evidencesoc.mcp_server.context import RunContext
+from evidencesoc.persistence.database import (
+    create_database_engine,
+    create_session_factory,
+)
+from evidencesoc.persistence.json_encoding import restore_json
+from evidencesoc.persistence.tables import (
+    AgentRunTable,
+    AlertTable,
+    ApprovalTable,
+    AttackStepTable,
+    EvidenceItemTable,
+    IncidentTable,
+    ResponsePlanTable,
+    SecurityEventTable,
+    ValidationResultTable,
+)
+from evidencesoc.tools.attack import validate_attack_results
+from evidencesoc.tools.policy import ALLOWED_TOOLS, validate_event_search
+
+OBSERVATION_FIELDS = frozenset(
+    {
+        "source_ip",
+        "destination_ip",
+        "source_port",
+        "destination_port",
+        "host",
+        "service",
+        "message",
+        "event_type",
+        "source",
+        "observed_at",
+        "severity",
+        "user",
+        "username",
+        "account",
+    }
+)
+SIMULATED_ACTIONS = frozenset(
+    {
+        "block_ip_simulated",
+        "isolate_host_simulated",
+        "disable_account_simulated",
+    }
+)
+
+
+def _utc(value: datetime | str) -> datetime:
+    parsed = datetime.fromisoformat(value) if isinstance(value, str) else value
+    return (
+        parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
+    )
+
+
+def _observations(raw: Mapping[str, Any]) -> dict[str, Any]:
+    result = {
+        key: deepcopy(value) for key, value in raw.items() if key in OBSERVATION_FIELDS
+    }
+    http = raw.get("http")
+    if isinstance(http, dict):
+        result["http"] = {
+            key: deepcopy(value)
+            for key, value in http.items()
+            if key in {"method", "path", "status_code"}
+        }
+    return result
+
+
+class PostgresWorkflowServices:
+    def __init__(
+        self,
+        settings: Settings,
+        *,
+        session_factory: Callable[[], Session] | None = None,
+    ) -> None:
+        self.settings = settings
+        self._engine = None
+        if session_factory is None:
+            self._engine = create_database_engine(
+                settings.database_url, bounded_tool_connections=True
+            )
+            session_factory = create_session_factory(self._engine)
+        self._sessions = session_factory
+
+    async def aclose(self) -> None:
+        await asyncio.to_thread(self.close)
+
+    def close(self) -> None:
+        if self._engine is not None:
+            self._engine.dispose()
+
+    async def load_incident(self, incident_id: str) -> dict[str, Any]:
+        return await asyncio.to_thread(self._load_incident, incident_id)
+
+    def _load_incident(self, incident_id: str) -> dict[str, Any]:
+        with self._sessions() as session:
+            row = session.execute(
+                select(IncidentTable, AlertTable)
+                .join(AlertTable, AlertTable.alert_id == IncidentTable.alert_id)
+                .where(IncidentTable.incident_id == incident_id)
+            ).one_or_none()
+            if row is None:
+                raise LookupError("incident or its alert does not exist")
+            incident, alert = row
+            value = Alert(
+                alert_id=alert.alert_id,
+                title=alert.title,
+                severity=alert.severity,
+                created_at=_utc(alert.created_at),
+                event_ids=alert.event_ids,
+            )
+            return {
+                "alerts": [value.model_dump(mode="json")],
+                "status": incident.status,
+            }
+
+    async def start_run(self, state: Mapping[str, Any], role: str) -> str:
+        return await asyncio.to_thread(self._start_run, dict(state), role)
+
+    def _start_run(self, state: dict[str, Any], role: str) -> str:
+        if state.get("trace_id"):
+            identity = json.dumps(
+                [
+                    state["incident_id"],
+                    state["trace_id"],
+                    role,
+                    state.get("fallback_count", 0),
+                ]
+            )
+            run_id = "AR-" + sha256(identity.encode()).hexdigest()[:32]
+        else:
+            run_id = "AR-" + new_ulid()
+        with self._sessions() as session, session.begin():
+            if session.get(IncidentTable, state["incident_id"]) is None:
+                raise LookupError("incident does not exist")
+            existing = session.get(AgentRunTable, run_id)
+            if existing is not None:
+                if (
+                    existing.incident_id != state["incident_id"]
+                    or existing.agent_name != role
+                ):
+                    raise PermissionError(
+                        "agent run belongs to another investigation role"
+                    )
+                existing.status = "running"
+                existing.finished_at = None
+                return run_id
+            session.add(
+                AgentRunTable(
+                    run_id=run_id,
+                    incident_id=state["incident_id"],
+                    agent_name=role,
+                    status="running",
+                    started_at=datetime.now(UTC),
+                    evidence_ids=[],
+                )
+            )
+        return run_id
+
+    async def finish_run(
+        self,
+        run_id: str,
+        delta: Mapping[str, Any],
+        status: str = "completed",
+    ) -> None:
+        await asyncio.to_thread(self._finish_run, run_id, dict(delta), status)
+
+    def _finish_run(self, run_id: str, delta: dict[str, Any], status: str) -> None:
+        if status not in {"completed", "failed"}:
+            raise ValueError("finished run status must be completed or failed")
+        with self._sessions() as session, session.begin():
+            row = session.get(AgentRunTable, run_id)
+            if row is None:
+                raise LookupError("agent run does not exist")
+            references = [item["evidence_id"] for item in delta.get("evidence", [])]
+            for key in (
+                "origin",
+                "classification",
+                "response_plan",
+                "validation_result",
+            ):
+                if isinstance(delta.get(key), dict):
+                    references.extend(delta[key].get("evidence_ids", []))
+            for step in delta.get("attack_steps", []):
+                references.extend(step.get("evidence_ids", []))
+            evidence_ids = list(dict.fromkeys(references))
+            self._check_evidence_scope(session, row.incident_id, evidence_ids)
+            row.evidence_ids = evidence_ids
+            row.status = status
+            row.finished_at = datetime.now(UTC)
+
+    def _scope(self, incident_id: str) -> dict[str, Any]:
+        loaded = self._load_incident(incident_id)
+        alert = loaded["alerts"][0]
+        at = _utc(alert["created_at"])
+        filters: dict[str, str] = {}
+        with self._sessions() as session:
+            events = (
+                session.execute(
+                    select(SecurityEventTable)
+                    .where(
+                        SecurityEventTable.event_id.in_(alert["event_ids"]),
+                    )
+                    .order_by(
+                        SecurityEventTable.observed_at, SecurityEventTable.event_id
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for event in events:
+                if calculate_content_sha256(event.raw) != event.content_sha256:
+                    raise ValueError("alert source event integrity check failed")
+                raw = _observations(event.raw)
+                filters = {
+                    key: raw[key]
+                    for key in ("source_ip", "host", "service")
+                    if isinstance(raw.get(key), str) and raw[key].strip()
+                }
+                if filters:
+                    break
+        return {
+            "alert_id": alert["alert_id"],
+            "time_from": (at - timedelta(seconds=900)).isoformat(),
+            "time_to": (at + timedelta(seconds=900)).isoformat(),
+            "filters": filters,
+            "limit": 100,
+        }
+
+    @staticmethod
+    async def _check_tools(session: Any) -> None:
+        discovered = await session.list_tools()
+        names = [tool.name for tool in discovered.tools]
+        if len(names) != 3 or set(names) != ALLOWED_TOOLS:
+            raise PermissionError("MCP server must expose exactly three approved tools")
+
+    @staticmethod
+    async def _call(
+        session: Any, name: str, arguments: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        if name not in ALLOWED_TOOLS:
+            raise PermissionError("MCP tool is not allowed")
+        result = await session.call_tool(name, arguments)
+        if result.isError:
+            payload = result.structuredContent or {}
+            code = payload.get("error", {}).get("code", "MCP_TOOL_ERROR")
+            raise RuntimeError(f"MCP tool failed: {code}")
+        structured = result.structuredContent
+        values = structured.get("result") if isinstance(structured, dict) else None
+        if not isinstance(values, list) or any(
+            not isinstance(item, dict) for item in values
+        ):
+            raise ValueError("MCP tool returned invalid structured results")
+        return values
+
+    async def hydrate_evidence(
+        self,
+        incident_id: str,
+        values: Sequence[Mapping[str, Any]],
+    ) -> list[dict[str, Any]]:
+        return await asyncio.to_thread(self._hydrate_evidence, incident_id, values)
+
+    def _hydrate_evidence(
+        self,
+        incident_id: str,
+        values: Sequence[Mapping[str, Any]],
+    ) -> list[dict[str, Any]]:
+        received = {
+            item.evidence_id: item
+            for item in (EvidenceItem.model_validate(value) for value in values)
+        }
+        if not received:
+            return []
+        with self._sessions() as session:
+            rows = session.execute(
+                select(EvidenceItemTable, SecurityEventTable)
+                .join(
+                    SecurityEventTable,
+                    SecurityEventTable.event_id == EvidenceItemTable.event_id,
+                )
+                .where(
+                    EvidenceItemTable.incident_id == incident_id,
+                    EvidenceItemTable.evidence_id.in_(received),
+                )
+            ).all()
+            if {row[0].evidence_id for row in rows} != set(received):
+                raise PermissionError("evidence is not owned by this incident")
+            result = []
+            for evidence, event in rows:
+                incoming = received[evidence.evidence_id]
+                if (
+                    incoming.event_id != evidence.event_id
+                    or incoming.source != evidence.source
+                    or incoming.content_sha256 != evidence.content_sha256
+                    or _utc(incoming.observed_at) != _utc(evidence.observed_at)
+                    or event.source != evidence.source
+                    or event.content_sha256 != evidence.content_sha256
+                    or calculate_content_sha256(event.raw) != event.content_sha256
+                ):
+                    raise ValueError(
+                        "evidence or its source failed integrity verification"
+                    )
+                stored = EvidenceItem(
+                    evidence_id=evidence.evidence_id,
+                    event_id=evidence.event_id,
+                    source=evidence.source,
+                    observed_at=_utc(evidence.observed_at),
+                    query=restore_json(evidence.query),
+                    summary=evidence.summary,
+                    content_sha256=evidence.content_sha256,
+                ).model_dump(mode="json")
+                stored["raw"] = _observations(event.raw)
+                result.append(stored)
+        return sorted(
+            result, key=lambda item: (item["observed_at"], item["evidence_id"])
+        )
+
+    async def collect(self, state: Mapping[str, Any], run_id: str) -> dict[str, Any]:
+        incident_id = state["incident_id"]
+        scope = await asyncio.to_thread(self._scope, incident_id)
+        context = RunContext(
+            run_id, incident_id, state.get("trace_id") or "TRACE-" + new_ulid()
+        )
+        async with open_stdio_session(
+            context, settings=self.settings, backend_dir=BACKEND_ROOT
+        ) as session:
+            await self._check_tools(session)
+            values = await self._call(
+                session,
+                "get_alert_context",
+                {
+                    "alert_id": scope["alert_id"],
+                    "before_seconds": 900,
+                    "after_seconds": 900,
+                },
+            )
+            if scope["filters"]:
+                arguments = {
+                    key: value for key, value in scope.items() if key != "alert_id"
+                }
+                validate_event_search(
+                    _utc(scope["time_from"]),
+                    _utc(scope["time_to"]),
+                    scope["filters"],
+                    scope["limit"],
+                )
+                values.extend(
+                    await self._call(session, "search_security_events", arguments)
+                )
+            knowledge = await self._call(
+                session,
+                "lookup_attack_technique",
+                {
+                    "query": "SQL injection against a public facing application",
+                    "limit": 8,
+                },
+            )
+            validate_attack_results(knowledge, limit=8)
+        evidence = await self.hydrate_evidence(incident_id, values)
+        return {"evidence": evidence, "knowledge": knowledge}
+
+    async def verify(self, state: Mapping[str, Any], run_id: str) -> dict[str, Any]:
+        incident_id = state["incident_id"]
+        scope = await asyncio.to_thread(self._scope, incident_id)
+        if not scope["filters"]:
+            return {"evidence": []}
+        context = RunContext(
+            run_id, incident_id, state.get("trace_id") or "TRACE-" + new_ulid()
+        )
+        plan = ResponsePlan.model_validate(state["response_plan"])
+        if plan.incident_id != incident_id:
+            raise PermissionError("verification plan belongs to a different incident")
+        queries: dict[str, dict[str, Any]] = {}
+        lower, upper = _utc(scope["time_from"]), _utc(scope["time_to"])
+        for raw_action in plan.actions:
+            action = SimulatedAction.model_validate(raw_action)
+            query = action.verification_query
+            filters = dict(scope["filters"])
+            for key, value in query["filters"].items():
+                if key in filters and filters[key] != value:
+                    raise PermissionError(
+                        "verification conflicts with the incident source filters"
+                    )
+                filters[key] = value
+            start, end = (
+                _utc(query.get("time_from", scope["time_from"])),
+                _utc(query.get("time_to", scope["time_to"])),
+            )
+            if start < lower or end > upper:
+                raise PermissionError(
+                    "verification cannot expand the incident time window"
+                )
+            limit = query.get("limit", scope["limit"])
+            if limit > scope["limit"]:
+                raise ValueError("verification limit cannot exceed 100")
+            validate_event_search(start, end, filters, limit)
+            arguments = {
+                "time_from": start.isoformat(),
+                "time_to": end.isoformat(),
+                "filters": filters,
+                "limit": limit,
+            }
+            queries[json.dumps(arguments, sort_keys=True)] = arguments
+        values: list[dict[str, Any]] = []
+        async with open_stdio_session(
+            context, settings=self.settings, backend_dir=BACKEND_ROOT
+        ) as session:
+            await self._check_tools(session)
+            for arguments in queries.values():
+                values.extend(
+                    await self._call(session, "search_security_events", arguments)
+                )
+        return {"evidence": await self.hydrate_evidence(incident_id, values)}
+
+    @staticmethod
+    def _check_evidence_scope(
+        session: Session, incident_id: str, evidence_ids: Sequence[str]
+    ) -> None:
+        if not evidence_ids:
+            return
+        owned = set(
+            session.scalars(
+                select(EvidenceItemTable.evidence_id).where(
+                    EvidenceItemTable.incident_id == incident_id,
+                    EvidenceItemTable.evidence_id.in_(evidence_ids),
+                )
+            )
+        )
+        if not set(evidence_ids) <= owned:
+            raise PermissionError("result cites evidence outside this incident")
+
+    async def save_result(self, state: Mapping[str, Any]) -> None:
+        await asyncio.to_thread(self._save_result, dict(state))
+
+    def _save_result(self, state: dict[str, Any]) -> None:
+        incident_id = state["incident_id"]
+        status = IncidentStatus(state["status"]).value
+        plan = (
+            ResponsePlan.model_validate(state["response_plan"])
+            if state.get("response_plan")
+            else None
+        )
+        approval = (
+            ApprovalRecord.model_validate(state["approval"])
+            if state.get("approval")
+            else None
+        )
+        validation = (
+            ValidationResult.model_validate(state["validation_result"])
+            if state.get("validation_result")
+            else None
+        )
+        if plan is not None and plan.incident_id != incident_id:
+            raise PermissionError("response plan belongs to a different incident")
+        for result in (approval, validation):
+            if result is not None and (
+                plan is None or result.response_plan_id != plan.response_plan_id
+            ):
+                raise PermissionError("result belongs to a different response plan")
+        if plan is not None and any(
+            action.get("action") not in SIMULATED_ACTIONS for action in plan.actions
+        ):
+            raise PermissionError(
+                "only approved simulation action types can be persisted"
+            )
+        with self._sessions() as session, session.begin():
+            incident = session.get(IncidentTable, incident_id)
+            if incident is None:
+                raise LookupError("incident does not exist")
+            incident.status = status
+            if plan is not None:
+                self._check_evidence_scope(session, incident_id, plan.evidence_ids)
+                existing = session.get(ResponsePlanTable, plan.response_plan_id)
+                if existing is not None and existing.incident_id != incident_id:
+                    raise PermissionError(
+                        "response plan identifier is already owned by another incident"
+                    )
+                session.merge(ResponsePlanTable(**plan.model_dump()))
+                session.flush()
+            if approval is not None:
+                existing_approval = session.get(ApprovalTable, approval.approval_id)
+                if (
+                    existing_approval is not None
+                    and existing_approval.response_plan_id != approval.response_plan_id
+                ):
+                    raise PermissionError("approval identifier belongs to another plan")
+                session.merge(ApprovalTable(**approval.model_dump()))
+            if validation is not None:
+                self._check_evidence_scope(
+                    session, incident_id, validation.evidence_ids
+                )
+                existing_validation = session.get(
+                    ValidationResultTable, validation.validation_id
+                )
+                if (
+                    existing_validation is not None
+                    and existing_validation.response_plan_id
+                    != validation.response_plan_id
+                ):
+                    raise PermissionError(
+                        "validation identifier belongs to another plan"
+                    )
+                session.merge(ValidationResultTable(**validation.model_dump()))
+            for step in state.get("attack_steps", []):
+                values = dict(step)
+                self._check_evidence_scope(session, incident_id, values["evidence_ids"])
+                existing_step = session.get(AttackStepTable, values["attack_step_id"])
+                if (
+                    existing_step is not None
+                    and existing_step.incident_id != incident_id
+                ):
+                    raise PermissionError(
+                        "attack step identifier belongs to another incident"
+                    )
+                if values.get("occurred_at") is not None:
+                    values["occurred_at"] = _utc(values["occurred_at"])
+                values["incident_id"] = incident_id
+                session.merge(AttackStepTable(**values))

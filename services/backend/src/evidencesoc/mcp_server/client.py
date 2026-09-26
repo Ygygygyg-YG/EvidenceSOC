@@ -32,6 +32,7 @@ def build_stdio_parameters(
             "DATABASE_URL": settings.database_url,
             "OPENSEARCH_URL": settings.opensearch_url,
             "OPENSEARCH_INDEX": settings.opensearch_index,
+            "RAG_DATA_DIRECTORY": str(settings.rag_data_directory),
         },
     )
 

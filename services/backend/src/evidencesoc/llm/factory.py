@@ -3,7 +3,7 @@
 from evidencesoc.config import Settings, get_settings
 
 
-def create_llm(settings: Settings | None = None) -> ChatOpenAI:
+def create_llm(settings: Settings | None = None, *, max_retries: int = 2) -> ChatOpenAI:
     settings = settings or get_settings()
 
     if settings.llm_mode != "deepseek":
@@ -20,5 +20,5 @@ def create_llm(settings: Settings | None = None) -> ChatOpenAI:
         base_url=settings.deepseek_base_url,
         temperature=0,
         timeout=60,
-        max_retries=2,
+        max_retries=max_retries,
     )

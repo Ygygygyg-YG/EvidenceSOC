@@ -48,7 +48,19 @@ def test_stdio_parameters_bind_context_and_local_dependencies() -> None:
         "DATABASE_URL": settings.database_url,
         "OPENSEARCH_URL": settings.opensearch_url,
         "OPENSEARCH_INDEX": settings.opensearch_index,
+        "RAG_DATA_DIRECTORY": str(settings.rag_data_directory),
     }
+
+
+def test_stdio_parameters_preserve_custom_knowledge_directory(tmp_path: Path) -> None:
+    client = importlib.import_module("evidencesoc.mcp_server.client")
+    settings = _settings("sqlite+pysqlite:///example.db")
+    settings.rag_data_directory = tmp_path / "custom-knowledge"
+    parameters = client.build_stdio_parameters(
+        RunContext("AR-42", "IN-42", "TRACE-42"),
+        settings=settings, backend_dir=BACKEND_DIR,
+    )
+    assert parameters.env["RAG_DATA_DIRECTORY"] == str(settings.rag_data_directory)
 
 
 def _database_with_agent_run(path: Path) -> None:

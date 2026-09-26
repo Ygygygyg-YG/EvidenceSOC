@@ -126,10 +126,17 @@ export interface components {
             /** Evidence Ids */
             evidence_ids: string[];
         };
+        /**
+         * EventIndexStatus
+         * @enum {string}
+         */
+        EventIndexStatus: "pending" | "indexed" | "failed";
         /** EvidenceItem */
         EvidenceItem: {
             /** Evidence Id */
             evidence_id: string;
+            /** Event Id */
+            event_id: string;
             /** Source */
             source: string;
             /**
@@ -164,7 +171,7 @@ export interface components {
          * IncidentStatus
          * @enum {string}
          */
-        IncidentStatus: "received" | "triaged" | "collecting" | "analyzing" | "reconstructing" | "awaiting_approval" | "simulating" | "validating" | "completed" | "failed";
+        IncidentStatus: "received" | "triaged" | "collecting" | "analyzing" | "reconstructing" | "awaiting_approval" | "simulating" | "validating" | "completed" | "failed" | "manual_review" | "rejected";
         /** ResponsePlan */
         ResponsePlan: {
             /** Response Plan Id */
@@ -202,6 +209,8 @@ export interface components {
              * @default null
              */
             external_id: string | null;
+            /** Deduplication Key */
+            deduplication_key: string;
             /**
              * Observed At
              * Format: date-time
@@ -221,6 +230,18 @@ export interface components {
             };
             /** Content Sha256 */
             content_sha256: string;
+            /** @default pending */
+            index_status: components["schemas"]["EventIndexStatus"];
+            /**
+             * Indexed At
+             * @default null
+             */
+            indexed_at: string | null;
+            /**
+             * Index Error
+             * @default null
+             */
+            index_error: string | null;
         };
         /**
          * Severity

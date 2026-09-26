@@ -53,6 +53,10 @@ target_metadata = Base.metadata
 
 UNMANAGED_TABLE_NAMES = {
     "task3_persistence_probe",
+    "checkpoint_migrations",
+    "checkpoints",
+    "checkpoint_blobs",
+    "checkpoint_writes",
 }
 
 

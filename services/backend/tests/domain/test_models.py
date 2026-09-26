@@ -148,6 +148,8 @@ def test_incident_status_defines_all_workflow_states() -> None:
         "validating",
         "completed",
         "failed",
+        "manual_review",
+        "rejected",
     }
 
 
