@@ -5,6 +5,7 @@ from pathlib import Path
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
+from evidencesoc.api.tables import ApiBase
 from evidencesoc.persistence.tables import Base
 
 config = context.config
@@ -49,7 +50,7 @@ config.set_main_option(
     database_url.replace("%", "%%"),
 )
 
-target_metadata = Base.metadata
+target_metadata = [Base.metadata, ApiBase.metadata]
 
 UNMANAGED_TABLE_NAMES = {
     "task3_persistence_probe",

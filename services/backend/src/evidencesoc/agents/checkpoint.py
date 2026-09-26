@@ -5,7 +5,8 @@ from contextlib import asynccontextmanager
 
 from langgraph.checkpoint.postgres import PostgresSaver
 from psycopg import Connection
-from psycopg.rows import dict_row
+from psycopg.rows import DictRow, dict_row
+from psycopg_pool import ConnectionPool
 
 
 class ThreadedPostgresSaver(PostgresSaver):
@@ -39,16 +40,25 @@ def psycopg_url(database_url: str) -> str:
 
 @asynccontextmanager
 async def open_checkpointer(database_url: str):
-    connection = await asyncio.to_thread(
-        Connection.connect,
+    pool: ConnectionPool[Connection[DictRow]] = ConnectionPool(
         psycopg_url(database_url),
-        autocommit=True,
-        prepare_threshold=0,
-        row_factory=dict_row,
+        kwargs={
+            "autocommit": True,
+            "connect_timeout": 3,
+            "prepare_threshold": 0,
+            "row_factory": dict_row,
+            "options": "-c statement_timeout=3000",
+        },
+        min_size=1,
+        max_size=2,
+        timeout=3,
+        check=ConnectionPool.check_connection,
+        open=False,
     )
     try:
-        saver = ThreadedPostgresSaver(connection)
+        await asyncio.to_thread(pool.open, wait=True, timeout=3)
+        saver = ThreadedPostgresSaver(pool)
         await asyncio.to_thread(saver.setup)
         yield saver
     finally:
-        await asyncio.to_thread(connection.close)
+        await asyncio.to_thread(pool.close)

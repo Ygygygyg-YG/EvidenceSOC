@@ -1,0 +1,668 @@
+"""Task 9 acceptance through real TCP, PostgreSQL, OpenSearch, and MCP."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import math
+import os
+import socket
+import subprocess
+import sys
+import threading
+import time
+from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+import httpx
+import pytest
+from sqlalchemy import delete, select
+
+from evidencesoc.agents.checkpoint import open_checkpointer
+from evidencesoc.agents.graph import ROLE_NAMES, TERMINAL_STATES
+from evidencesoc.api.tables import ApiInvestigationEventTable, ApiInvestigationTable
+from evidencesoc.config import Settings
+from evidencesoc.ids import new_event_id, new_ulid
+from evidencesoc.ingestion.jsonl import ParsedLogRecord
+from evidencesoc.ingestion.normalize import normalize_record
+from evidencesoc.persistence.database import (
+    create_database_engine,
+    create_session_factory,
+)
+from evidencesoc.persistence.event_repository import EventRepository
+from evidencesoc.persistence.event_search import (
+    OpenSearchEventStore,
+    create_opensearch_client,
+)
+from evidencesoc.persistence.tables import (
+    AlertTable,
+    ApprovalTable,
+    IncidentTable,
+    SecurityEventTable,
+    ValidationResultTable,
+)
+
+ROOT = Path(__file__).resolve().parents[4]
+API = "/api/v1"
+CHILD_CODE = """
+import asyncio, sys
+import uvicorn
+from evidencesoc.config import Settings
+from evidencesoc.main import create_app
+from evidencesoc.agents.services import PostgresWorkflowServices
+delay = float(sys.argv[3])
+if delay:
+    original_collect = PostgresWorkflowServices.collect
+    async def delayed_collect(self, state, run_id):
+        await asyncio.sleep(delay)
+        return await original_collect(self, state, run_id)
+    PostgresWorkflowServices.collect = delayed_collect
+settings = Settings(llm_mode='fixture', opensearch_index=sys.argv[1])
+uvicorn.run(create_app(settings=settings), host='127.0.0.1', port=int(sys.argv[2]),
+            log_config=None, access_log=False, loop='asyncio')
+"""
+
+
+@dataclass
+class LiveApi:
+    settings: Settings
+    log_path: Path
+    event_ids: list[str]
+    port: int
+    collect_delay: float = 0
+    process: subprocess.Popen | None = None
+    log_handle: Any = None
+    alert_ids: set[str] = field(default_factory=set)
+    incident_ids: set[str] = field(default_factory=set)
+
+    @property
+    def url(self) -> str:
+        return f"http://127.0.0.1:{self.port}"
+
+    def client(self) -> httpx.Client:
+        return httpx.Client(base_url=self.url, timeout=15, trust_env=False)
+
+    def start(self) -> None:
+        self.log_handle = self.log_path.open("ab")
+        environment = os.environ.copy()
+        environment["PYTHONDONTWRITEBYTECODE"] = "1"
+        self.process = subprocess.Popen(
+            [
+                sys.executable,
+                "-B",
+                "-c",
+                CHILD_CODE,
+                self.settings.opensearch_index,
+                str(self.port),
+                str(self.collect_delay),
+            ],
+            cwd=ROOT / "services/backend",
+            env=environment,
+            stdin=subprocess.DEVNULL,
+            stdout=self.log_handle,
+            stderr=subprocess.STDOUT,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        deadline = time.monotonic() + 25
+        with self.client() as client:
+            while time.monotonic() < deadline:
+                assert self.process.poll() is None, "acceptance API process exited"
+                try:
+                    response = client.get("/health/ready", timeout=1)
+                    if response.status_code == 200:
+                        assert response.json() == {"status": "ok"}
+                        return
+                except httpx.TransportError:
+                    pass
+                time.sleep(0.1)
+        pytest.fail("real API dependencies did not become ready within 25 seconds")
+
+    def stop(self) -> None:
+        if self.process is not None:
+            if self.process.poll() is None:
+                if os.name == "nt":
+                    # MCP is also a child process: keep this test's process tree owned.
+                    subprocess.run(
+                        ["taskkill", "/PID", str(self.process.pid), "/T", "/F"],
+                        stdin=subprocess.DEVNULL,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        check=False,
+                        timeout=10,
+                        creationflags=subprocess.CREATE_NO_WINDOW,
+                    )
+                else:
+                    self.process.kill()
+                self.process.wait(timeout=10)
+            self.process = None
+        if self.log_handle is not None:
+            self.log_handle.close()
+            self.log_handle = None
+
+    def create_alert(self, client: httpx.Client) -> str:
+        alert_id = "AL-" + new_ulid()
+        self.alert_ids.add(alert_id)
+        response = client.post(
+            f"{API}/alerts",
+            json={
+                "alert_id": alert_id,
+                "title": "Task9 SQL injection acceptance",
+                "severity": "high",
+                "event_ids": self.event_ids,
+                "created_at": "2026-09-21T10:20:17Z",
+            },
+        )
+        assert response.status_code == 201
+        assert response.json()["alert_id"] == alert_id
+        return alert_id
+
+    def investigate(self, client: httpx.Client, alert_id: str) -> dict[str, Any]:
+        response = client.post(f"{API}/investigations", json={"alert_id": alert_id})
+        assert response.status_code == 202
+        metadata = response.json()
+        self.incident_ids.add(metadata["incident_id"])
+        assert response.headers["x-trace-id"] == metadata["trace_id"]
+        return metadata
+
+
+@pytest.fixture
+def live_api(tmp_path) -> Iterator[tuple[LiveApi, Any]]:
+    suffix = new_ulid()
+    index = f"security-events-task9-{suffix.lower()}"
+    settings = Settings(llm_mode="fixture", opensearch_index=index)
+    engine = create_database_engine(settings.database_url)
+    sessions = create_session_factory(engine)
+    search = create_opensearch_client(settings.opensearch_url)
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        port = listener.getsockname()[1]
+    server = LiveApi(settings, tmp_path / "task9-api.jsonl", [], port)
+    try:
+        with sessions() as session:
+            unrelated = session.scalar(
+                select(ApiInvestigationTable.investigation_id)
+                .where(ApiInvestigationTable.status.not_in(TERMINAL_STATES))
+                .limit(1)
+            )
+            assert unrelated is None, (
+                "finish existing recoverable investigations before this isolated acceptance run"
+            )
+        template = json.loads(
+            (ROOT / "infra/opensearch/security-events-template.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        search.indices.create(index=index, body=template["template"])
+        store = OpenSearchEventStore(search, index_name=index)
+        for offset, line in enumerate(
+            (ROOT / "data/samples/sql-injection.jsonl")
+            .read_text(encoding="utf-8")
+            .splitlines()
+        ):
+            raw = json.loads(line)
+            raw["external_id"] = f"task9-{suffix}-{offset}"
+            raw["host"] = f"task9-{suffix.lower()}.example.test"
+            raw["username"] = "task9-acceptance-user"
+            raw["labels"] = ["forbidden-truth"]
+            event = normalize_record(
+                ParsedLogRecord(raw, "task9-acceptance", offset + 1),
+                event_id=new_event_id(),
+                ingested_at=datetime.now(UTC),
+            )
+            server.event_ids.append(event.event_id)
+            with sessions() as session:
+                EventRepository(session).register(event)
+                session.commit()
+            store.index_event(event)
+        search.indices.refresh(index=index)
+        server.start()
+        yield server, sessions
+    finally:
+        server.stop()
+        with sessions() as session:
+            server.incident_ids.update(
+                session.scalars(
+                    select(IncidentTable.incident_id).where(
+                        IncidentTable.alert_id.in_(server.alert_ids)
+                    )
+                )
+            )
+        if server.incident_ids:
+
+            async def remove_owned_checkpoints():
+                async with open_checkpointer(settings.database_url) as saver:
+                    for incident_id in server.incident_ids:
+                        await saver.adelete_thread(incident_id)
+
+            asyncio.run(remove_owned_checkpoints())
+        with sessions() as session:
+            session.execute(
+                delete(IncidentTable).where(
+                    IncidentTable.incident_id.in_(server.incident_ids)
+                )
+            )
+            session.execute(
+                delete(AlertTable).where(AlertTable.alert_id.in_(server.alert_ids))
+            )
+            session.execute(
+                delete(SecurityEventTable).where(
+                    SecurityEventTable.event_id.in_(server.event_ids)
+                )
+            )
+            session.commit()
+        try:
+            if search.indices.exists(index=index):
+                search.indices.delete(index=index)
+        finally:
+            search.close()
+            engine.dispose()
+
+
+def wait_status(
+    client: httpx.Client, metadata: dict[str, Any], status: str
+) -> dict[str, Any]:
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        response = client.get(f"{API}/incidents/{metadata['incident_id']}")
+        assert response.status_code == 200
+        assert response.headers["x-trace-id"] == metadata["trace_id"]
+        result = response.json()
+        if result["status"] == status:
+            return result
+        assert result["status"] not in TERMINAL_STATES, (
+            f"investigation reached unexpected terminal status {result['status']}"
+        )
+        time.sleep(0.05)
+    pytest.fail(f"investigation did not reach {status} within 30 seconds")
+
+
+def read_sse(
+    client: httpx.Client,
+    metadata: dict[str, Any],
+    *,
+    until: str,
+    cursor: int = 0,
+    started_at: float | None = None,
+    until_agent: str | None = None,
+) -> list[dict[str, Any]]:
+    frames: list[dict[str, Any]] = []
+    frame: dict[str, Any] = {}
+    data_lines: list[str] = []
+    headers = {"Last-Event-ID": str(cursor)} if cursor else {}
+    with client.stream("GET", metadata["stream_url"], headers=headers) as response:
+        assert response.status_code == 200
+        assert "text/event-stream" in response.headers["content-type"]
+        assert response.headers["x-trace-id"] == metadata["trace_id"]
+        for line in response.iter_lines():
+            if not line:
+                if not data_lines:
+                    continue
+                frame["data"] = json.loads("\n".join(data_lines))
+                assert int(frame["id"]) == cursor + 1
+                cursor = int(frame["id"])
+                assert frame["data"]["trace_id"] == metadata["trace_id"]
+                assert frame["data"]["investigation_id"] == metadata["investigation_id"]
+                assert frame["data"]["incident_id"] == metadata["incident_id"]
+                if not frames and started_at is not None:
+                    elapsed = time.perf_counter() - started_at
+                    assert elapsed < 2, f"first TCP SSE event took {elapsed:.3f}s"
+                frames.append(frame)
+                if frame["event"] == until and (
+                    until_agent is None or frame["data"].get("agent") == until_agent
+                ):
+                    return frames
+                frame, data_lines = {}, []
+            elif not line.startswith(":"):
+                key, separator, value = line.partition(":")
+                assert separator
+                if key == "data":
+                    data_lines.append(value.lstrip(" "))
+                elif key in {"id", "event"}:
+                    frame[key] = value.lstrip(" ")
+    pytest.fail(f"TCP SSE ended before {until}")
+
+
+def assert_completed(result: dict[str, Any], metadata: dict[str, Any]) -> None:
+    assert result["trace_id"] == metadata["trace_id"]
+    assert result["classification"]["primary_type"] == "sql_injection"
+    assert result["origin"]["observed_source_ip"] == "203.0.113.42"
+    assert result["evidence"] and result["attack_steps"]
+    assert len(result["runs"]) == 6
+    assert {run["agent_name"] for run in result["runs"]} == set(ROLE_NAMES)
+    assert all(run["status"] == "completed" for run in result["runs"])
+    assert result["approval"]["decision"] == "approved"
+    assert result["validation_result"]["outcome"] == "success"
+    assert "simulation only" in result["validation_result"]["summary"]
+    assert "forbidden-truth" not in json.dumps(result)
+
+
+def test_live_tcp_approval_stream_performance_and_secret_redaction(live_api):
+    server, sessions = live_api
+    with server.client() as client:
+        alert_id = server.create_alert(client)
+        started_at = time.perf_counter()
+        metadata = server.investigate(client, alert_id)
+        initial = read_sse(
+            client, metadata, until="approval.required", started_at=started_at
+        )
+        assert initial[0]["event"] == "investigation.started"
+        assert {frame["event"] for frame in initial} >= {
+            "agent.started",
+            "agent.completed",
+            "evidence.added",
+            "approval.required",
+        }
+        before = wait_status(client, metadata, "awaiting_approval")
+        assert before["approval"] is None and before["validation_result"] is None
+        plan_id = before["response_plan"]["response_plan_id"]
+        barrier = threading.Barrier(2)
+
+        def concurrent_approve():
+            with server.client() as decision_client:
+                barrier.wait(timeout=5)
+                return decision_client.post(
+                    f"{API}/response-plans/{plan_id}/approve",
+                    json={
+                        "reason": "Task9 reviewed simulation",
+                        "decided_by": "acceptance-reviewer",
+                    },
+                )
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            responses = list(pool.map(lambda _: concurrent_approve(), range(2)))
+        assert sorted(response.status_code for response in responses) == [202, 409]
+        accepted = next(
+            response for response in responses if response.status_code == 202
+        )
+        assert accepted.json()["trace_id"] == metadata["trace_id"]
+        tail = read_sse(
+            client,
+            metadata,
+            until="investigation.completed",
+            cursor=int(initial[-1]["id"]),
+        )
+        assert {frame["event"] for frame in tail} >= {
+            "decision.recorded",
+            "validation.completed",
+        }
+        assert {
+            frame["data"]["agent"]
+            for frame in [*initial, *tail]
+            if frame["event"] == "agent.completed"
+        } == set(ROLE_NAMES)
+        after = wait_status(client, metadata, "completed")
+        assert_completed(after, metadata)
+        with sessions() as session:
+            assert (
+                len(
+                    session.scalars(
+                        select(ApprovalTable).where(
+                            ApprovalTable.response_plan_id == plan_id
+                        )
+                    ).all()
+                )
+                == 1
+            )
+            assert (
+                len(
+                    session.scalars(
+                        select(ValidationResultTable).where(
+                            ValidationResultTable.response_plan_id == plan_id
+                        )
+                    ).all()
+                )
+                == 1
+            )
+        for name, path in (
+            ("alerts", f"{API}/alerts"),
+            ("incident", f"{API}/incidents/{metadata['incident_id']}"),
+        ):
+            durations = []
+            for _ in range(100):
+                started = time.perf_counter()
+                response = client.get(path)
+                durations.append((time.perf_counter() - started) * 1000)
+                assert response.status_code == 200
+            p95 = sorted(durations)[math.ceil(len(durations) * 0.95) - 1]
+            print(f"task9_tcp {name} samples=100 p95_ms={p95:.2f}")
+            assert p95 < 500
+        sentinel = "task9-secret-" + new_ulid()
+        invalid = client.post(
+            f"{API}/alerts?password={sentinel}&api_key={sentinel}",
+            headers={
+                "Authorization": f"Bearer {sentinel}",
+                "Cookie": f"session={sentinel}",
+            },
+            json={
+                "title": sentinel,
+                "severity": sentinel,
+                "event_ids": server.event_ids,
+                "password": sentinel,
+            },
+        )
+        assert invalid.status_code == 422
+        assert sentinel not in invalid.text
+        assert invalid.json()["error"]["trace_id"] == invalid.headers["x-trace-id"]
+    server.stop()
+    log_text = server.log_path.read_text(encoding="utf-8", errors="replace")
+    assert sentinel not in log_text
+    audits = [
+        json.loads(line)
+        for line in log_text.splitlines()
+        if line.startswith("{") and '"http_request"' in line
+    ]
+    assert audits
+    assert all(
+        {"method", "route", "status_code", "duration_ms", "trace_id"} <= audit.keys()
+        for audit in audits
+    )
+    assert all(
+        not {"headers", "body", "query", "query_string", "url"} & audit.keys()
+        for audit in audits
+    )
+
+
+def test_live_tcp_restart_replays_cursor_and_rejection_without_subscription(live_api):
+    server, _sessions = live_api
+    with server.client() as client:
+        metadata = server.investigate(client, server.create_alert(client))
+        # No subscriber is present while the background investigation runs.
+        before = wait_status(client, metadata, "awaiting_approval")
+        initial = read_sse(client, metadata, until="approval.required")
+        plan_id = before["response_plan"]["response_plan_id"]
+    server.stop()
+    server.start()
+    with server.client() as client:
+        recovered = wait_status(client, metadata, "awaiting_approval")
+        assert recovered["response_plan"] == before["response_plan"]
+        assert recovered["trace_id"] == before["trace_id"]
+        replay = read_sse(
+            client, metadata, until="approval.required", cursor=int(initial[0]["id"])
+        )
+        assert replay == initial[1:]
+        decision = client.post(
+            f"{API}/response-plans/{plan_id}/approve",
+            json={
+                "reason": "reviewed after process restart",
+                "decided_by": "restart-reviewer",
+            },
+        )
+        assert decision.status_code == 202
+        tail = read_sse(
+            client,
+            metadata,
+            until="investigation.completed",
+            cursor=int(initial[-1]["id"]),
+        )
+        assert tail[-1]["data"]["status"] == "completed"
+        assert_completed(wait_status(client, metadata, "completed"), metadata)
+
+        rejected_metadata = server.investigate(client, server.create_alert(client))
+        pending = wait_status(client, rejected_metadata, "awaiting_approval")
+        rejected_plan = pending["response_plan"]["response_plan_id"]
+        reject_path = f"{API}/response-plans/{rejected_plan}/reject"
+        body = {
+            "reason": "reject the simulated response",
+            "decided_by": "rejection-reviewer",
+        }
+        assert client.post(reject_path, json=body).status_code == 202
+        assert client.post(reject_path, json=body).status_code == 409
+        rejected = wait_status(client, rejected_metadata, "rejected")
+        assert rejected["approval"]["decision"] == "rejected"
+        assert rejected["validation_result"] is None
+        assert {run["agent_name"] for run in rejected["runs"]} == set(ROLE_NAMES) - {
+            "validate"
+        }
+        rejected_frames = read_sse(
+            client, rejected_metadata, until="investigation.completed"
+        )
+        assert rejected_frames[-1]["data"]["status"] == "rejected"
+        assert not any(
+            frame["event"] == "validation.completed" for frame in rejected_frames
+        )
+
+
+def test_live_tcp_two_processes_accept_only_one_approval(live_api, tmp_path):
+    server, sessions = live_api
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        second_port = listener.getsockname()[1]
+    peer = LiveApi(
+        server.settings,
+        tmp_path / "task9-peer-api.jsonl",
+        server.event_ids,
+        second_port,
+    )
+    try:
+        peer.start()
+        with server.client() as client:
+            metadata = server.investigate(client, server.create_alert(client))
+            before = wait_status(client, metadata, "awaiting_approval")
+            plan_id = before["response_plan"]["response_plan_id"]
+            barrier = threading.Barrier(2)
+
+            def approve_from(worker):
+                with worker.client() as decision_client:
+                    barrier.wait(timeout=5)
+                    return decision_client.post(
+                        f"{API}/response-plans/{plan_id}/approve",
+                        json={
+                            "reason": "concurrent independent API workers",
+                            "decided_by": "cross-worker-reviewer",
+                        },
+                    )
+
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                responses = list(pool.map(approve_from, (server, peer)))
+            assert sorted(response.status_code for response in responses) == [202, 409]
+            accepted = next(
+                response for response in responses if response.status_code == 202
+            )
+            assert accepted.json()["trace_id"] == metadata["trace_id"]
+            frames = read_sse(client, metadata, until="investigation.completed")
+            assert frames[-1]["data"]["status"] == "completed"
+            assert sum(frame["event"] == "decision.recorded" for frame in frames) == 1
+            assert (
+                sum(frame["event"] == "validation.completed" for frame in frames) == 1
+            )
+            assert_completed(wait_status(client, metadata, "completed"), metadata)
+            with peer.client() as other_client:
+                assert_completed(
+                    wait_status(other_client, metadata, "completed"), metadata
+                )
+            with sessions() as session:
+                assert (
+                    len(
+                        session.scalars(
+                            select(ApprovalTable).where(
+                                ApprovalTable.response_plan_id == plan_id
+                            )
+                        ).all()
+                    )
+                    == 1
+                )
+                assert (
+                    len(
+                        session.scalars(
+                            select(ValidationResultTable).where(
+                                ValidationResultTable.response_plan_id == plan_id
+                            )
+                        ).all()
+                    )
+                    == 1
+                )
+    finally:
+        peer.stop()
+
+
+def test_live_tcp_collect_interruption_resumes_without_event_loss(live_api):
+    server, sessions = live_api
+    server.stop()
+    server.collect_delay = 2
+    server.start()
+    with server.client() as client:
+        metadata = server.investigate(client, server.create_alert(client))
+        initial = read_sse(
+            client, metadata, until="agent.started", until_agent="collect"
+        )
+        cursor = int(initial[-1]["id"])
+        assert initial[-1]["data"]["agent"] == "collect"
+        assert not any(
+            frame["event"] == "agent.completed" and frame["data"]["agent"] == "collect"
+            for frame in initial
+        )
+    server.stop()
+    server.collect_delay = 0
+    server.start()
+    with server.client() as client:
+        recovered = read_sse(client, metadata, until="approval.required", cursor=cursor)
+        collect_restarts = [
+            frame
+            for frame in recovered
+            if frame["event"] == "agent.started" and frame["data"]["agent"] == "collect"
+        ]
+        assert len(collect_restarts) == 1
+        assert any(
+            frame["event"] == "agent.completed" and frame["data"]["agent"] == "collect"
+            for frame in recovered
+        )
+        with sessions() as session:
+            starts = session.scalars(
+                select(ApiInvestigationEventTable).where(
+                    ApiInvestigationEventTable.investigation_id
+                    == metadata["investigation_id"],
+                    ApiInvestigationEventTable.event == "agent.started",
+                )
+            ).all()
+            collect_starts = [row for row in starts if row.data["agent"] == "collect"]
+            assert len(collect_starts) == 2
+            source_uuids = {
+                row.dedup_key.removeprefix("source:").removesuffix(":started")
+                for row in collect_starts
+            }
+            assert len(source_uuids) == 2 and all(
+                len(value) == 26 for value in source_uuids
+            )
+        before = wait_status(client, metadata, "awaiting_approval")
+        plan_id = before["response_plan"]["response_plan_id"]
+        response = client.post(
+            f"{API}/response-plans/{plan_id}/approve",
+            json={
+                "reason": "reviewed after interrupted collection",
+                "decided_by": "recovery-reviewer",
+            },
+        )
+        assert response.status_code == 202
+        tail = read_sse(
+            client,
+            metadata,
+            until="investigation.completed",
+            cursor=int(recovered[-1]["id"]),
+        )
+        all_ids = [int(frame["id"]) for frame in [*initial, *recovered, *tail]]
+        assert all_ids == list(range(1, all_ids[-1] + 1))
+        assert_completed(wait_status(client, metadata, "completed"), metadata)

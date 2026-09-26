@@ -38,6 +38,7 @@ def _now() -> str:
 def _event(state, node, event, *, output=None):
     result = {
         "event_id": len(state.get("events", [])) + 1,
+        "event_uuid": new_ulid(),
         "node": node,
         "event": event,
         "incident_id": state["incident_id"],
@@ -348,7 +349,7 @@ class InvestigationWorkflow:
         return await self.get_state(incident_id)
 
     async def stream_events(
-        self, incident_id: str, *, after_event_id: int = 0
+        self, incident_id: str, *, after_event_id: int = 0, trace_id: str | None = None
     ) -> AsyncIterator[dict[str, Any]]:
         config = self._config(incident_id)
         if after_event_id < 0:
@@ -371,7 +372,7 @@ class InvestigationWorkflow:
             else:
                 initial = {
                     "incident_id": incident_id,
-                    "trace_id": f"TRACE-{new_ulid()}",
+                    "trace_id": trace_id or f"TRACE-{new_ulid()}",
                     "status": "received",
                     "alerts": [],
                     "evidence": [],
