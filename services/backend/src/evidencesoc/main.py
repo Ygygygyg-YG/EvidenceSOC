@@ -9,7 +9,15 @@ import httpx
 import structlog
 
 from evidencesoc.agents.graph import open_workflow
-from evidencesoc.api import alerts, investigations, responses, sse
+from evidencesoc.api import (
+    alerts,
+    dashboard,
+    demo_session,
+    investigations,
+    responses,
+    sse,
+)
+from evidencesoc.api.demo_session import DemoSessionManager
 from evidencesoc.api.errors import ApiError, install_error_handlers
 from evidencesoc.api.runner import InvestigationRunner
 from evidencesoc.api.storage import ApiStore
@@ -117,9 +125,22 @@ def create_app(
     application = EvidenceSOCApp(
         title="EvidenceSOC API", version="0.1.0", lifespan=lifespan
     )
+    application.state.execution_mode = (
+        "rules" if settings.llm_mode == "fixture" else "model"
+    )
+    application.state.demo_session_settings = settings
+    application.state.demo_sessions = DemoSessionManager(settings)
     application.add_middleware(RequestAuditMiddleware)
     install_error_handlers(application)
-    for router in (alerts.router, investigations.router, responses.router, sse.router):
+    for router in (
+        alerts.router,
+        dashboard.router,
+        dashboard.health_router,
+        demo_session.router,
+        investigations.router,
+        responses.router,
+        sse.router,
+    ):
         application.include_router(router)
 
     @application.get("/health/live")

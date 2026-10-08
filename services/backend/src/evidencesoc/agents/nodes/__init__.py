@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from copy import deepcopy
+from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Any, Protocol
 
@@ -253,6 +255,13 @@ class NodeHandlers:
             "respond", ResponseOutput, state, fallback.respond
         )
         data = output.model_dump(mode="json")
+        generation = state.get("plan_generation", 0)
+        if data["response_plan"] and generation:
+            source_id = state["renewed_from_plan_id"]
+            digest = sha256(
+                f"{state['incident_id']}|{source_id}|{generation}".encode()
+            ).hexdigest()[:24]
+            data["response_plan"]["response_plan_id"] = f"RP-{digest}"
         return {
             **data,
             "status": "awaiting_approval" if data["response_plan"] else "manual_review",
@@ -264,6 +273,17 @@ class NodeHandlers:
     async def validate(self, state: dict[str, Any]) -> dict[str, Any]:
         result = await self.services.verify(state, state["_run_id"])
         fresh = result.get("evidence", [])
+        executed_checks = result.get("executed_checks", [])
+        query_starts = [
+            datetime.fromisoformat(check["condition"]["time_from"])
+            for check in executed_checks
+        ]
+        query_ends = [
+            datetime.fromisoformat(check["condition"]["time_to"])
+            for check in executed_checks
+        ]
+        time_from = min(query_starts) if query_starts else None
+        time_to = max(query_ends) if query_ends else None
         delta: dict[str, Any] = {
             "status": "validating",
             "evidence": merge_by_id(state.get("evidence", []), fresh, "evidence_id"),
@@ -286,8 +306,18 @@ class NodeHandlers:
                 response_plan_id=plan.response_plan_id,
                 outcome=ValidationOutcome.INSUFFICIENT_EVIDENCE,
                 summary="No fresh verification evidence was returned; prior investigation evidence cannot prove a simulated or real response succeeded.",
-                checked_at=fallback.checked_timestamp(state, previous),
+                checked_at=datetime.now(UTC),
                 evidence_ids=[item["evidence_id"] for item in previous],
+                time_from=time_from,
+                time_to=time_to,
+                checks=[
+                    {
+                        **check,
+                        "outcome": ValidationOutcome.INSUFFICIENT_EVIDENCE,
+                        "explanation": "The executed query returned no target evidence; the simulation effect remains unverified.",
+                    }
+                    for check in executed_checks
+                ],
             )
             return {
                 **delta,
@@ -298,27 +328,96 @@ class NodeHandlers:
         summary = (
             "Simulation validation failed; no real system changes are demonstrated."
         )
+        checks: list[dict[str, Any]] = []
         try:
             plan = ResponsePlan.model_validate(state.get("response_plan"))
             approval = ApprovalRecord.model_validate(state.get("approval"))
             actions = [SimulatedAction.model_validate(item) for item in plan.actions]
-            simulations = state.get("simulation", [])
+            execution = state.get("simulation_execution")
+            plan_digest = sha256(
+                json.dumps(
+                    state["response_plan"],
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                ).encode()
+            ).hexdigest()
             authorized = (
                 approval.decision == "approved"
                 and approval.response_plan_id == plan.response_plan_id
                 and plan.incident_id == state["incident_id"]
+                and state.get("approved_plan_sha256") == plan_digest
             )
-            all_simulated = len(simulations) == len(actions) and all(
-                sim.get("action") == action.action
-                and sim.get("target") == action.target
-                and sim.get("status") == "simulated"
-                and sim.get("outcome", "success") == "success"
-                for sim, action in zip(simulations, actions, strict=True)
+            action_ids = [action.action_id for action in actions]
+            action_results = (
+                execution.get("action_results", [])
+                if isinstance(execution, dict)
+                else []
             )
+            if not isinstance(action_results, list) or any(
+                not isinstance(item, dict) for item in action_results
+            ):
+                action_results = []
+            simulation = state.get("simulation")
+            legacy_matches = (
+                isinstance(simulation, list)
+                and len(simulation) == len(actions)
+                and all(
+                    isinstance(item, dict)
+                    and item.get("action") == action.action
+                    and item.get("target") == action.target
+                    and item.get("status") == "simulated"
+                    and item.get("simulated", True) is True
+                    and item.get("outcome", "success") == "success"
+                    and item.get("action_id", action.action_id) == action.action_id
+                    for item, action in zip(simulation, actions, strict=True)
+                )
+            )
+            all_simulated = (
+                isinstance(execution, dict)
+                and execution.get("response_plan_id") == plan.response_plan_id
+                and bool(state.get("approved_plan_version"))
+                and execution.get("plan_version") == state.get("approved_plan_version")
+                and execution.get("status") == "completed"
+                and all(action_ids)
+                and len(set(action_ids)) == len(action_ids)
+                and len(action_results) == len(actions)
+                and {item.get("action_id") for item in action_results}
+                == set(action_ids)
+                and all(item.get("outcome") == "success" for item in action_results)
+                and legacy_matches
+            )
+            fresh_by_id = {item["evidence_id"]: item for item in fresh}
+            for index, check in enumerate(executed_checks):
+                cited = [
+                    evidence_id
+                    for evidence_id in check["evidence_ids"]
+                    if evidence_id in fresh_by_id
+                ]
+                matched = index < len(actions) and any(
+                    fallback.matching_target(fresh_by_id[evidence_id], actions[index])
+                    for evidence_id in cited
+                )
+                if not authorized or not all_simulated:
+                    check_outcome = ValidationOutcome.FAILURE
+                    explanation = "The approved simulated action did not complete for this plan version."
+                elif matched:
+                    check_outcome = ValidationOutcome.SUCCESS
+                    explanation = "The approved simulated action matched freshly queried target evidence; this does not prove a real-world effect."
+                else:
+                    check_outcome = ValidationOutcome.INSUFFICIENT_EVIDENCE
+                    explanation = "The executed query returned no target evidence; the simulation effect remains unverified."
+                checks.append(
+                    {
+                        **check,
+                        "evidence_ids": cited,
+                        "outcome": check_outcome,
+                        "explanation": explanation,
+                    }
+                )
             if authorized and all_simulated:
-                if all(
-                    any(fallback.matching_target(item, action) for item in fresh)
-                    for action in actions
+                if len(checks) == len(actions) and all(
+                    check["outcome"] == ValidationOutcome.SUCCESS for check in checks
                 ):
                     outcome = ValidationOutcome.SUCCESS
                     summary = "Approved simulated actions match freshly queried target evidence. This verifies the simulation only, not real system changes or effective traffic blocking."
@@ -335,8 +434,11 @@ class NodeHandlers:
             response_plan_id=response_plan_id,
             outcome=outcome,
             summary=summary,
-            checked_at=fallback.checked_timestamp(state, fresh),
+            checked_at=datetime.now(UTC),
             evidence_ids=[item["evidence_id"] for item in fresh],
+            time_from=time_from,
+            time_to=time_to,
+            checks=checks,
         )
         return {
             **delta,

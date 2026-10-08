@@ -1,0 +1,16 @@
+export const socTokens = {
+  canvas: '#0B1220',
+  surface: '#111B2E',
+  elevated: '#17243B',
+  text: '#F1F5F9',
+  textSecondary: '#B6C4D8',
+  textMuted: '#8B9CB5',
+  border: '#2B3C55',
+  controlBorder: '#657E9E',
+  primary: '#4FAFC2',
+  primaryHover: '#65C1D2',
+  primaryActive: '#3994A8',
+  error: '#F2A0A5',
+  warning: '#F6C76B',
+  success: '#76D7AE',
+} as const;

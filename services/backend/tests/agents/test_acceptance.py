@@ -7,8 +7,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from sqlalchemy import delete, select
-
 from evidencesoc.agents.checkpoint import open_checkpointer
 from evidencesoc.agents.graph import InvestigationWorkflow, open_workflow
 from evidencesoc.agents.nodes import NodeHandlers
@@ -36,6 +34,7 @@ from evidencesoc.persistence.tables import (
     ToolCallTable,
     ValidationResultTable,
 )
+from sqlalchemy import delete, select
 
 ROOT = Path(__file__).resolve().parents[4]
 
@@ -169,7 +168,9 @@ async def test_real_mcp_six_roles_and_postgres_resume_in_fresh_process(live_inci
         assert not before["simulation"] and before["approval"] is None
         assert before["origin"]["observed_source_ip"] == "203.0.113.42"
         assert before["classification"]["primary_type"] == "sql_injection"
-        assert before["classification"]["technique_ids"] == ["T1190"]
+        # This isolated acceptance fixture imports events but no ATT&CK
+        # knowledge; an ungrounded technique mapping must stay absent.
+        assert before["classification"]["technique_ids"] == []
         assert before["attack_steps"] and all(
             step["evidence_ids"] for step in before["attack_steps"]
         )
@@ -252,12 +253,18 @@ async def test_all_three_simulated_actions_validate_with_real_scoped_queries(
                     {
                         **template,
                         "action": "isolate_host_simulated",
+                        "action_id": f"{template['action_id']}-2",
+                        "type": "isolate_host_simulated",
+                        "parameters": {"host": host},
                         "target": host,
                         "verification_query": {"filters": {"host": host}, "limit": 10},
                     },
                     {
                         **template,
                         "action": "disable_account_simulated",
+                        "action_id": f"{template['action_id']}-3",
+                        "type": "disable_account_simulated",
+                        "parameters": {"account": "task8-demo-user"},
                         "target": "task8-demo-user",
                         "verification_query": {"filters": {"host": host}, "limit": 5},
                     },

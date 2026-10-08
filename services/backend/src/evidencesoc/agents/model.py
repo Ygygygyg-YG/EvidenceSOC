@@ -48,7 +48,12 @@ class DeepSeekStructuredModel:
                     "Do not invent identifiers, entities, technique mappings, or successful exploitation. "
                     "Return unknown when evidence is insufficient. Never read labels or attacker truth. "
                     "Only propose block_ip_simulated, isolate_host_simulated, disable_account_simulated; "
-                    "all actions require human approval. Simulation does not change a real system."
+                    "all actions require human approval. Simulation does not change a real system. "
+                    "For a response plan, every action needs a stable action_id, type equal to its "
+                    "simulated action, target, parameters containing only that target, expected_effect, "
+                    "risk, impact, preview, rollback, rollback_ref naming a plan rollback step, "
+                    "verification_query, and evidence_ids drawn from the plan's observed incident "
+                    "evidence. Never cite evidence from another incident."
                 ),
             ),
             ("human", json.dumps(context, ensure_ascii=False, default=str)),

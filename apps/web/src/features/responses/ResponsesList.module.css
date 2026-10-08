@@ -1,0 +1,48 @@
+.page { min-width: 0; }
+.header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
+.header h1 { margin: 0 0 6px; color: var(--soc-text); font-size: 24px; line-height: 1.35; }
+.header p { margin: 0; color: var(--soc-text-secondary); }
+.simulation { flex: none; padding: 7px 11px; border: 1px solid var(--soc-primary); border-radius: 999px; color: var(--soc-primary); font-size: 13px; font-weight: 600; }
+.panel { min-width: 0; overflow: hidden; background: var(--soc-surface); border: 1px solid var(--soc-border); border-radius: 8px; }
+.filters { display: flex; flex-wrap: wrap; gap: 16px; padding: 20px; border-bottom: 1px solid var(--soc-border); }
+.filter { display: flex; flex-direction: column; gap: 6px; width: 180px; color: var(--soc-text-secondary); }
+.filter > :last-child { width: 100%; }
+.context { margin: 0; padding: 10px 20px; color: var(--soc-text-secondary); font-size: 13px; background: var(--soc-elevated); }
+.summary { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 16px 20px; }
+.summary h2 { margin: 0; font-size: 16px; }
+.summary > div { display: flex; align-items: center; gap: 12px; color: var(--soc-text-secondary); }
+.notice { display: flex; align-items: center; gap: 12px; padding: 12px 20px; color: var(--soc-text-secondary); border-top: 1px solid var(--soc-border); }
+.notice code { overflow-wrap: anywhere; }
+.state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; min-height: 280px; padding: 30px; text-align: center; }
+.state svg { color: var(--soc-text-secondary); }
+.state h2, .state p { margin: 0; color: var(--soc-text-secondary); }
+.state p { overflow-wrap: anywhere; }
+.state code { overflow-wrap: anywhere; }
+.tableScroller { overflow-x: auto; }
+.table { width: 100%; min-width: 900px; border-collapse: collapse; table-layout: fixed; }
+.table th { padding: 12px 16px; color: var(--soc-text-secondary); font-weight: 500; text-align: left; background: var(--soc-elevated); border-block: 1px solid var(--soc-border); }
+.table td { padding: 14px 16px; color: var(--soc-text-secondary); border-bottom: 1px solid var(--soc-border); vertical-align: top; overflow-wrap: anywhere; }
+.table tbody tr:last-child td { border-bottom: 0; }
+.table a, .cards a { color: var(--soc-text); text-decoration: none; }
+.table a:hover, .cards a:hover { color: var(--soc-primary); text-decoration: underline; text-underline-offset: 3px; }
+.subline { display: block; margin-top: 5px; color: var(--soc-text-muted); font-size: 13px; overflow-wrap: anywhere; }
+.status { display: inline-block; padding: 4px 8px; border: 1px solid var(--soc-border); border-radius: 5px; color: var(--soc-warning); font-size: 13px; white-space: nowrap; }
+.status[data-state='approved'] { color: var(--soc-success); }
+.status[data-state='rejected'] { color: var(--soc-error); }
+.status[data-state='submitting'] { color: var(--soc-primary); }
+.cards { display: none; }
+.pagination { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 16px 20px; border-top: 1px solid var(--soc-border); color: var(--soc-text-secondary); }
+.pagination > div { display: flex; gap: 8px; }
+@media (width < 768px) {
+  .header { flex-wrap: wrap; }
+  .tableScroller { display: none; }
+  .filters, .summary, .pagination { padding-inline: 16px; }
+  .context { padding-inline: 16px; }
+  .filter { width: calc(50% - 8px); }
+  .cards { display: grid; gap: 12px; margin: 0; padding: 0 16px 16px; list-style: none; }
+  .cards li { min-width: 0; padding: 16px; background: var(--soc-elevated); border: 1px solid var(--soc-border); border-radius: 8px; overflow-wrap: anywhere; }
+  .cards li > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .cards h3 { margin: 12px 0 6px; font-size: 16px; }
+  .cards p { margin: 0 0 6px; color: var(--soc-text-secondary); }
+  .cards small, .cards li > div > span:last-child { color: var(--soc-text-muted); }
+}

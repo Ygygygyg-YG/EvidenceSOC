@@ -4,13 +4,13 @@ import asyncio
 import importlib
 import json
 from copy import deepcopy
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from hashlib import sha256
 from typing import Any
 
 import pytest
-from pydantic import ValidationError
-
 from evidencesoc.config import Settings
+from pydantic import ValidationError
 
 EV = "EV-01J8ZW4AAA0ABCDEFGHJKMNPQR"
 EV2 = "EV-01J8ZW4AAA1ABCDEFGHJKMNPQR"
@@ -64,9 +64,11 @@ class Services:
         *,
         collected: dict[str, Any] | None = None,
         verified: list[dict[str, Any]] | None = None,
+        executed_checks: list[dict[str, Any]] | None = None,
     ) -> None:
         self.collected = collected or {"evidence": [evidence()], "knowledge": []}
         self.verified = [evidence(EV2)] if verified is None else verified
+        self.executed_checks = executed_checks
         self.calls: list[tuple[str, str]] = []
 
     async def load_incident(self, incident_id: str) -> dict[str, Any]:
@@ -79,7 +81,25 @@ class Services:
 
     async def verify(self, current: dict[str, Any], run_id: str) -> dict[str, Any]:
         self.calls.append(("verify", run_id))
-        return {"evidence": self.verified}
+        result = {"evidence": self.verified}
+        if self.executed_checks is None:
+            plan = current["response_plan"]
+            result["executed_checks"] = [
+                {
+                    "check_id": plan["validation_checks"][index]["check_id"],
+                    "condition": {
+                        "time_from": "2026-09-26T00:00:00+00:00",
+                        "time_to": "2026-09-26T00:05:00+00:00",
+                        "filters": action["verification_query"]["filters"],
+                        "limit": action["verification_query"].get("limit", 100),
+                    },
+                    "evidence_ids": [item["evidence_id"] for item in self.verified],
+                }
+                for index, action in enumerate(plan["actions"])
+            ]
+        else:
+            result["executed_checks"] = self.executed_checks
+        return result
 
 
 def handlers(services: Services | None = None, **kwargs: Any) -> Any:
@@ -264,6 +284,60 @@ async def test_response_actions_are_complete_and_use_only_simulated_allowlist() 
     assert len(plan["actions"]) >= 1
     for item in plan["actions"]:
         schema.model_validate(item)
+        assert item["action_id"].startswith("ACT-")
+        assert item["type"] == item["action"]
+        assert item["parameters"] == {"source_ip": item["target"]}
+        assert item["expected_effect"]
+        assert item["rollback_ref"] in {
+            step["step_id"] for step in plan["rollback_steps"]
+        }
+        assert item["evidence_ids"]
+        assert set(item["evidence_ids"]) <= set(plan["evidence_ids"])
+
+
+@pytest.mark.asyncio
+async def test_response_rejects_action_citations_outside_plan_and_mismatched_target() -> (
+    None
+):
+    current = await response_state()
+    plan = current["response_plan"]
+    schema = importlib.import_module("evidencesoc.agents.models").ResponseOutput
+
+    for change in (
+        {"evidence_ids": [EV2]},
+        {"parameters": {"source_ip": "198.51.100.11"}},
+        {"rollback_ref": "RB-not-in-plan"},
+        {"type": "isolate_host_simulated"},
+    ):
+        invalid = deepcopy(plan)
+        invalid["actions"][0].update(change)
+        with pytest.raises(ValidationError):
+            schema.model_validate({"response_plan": invalid})
+
+
+@pytest.mark.asyncio
+async def test_model_response_must_include_review_and_expiry_details() -> None:
+    current = await response_state()
+    plan = current["response_plan"]
+    schema = importlib.import_module("evidencesoc.agents.models").ResponseOutput
+    for omitted in (
+        "risk_level",
+        "risk_reason",
+        "affected_assets",
+        "business_impact",
+        "expires_at",
+        "rollback_steps",
+        "validation_checks",
+    ):
+        incomplete = {key: value for key, value in plan.items() if key != omitted}
+        with pytest.raises(ValidationError):
+            schema.model_validate({"response_plan": incomplete})
+    unbounded = {
+        **plan,
+        "expires_at": (datetime.now(UTC) + timedelta(days=1)).isoformat(),
+    }
+    with pytest.raises(ValidationError):
+        schema.model_validate({"response_plan": unbounded})
 
 
 class BrokenModel:
@@ -370,6 +444,31 @@ async def response_state() -> dict[str, Any]:
             "status": "simulated",
         }
     ]
+    plan = current["response_plan"]
+    version = sha256(
+        json.dumps(plan, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    current["approved_plan_sha256"] = version
+    current["approved_plan_version"] = version
+    current["simulation_execution"] = {
+        "simulation_id": "SIM-1",
+        "response_plan_id": plan["response_plan_id"],
+        "plan_version": version,
+        "status": "completed",
+        "started_at": datetime.now(UTC).isoformat(),
+        "finished_at": datetime.now(UTC).isoformat(),
+        "action_results": [
+            {
+                "action_id": action["action_id"],
+                "outcome": "success",
+                "description": "The simulated action completed.",
+                "started_at": datetime.now(UTC).isoformat(),
+                "finished_at": datetime.now(UTC).isoformat(),
+            }
+            for action in plan["actions"]
+        ],
+        "error": None,
+    }
     return current
 
 
@@ -377,20 +476,69 @@ async def response_state() -> dict[str, Any]:
 async def test_validation_requeries_and_explicitly_limits_success_to_simulation() -> (
     None
 ):
-    services = Services()
-    result = await handlers(services).validate(await response_state())
+    current = await response_state()
+    check_id = current["response_plan"]["validation_checks"][0]["check_id"]
+    condition = {
+        "time_from": "2026-09-26T00:00:00+00:00",
+        "time_to": "2026-09-26T00:05:00+00:00",
+        "filters": {"source_ip": "198.51.100.10"},
+        "limit": 10,
+    }
+    services = Services(
+        executed_checks=[
+            {"check_id": check_id, "condition": condition, "evidence_ids": [EV2]}
+        ]
+    )
+    result = await handlers(services).validate(current)
     assert services.calls == [("verify", "RUN-1")]
     assert result["validation_result"]["outcome"] == "success"
     assert result["validation_result"]["evidence_ids"] == [EV2]
     assert "simulat" in result["validation_result"]["summary"].lower()
+    assert datetime.fromisoformat(
+        result["validation_result"]["time_from"]
+    ) == datetime.fromisoformat(condition["time_from"])
+    assert datetime.fromisoformat(
+        result["validation_result"]["time_to"]
+    ) == datetime.fromisoformat(condition["time_to"])
+    assert result["validation_result"]["checks"] == [
+        {
+            "check_id": check_id,
+            "condition": condition,
+            "outcome": "success",
+            "evidence_ids": [EV2],
+            "explanation": "The approved simulated action matched freshly queried target evidence; this does not prove a real-world effect.",
+        }
+    ]
 
 
 @pytest.mark.asyncio
 async def test_validation_empty_query_result_is_insufficient_not_success() -> None:
-    result = await handlers(Services(verified=[])).validate(await response_state())
+    current = await response_state()
+    check_id = current["response_plan"]["validation_checks"][0]["check_id"]
+    result = await handlers(
+        Services(
+            verified=[],
+            executed_checks=[
+                {
+                    "check_id": check_id,
+                    "condition": {
+                        "time_from": "2026-09-26T00:00:00+00:00",
+                        "time_to": "2026-09-26T00:05:00+00:00",
+                        "filters": {"source_ip": "198.51.100.10"},
+                        "limit": 10,
+                    },
+                    "evidence_ids": [],
+                }
+            ],
+        )
+    ).validate(current)
     assert result["validation_result"]["outcome"] == "insufficient_evidence"
     assert result["validation_result"]["evidence_ids"] == [EV]
     assert result["stop_reason"] == "insufficient_evidence"
+    assert result["validation_result"]["checks"][0]["evidence_ids"] == []
+    assert (
+        result["validation_result"]["checks"][0]["outcome"] == "insufficient_evidence"
+    )
 
 
 @pytest.mark.asyncio
@@ -425,7 +573,7 @@ async def test_validation_matches_target_in_new_evidence() -> None:
 @pytest.mark.asyncio
 async def test_validation_simulator_failure_remains_failure() -> None:
     current = await response_state()
-    current["simulation"][0]["status"] = "failed"
+    current["simulation_execution"]["action_results"][0]["outcome"] = "failure"
     result = await handlers().validate(current)
     assert result["validation_result"]["outcome"] == "failure"
 
@@ -542,8 +690,18 @@ def test_action_verification_query_must_match_its_target() -> None:
 async def test_simulation_missing_is_failure_even_with_target_evidence() -> None:
     current = await response_state()
     current["simulation"] = []
+    current["simulation_execution"] = None
     result = await handlers().validate(current)
     assert result["validation_result"]["outcome"] == "failure"
+
+
+@pytest.mark.asyncio
+async def test_validation_rejects_simulation_from_another_plan_version() -> None:
+    current = await response_state()
+    current["simulation_execution"]["plan_version"] = "0" * 64
+    result = await handlers().validate(current)
+    assert result["validation_result"]["outcome"] == "failure"
+    assert result["validation_result"]["checks"][0]["outcome"] == "failure"
 
 
 def test_analysis_schema_rejects_evaluation_dataset_labels() -> None:

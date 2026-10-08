@@ -5,10 +5,9 @@ import importlib
 from typing import Any
 
 import pytest
+from evidencesoc.config import Settings
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.errors import NodeCancelledError
-
-from evidencesoc.config import Settings
 
 EV = "EV-01ARZ3NDEKTSV4RRFFQ69G5FAV"
 NOW = "2026-09-21T10:20:17+00:00"
@@ -90,7 +89,27 @@ class MemoryServices:
         self.verifications += 1
         if self.verify_error:
             raise RuntimeError("dependency unavailable; secret-value")
-        return {"evidence": [] if self.verify_empty else [self.evidence()]}
+        evidence = [] if self.verify_empty else [self.evidence()]
+        plan = state["response_plan"]
+        return {
+            "evidence": evidence,
+            "executed_checks": [
+                {
+                    "check_id": plan["validation_checks"][index]["check_id"],
+                    "condition": {
+                        "time_from": "2026-09-21T10:15:00+00:00",
+                        "time_to": "2026-09-21T10:25:00+00:00",
+                        "filters": action["verification_query"]["filters"],
+                        "limit": action["verification_query"].get("limit", 100),
+                    },
+                    "evidence_ids": [item["evidence_id"] for item in evidence],
+                }
+                for index, action in enumerate(plan["actions"])
+            ],
+        }
+
+    async def hydrate_evidence(self, incident_id, values):
+        return list(values)
 
     async def save_result(self, state):
         self.saved.append(dict(state))
@@ -125,6 +144,7 @@ async def test_fixture_pauses_before_actions_and_finishes_six_roles_after_approv
     flow = workflow(services)
     state = await flow.run_investigation("IN-demo")
     assert state["status"] == "awaiting_approval"
+    assert state.get("simulation_execution") is None
     assert state["fallback_used"] is True
     assert not state.get("simulation")
     assert services.verifications == 0
@@ -140,6 +160,19 @@ async def test_fixture_pauses_before_actions_and_finishes_six_roles_after_approv
     assert final["simulation"] and all(
         action["simulated"] for action in final["simulation"]
     )
+    execution = final["simulation_execution"]
+    assert execution["response_plan_id"] == final["response_plan"]["response_plan_id"]
+    assert execution["plan_version"]
+    assert execution["status"] == "completed"
+    assert execution["started_at"] <= execution["finished_at"]
+    assert execution["error"] is None
+    assert len(execution["action_results"]) == len(final["response_plan"]["actions"])
+    assert (
+        execution["action_results"][0]["action_id"]
+        == final["response_plan"]["actions"][0]["action_id"]
+    )
+    assert execution["action_results"][0]["outcome"] == "success"
+    assert execution in [saved.get("simulation_execution") for saved in services.saved]
     assert services.verifications == 1
     roles = [
         event["node"] for event in final["events"] if event["event"] == "node.completed"
@@ -195,6 +228,35 @@ async def test_checkpoint_resume_and_duplicate_approval_cannot_repeat_simulation
     with pytest.raises(ValueError):
         await approve(recovered)
     assert services.verifications == 1
+
+
+@pytest.mark.asyncio
+async def test_renewal_generates_a_new_plan_without_reusing_an_approval():
+    services = MemoryServices()
+    flow = workflow(services)
+    original = await flow.run_investigation("IN-renew")
+    old_id = original["response_plan"]["response_plan_id"]
+
+    renewed = await flow.renew_plan(
+        "IN-renew", response_plan_id=old_id, requested_by="reviewer"
+    )
+
+    assert renewed["status"] == "awaiting_approval"
+    assert renewed["response_plan"]["response_plan_id"] != old_id
+    assert (
+        renewed["response_plan"]["evidence_ids"]
+        == original["response_plan"]["evidence_ids"]
+    )
+    assert renewed.get("approval") is None
+    assert not renewed.get("simulation")
+    assert services.verifications == 0
+    assert [run["role"] for run in services.runs].count("respond") == 2
+    assert [run["role"] for run in services.runs].count("collect") == 1
+    assert any(
+        saved.get("response_plan", {}).get("response_plan_id") == old_id
+        for saved in services.saved
+        if saved.get("response_plan")
+    )
 
 
 @pytest.mark.asyncio
@@ -364,6 +426,7 @@ async def test_restart_after_simulation_resumes_validation_without_resimulation(
     result = await recovered.run_investigation("IN-demo")
     assert result["status"] == "completed"
     assert result["simulation"] == intermediate["simulation"]
+    assert result["simulation_execution"] == intermediate["simulation_execution"]
     assert (
         sum(event["event"] == "simulation.completed" for event in result["events"]) == 1
     )
