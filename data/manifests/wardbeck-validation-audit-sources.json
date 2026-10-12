@@ -1,0 +1,14 @@
+{
+  "schema_version": 2,
+  "dataset_id": "ait-v2.1:wardbeck",
+  "scenario": "wardbeck",
+  "split": "validation",
+  "sources": [
+    {
+      "relative_log_path": "intranet_server/logs/audit/audit.log",
+      "events": "../ait/scenarios/wardbeck/processed/agent/wardbeck-intranet-audit-events.jsonl",
+      "scored_gold": "../ait/scenarios/wardbeck/processed/gold/wardbeck-intranet-audit-scored-gold.jsonl",
+      "proof": "../ait/scenarios/wardbeck/processed/reports/wardbeck-intranet-audit-completeness.json"
+    }
+  ]
+}

@@ -1,0 +1,133 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "case_id": "harrison-dev-001",
+      "split": "development",
+      "class": "attack",
+      "scenario": "harrison",
+      "time_from": "2022-02-08T07:56:00Z",
+      "time_to": "2022-02-08T07:56:04Z",
+      "counts": {
+        "selected": 3,
+        "attack": 3,
+        "normal": 0,
+        "unknown": 0
+      },
+      "scoring_manifest_sha256": "e0675a7e9c0d4ea4c16702d3deff0d360ec41ea0cf83efbc86b25afa29636d98",
+      "rebuild_verified": true
+    },
+    {
+      "case_id": "harrison-dev-002",
+      "split": "development",
+      "class": "normal",
+      "scenario": "harrison",
+      "time_from": "2022-02-08T10:00:00Z",
+      "time_to": "2022-02-08T10:10:00Z",
+      "counts": {
+        "selected": 8,
+        "attack": 0,
+        "normal": 8,
+        "unknown": 0
+      },
+      "scoring_manifest_sha256": "3f7ed9288ee014836ac065c2164ef2e190107b5976937d075e1eddd17987e980",
+      "rebuild_verified": true
+    },
+    {
+      "case_id": "santos-dev-001",
+      "split": "development",
+      "class": "attack",
+      "scenario": "santos",
+      "time_from": "2022-01-17T11:22:57Z",
+      "time_to": "2022-01-17T11:23:01Z",
+      "counts": {
+        "selected": 4,
+        "attack": 4,
+        "normal": 0,
+        "unknown": 0
+      },
+      "scoring_manifest_sha256": "8acfeba6c7c2e88bd7c207661ecd4c7884a4cd32d59484a7ed3e12ff352e33aa",
+      "rebuild_verified": true
+    },
+    {
+      "case_id": "santos-dev-002",
+      "split": "development",
+      "class": "normal",
+      "scenario": "santos",
+      "time_from": "2022-01-16T07:30:00Z",
+      "time_to": "2022-01-16T07:40:00Z",
+      "counts": {
+        "selected": 8,
+        "attack": 0,
+        "normal": 8,
+        "unknown": 0
+      },
+      "scoring_manifest_sha256": "acaccab97674a3f2f463ec885a970d858dcd1aa2ee0f471582f0ad02a5aba81c",
+      "rebuild_verified": true
+    },
+    {
+      "case_id": "wheeler-dev-001",
+      "split": "development",
+      "class": "attack",
+      "scenario": "wheeler",
+      "time_from": "2022-01-30T07:56:46Z",
+      "time_to": "2022-01-30T07:56:50Z",
+      "counts": {
+        "selected": 19,
+        "attack": 4,
+        "normal": 15,
+        "unknown": 0
+      },
+      "scoring_manifest_sha256": "f19c0a78acb868cf83997b8172164fb1eafe413d9d868fdac0f56f10d61e049a",
+      "rebuild_verified": true
+    },
+    {
+      "case_id": "wheeler-dev-002",
+      "split": "development",
+      "class": "normal",
+      "scenario": "wheeler",
+      "time_from": "2022-01-29T05:30:00Z",
+      "time_to": "2022-01-29T05:40:00Z",
+      "counts": {
+        "selected": 8,
+        "attack": 0,
+        "normal": 8,
+        "unknown": 0
+      },
+      "scoring_manifest_sha256": "34a64d315ecd7db75abac582465a0a9a93ce96f5f0442fb3da59bf85941bcfab",
+      "rebuild_verified": true
+    },
+    {
+      "case_id": "wardbeck-val-001",
+      "split": "validation",
+      "class": "attack",
+      "scenario": "wardbeck",
+      "time_from": "2022-01-23T12:12:17Z",
+      "time_to": "2022-01-23T12:12:21Z",
+      "counts": {
+        "selected": 3,
+        "attack": 3,
+        "normal": 0,
+        "unknown": 0
+      },
+      "scoring_manifest_sha256": "bfe4748c204bfe0387fc9c7262d98e0b9401ada5df6191cea5db661832cd0199",
+      "rebuild_verified": true
+    },
+    {
+      "case_id": "wardbeck-val-002",
+      "split": "validation",
+      "class": "normal",
+      "scenario": "wardbeck",
+      "time_from": "2022-01-20T22:30:00Z",
+      "time_to": "2022-01-20T22:40:00Z",
+      "counts": {
+        "selected": 8,
+        "attack": 0,
+        "normal": 8,
+        "unknown": 0
+      },
+      "scoring_manifest_sha256": "ecfdae3d852cac2b059bc8afa13b1bb0789a0a0a9609af960c49a0fcde61387c",
+      "rebuild_verified": true
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "schema_version": 2,
+  "dataset_id": "ait-v2.1:wilson",
+  "scenario": "wilson",
+  "split": "test",
+  "sources": [
+    {
+      "relative_log_path": "intranet_server/logs/apache2/intranet.hallbrown.wilson.com-access.log.2",
+      "events": "../ait/scenarios/wilson/processed/agent/wilson-apache-events.jsonl",
+      "scored_gold": "../ait/scenarios/wilson/processed/gold/wilson-apache-scored-gold.jsonl",
+      "proof": "../ait/scenarios/wilson/processed/reports/wilson-apache-completeness.json"
+    }
+  ]
+}

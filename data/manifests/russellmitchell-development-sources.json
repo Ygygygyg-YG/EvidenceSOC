@@ -1,0 +1,26 @@
+{
+  "schema_version": 2,
+  "dataset_id": "ait-v2.1:russellmitchell",
+  "scenario": "russellmitchell",
+  "split": "development",
+  "sources": [
+    {
+      "relative_log_path": "intranet_server/logs/apache2/intranet.smith.russellmitchell.com-access.log.2",
+      "events": "../ait/scenarios/russellmitchell/processed/agent/russell-apache-events.jsonl",
+      "scored_gold": "../ait/scenarios/russellmitchell/processed/gold/russell-apache-scored-gold.jsonl",
+      "proof": "../ait/scenarios/russellmitchell/processed/reports/russell-apache-completeness.json"
+    },
+    {
+      "relative_log_path": "intranet_server/logs/audit/audit.log",
+      "events": "../ait/scenarios/russellmitchell/processed/agent/russell-intranet-audit-events.jsonl",
+      "scored_gold": "../ait/scenarios/russellmitchell/processed/gold/russell-intranet-audit-scored-gold.jsonl",
+      "proof": "../ait/scenarios/russellmitchell/processed/reports/russell-intranet-audit-completeness.json"
+    },
+    {
+      "relative_log_path": "inet-firewall/logs/dnsmasq.log",
+      "events": "../ait/scenarios/russellmitchell/processed/agent/russell-dnsmasq-events.jsonl",
+      "scored_gold": "../ait/scenarios/russellmitchell/processed/gold/russell-dnsmasq-scored-gold.jsonl",
+      "proof": "../ait/scenarios/russellmitchell/processed/reports/russell-dnsmasq-completeness.json"
+    }
+  ]
+}

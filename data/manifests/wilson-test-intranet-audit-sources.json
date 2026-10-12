@@ -1,0 +1,14 @@
+{
+  "schema_version": 2,
+  "dataset_id": "ait-v2.1:wilson",
+  "scenario": "wilson",
+  "split": "test",
+  "sources": [
+    {
+      "relative_log_path": "intranet_server/logs/audit/audit.log",
+      "events": "../ait/scenarios/wilson/processed/agent/wilson-intranet-audit-events.jsonl",
+      "scored_gold": "../ait/scenarios/wilson/processed/gold/wilson-intranet-audit-scored-gold.jsonl",
+      "proof": "../ait/scenarios/wilson/processed/reports/wilson-intranet-audit-completeness.json"
+    }
+  ]
+}

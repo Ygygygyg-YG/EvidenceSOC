@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "dataset_id": "ait-v2.1:fox",
+  "scenario": "fox",
+  "split": "development",
+  "sources": [
+    {
+      "relative_log_path": "intranet_server/logs/apache2/intranet.price.fox.org-access.log.2",
+      "events": "../ait/processed/agent/fox-apache-events.jsonl",
+      "scored_gold": "../ait/processed/gold/fox-apache-scored-gold.jsonl",
+      "proof": "../ait/processed/reports/fox-apache-completeness.json"
+    },
+    {
+      "relative_log_path": "intranet_server/logs/audit/audit.log",
+      "events": "../ait/processed/agent/fox-intranet-audit-events.jsonl",
+      "scored_gold": "../ait/processed/gold/fox-intranet-audit-scored-gold.jsonl",
+      "proof": "../ait/processed/reports/fox-intranet-audit-completeness.json"
+    },
+    {
+      "relative_log_path": "inet-firewall/logs/dnsmasq.log",
+      "events": "../ait/processed/agent/fox-dnsmasq-events.jsonl",
+      "scored_gold": "../ait/processed/gold/fox-dnsmasq-scored-gold.jsonl",
+      "proof": "../ait/processed/reports/fox-dnsmasq-completeness.json"
+    }
+  ]
+}

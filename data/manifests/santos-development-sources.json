@@ -1,0 +1,26 @@
+{
+  "schema_version": 2,
+  "dataset_id": "ait-v2.1:santos",
+  "scenario": "santos",
+  "split": "development",
+  "sources": [
+    {
+      "relative_log_path": "intranet_server/logs/apache2/intranet.smith.santos.com-access.log",
+      "events": "../ait/scenarios/santos/processed/agent/santos-apache-events.jsonl",
+      "scored_gold": "../ait/scenarios/santos/processed/gold/santos-apache-scored-gold.jsonl",
+      "proof": "../ait/scenarios/santos/processed/reports/santos-apache-completeness.json"
+    },
+    {
+      "relative_log_path": "intranet_server/logs/audit/audit.log",
+      "events": "../ait/scenarios/santos/processed/agent/santos-intranet-audit-events.jsonl",
+      "scored_gold": "../ait/scenarios/santos/processed/gold/santos-intranet-audit-scored-gold.jsonl",
+      "proof": "../ait/scenarios/santos/processed/reports/santos-intranet-audit-completeness.json"
+    },
+    {
+      "relative_log_path": "inet-firewall/logs/dnsmasq.log",
+      "events": "../ait/scenarios/santos/processed/agent/santos-dnsmasq-events.jsonl",
+      "scored_gold": "../ait/scenarios/santos/processed/gold/santos-dnsmasq-scored-gold.jsonl",
+      "proof": "../ait/scenarios/santos/processed/reports/santos-dnsmasq-completeness.json"
+    }
+  ]
+}

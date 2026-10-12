@@ -1,0 +1,26 @@
+{
+  "schema_version": 2,
+  "dataset_id": "ait-v2.1:harrison",
+  "scenario": "harrison",
+  "split": "development",
+  "sources": [
+    {
+      "relative_log_path": "intranet_server/logs/apache2/intranet.mannsmith.harrison.com-access.log.1",
+      "events": "../ait/scenarios/harrison/processed/agent/harrison-apache-events.jsonl",
+      "scored_gold": "../ait/scenarios/harrison/processed/gold/harrison-apache-scored-gold.jsonl",
+      "proof": "../ait/scenarios/harrison/processed/reports/harrison-apache-completeness.json"
+    },
+    {
+      "relative_log_path": "intranet_server/logs/audit/audit.log",
+      "events": "../ait/scenarios/harrison/processed/agent/harrison-intranet-audit-events.jsonl",
+      "scored_gold": "../ait/scenarios/harrison/processed/gold/harrison-intranet-audit-scored-gold.jsonl",
+      "proof": "../ait/scenarios/harrison/processed/reports/harrison-intranet-audit-completeness.json"
+    },
+    {
+      "relative_log_path": "inet-firewall/logs/dnsmasq.log",
+      "events": "../ait/scenarios/harrison/processed/agent/harrison-dnsmasq-events.jsonl",
+      "scored_gold": "../ait/scenarios/harrison/processed/gold/harrison-dnsmasq-scored-gold.jsonl",
+      "proof": "../ait/scenarios/harrison/processed/reports/harrison-dnsmasq-completeness.json"
+    }
+  ]
+}

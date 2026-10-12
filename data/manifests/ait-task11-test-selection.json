@@ -1,0 +1,562 @@
+{
+  "schema_version": 1,
+  "selection": "one bounded window per reviewed attack phase; separated 10-minute normal windows with no attack in any of the scenario's three reviewed sources",
+  "split": "test",
+  "scenario_groups": [
+    "shaw",
+    "wilson"
+  ],
+  "same_scenario_windows_correlated": true,
+  "target": {
+    "attack": 24,
+    "normal": 24,
+    "ablation_attack": 12,
+    "ablation_normal": 12
+  },
+  "actual": {
+    "attack": 11,
+    "normal": 11,
+    "N": 22,
+    "M": 22
+  },
+  "shortfall_reason": "The two fixed AIT test scenarios have only a few distinct attack phases; slicing dense scans into extra windows would create correlated duplicates.",
+  "ablation_case_ids": [
+    "shaw-test-attack-dns-recon",
+    "shaw-test-attack-privilege-escalation",
+    "shaw-test-attack-remote-command",
+    "shaw-test-attack-web-recon",
+    "shaw-test-attack-webshell-upload",
+    "wilson-test-attack-dns-exfiltration",
+    "wilson-test-attack-dns-recon",
+    "wilson-test-attack-privilege-escalation",
+    "wilson-test-attack-remote-command",
+    "wilson-test-attack-web-recon",
+    "wilson-test-attack-webshell-upload",
+    "shaw-test-normal-apache-early",
+    "shaw-test-normal-apache-late",
+    "shaw-test-normal-audit-early",
+    "shaw-test-normal-audit-late",
+    "shaw-test-normal-dnsmasq-early",
+    "wilson-test-normal-apache-early",
+    "wilson-test-normal-apache-late",
+    "wilson-test-normal-audit-early",
+    "wilson-test-normal-audit-late",
+    "wilson-test-normal-dnsmasq-early",
+    "wilson-test-normal-dnsmasq-late"
+  ],
+  "cases": [
+    {
+      "case_id": "shaw-test-attack-dns-recon",
+      "scenario": "shaw",
+      "class": "attack",
+      "phase": "dns-recon",
+      "profiles": [
+        "dnsmasq"
+      ],
+      "time_from": "2022-01-29T14:37:12Z",
+      "time_to": "2022-01-29T14:37:22Z",
+      "expected_count": {
+        "attack": 418,
+        "normal": 4
+      },
+      "actual_count": {
+        "selected": 422,
+        "attack": 418,
+        "normal": 4,
+        "unknown": 0
+      },
+      "scoring_manifest_sha256": "43567f0259ef0096b4c1da438115fe5accb5abeee4f1b304b1a954a8734e5b16",
+      "agent_manifest_sha256": "9d1c04b7f458ad654f6302fe77a1b7b76e064662bc4490127ae7d9028ed42842",
+      "rebuild_verified": true
+    },
+    {
+      "case_id": "shaw-test-attack-privilege-escalation",
+      "scenario": "shaw",
+      "class": "attack",
+      "phase": "privilege-escalation",
+      "profiles": [
+        "apache",
+        "intranet-audit",
+        "dnsmasq"
+      ],
+      "time_from": "2022-01-29T15:20:51Z",
+      "time_to": "2022-01-29T15:21:16Z",
+      "expected_count": {
+        "attack": 19,
+        "normal": 28
+      },
+      "actual_count": {
+        "selected": 47,
+        "attack": 19,
+        "normal": 28,
+        "unknown": 0
+      },
+      "scoring_manifest_sha256": "19219ffb54ef695fc98552fc1137d476671f0b8cb0a5e335ad9288f584e78a77",
+      "agent_manifest_sha256": "1bf9c31663ca3a52a4afde6f823a5274c247a44847dce7c5c8964e488ee019f2",
+      "rebuild_verified": true
+    },
+    {
+      "case_id": "shaw-test-attack-remote-command",
+      "scenario": "shaw",
+      "class": "attack",
+      "phase": "remote-command",
+      "profiles": [
+        "apache"
+      ],
+      "time_from": "2022-01-29T14:39:52Z",
+      "time_to": "2022-01-29T14:39:57Z",
+      "expected_count": {
+        "attack": 3
+      },
+      "actual_count": {
+        "selected": 3,
+        "attack": 3,
+        "normal": 0,
+        "unknown": 0
+      },
+      "scoring_manifest_sha256": "9bff784482bfb793d29b2d0e52c6c913f0c7d79072e71527cf3c9fa6a306e9d5",
+      "agent_manifest_sha256": "9a524064e0f6537708dfba5a2a47e22eac065b3a414afd201b57ad8305aa0ec4",
+      "rebuild_verified": true
+    },
+    {
+      "case_id": "shaw-test-attack-web-recon",
+      "scenario": "shaw",
+      "class": "attack",
+      "phase": "web-recon",
+      "profiles": [
+        "apache"
+      ],
+      "time_from": "2022-01-29T14:39:15Z",
+      "time_to": "2022-01-29T14:39:25Z",
+      "expected_count": {
+        "attack": 3735
+      },
+      "actual_count": {
+        "selected": 3735,
+        "attack": 3735,
+        "normal": 0,
+        "unknown": 0
+      },
+      "scoring_manifest_sha256": "4b500d179e33c0b965999fe7bc4109fc43b00104b46115a2ee2f77920396e69e",
+      "agent_manifest_sha256": "a996769a03ed36100dd5b093313baeb7ee0aeb4c65ee7eb47fa8b7d83cb0791e",
+      "rebuild_verified": true
+    },
+    {
+      "case_id": "shaw-test-attack-webshell-upload",
+      "scenario": "shaw",
+      "class": "attack",
+      "phase": "webshell-upload",
+      "profiles": [
+        "apache"
+      ],
+      "time_from": "2022-01-29T14:39:39Z",
+      "time_to": "2022-01-29T14:39:43Z",
+      "expected_count": {
+        "attack": 3
+      },
+      "actual_count": {
+        "selected": 3,
+        "attack": 3,
+        "normal": 0,
+        "unknown": 0
+      },
+      "scoring_manifest_sha256": "4e2744f5637acc0a93552c7e2314e50993ad60372e428dfb24cd81413ce2a117",
+      "agent_manifest_sha256": "1e6fc4e1d5b8d091e626fc7f83b82218260e693de3c7d5121cfef42e3420bfda",
+      "rebuild_verified": true
+    },
+    {
+      "case_id": "shaw-test-normal-apache-early",
+      "scenario": "shaw",
+      "class": "normal",
+      "phase": "apache-background-early",
+      "profiles": [
+        "apache"
+      ],
+      "time_from": "2022-01-29T06:40:00Z",
+      "time_to": "2022-01-29T06:50:00Z",
+      "expected_count": {
+        "normal": 9
+      },
+      "actual_count": {
+        "selected": 9,
+        "attack": 0,
+        "normal": 9,
+        "unknown": 0
+      },
+      "scoring_manifest_sha256": "ff6fe999a357c937c4403f2ac9837f24bd5ecaf897acbdbb85bb6ebe44966cd6",
+      "agent_manifest_sha256": "9a8e2bd92b1af52f179b7bbbe7b6947825ffca88b71accda5cc0c2666a0cdf62",
+      "rebuild_verified": true
+    },
+    {
+      "case_id": "shaw-test-normal-apache-late",
+      "scenario": "shaw",
+      "class": "normal",
+      "phase": "apache-background-late",
+      "profiles": [
+        "apache"
+      ],
+      "time_from": "2022-01-30T06:20:00Z",
+      "time_to": "2022-01-30T06:30:00Z",
+      "expected_count": {
+        "normal": 19
+      },
+      "actual_count": {
+        "selected": 19,
+        "attack": 0,
+        "normal": 19,
+        "unknown": 0
+      },
+      "scoring_manifest_sha256": "9826d334be420c8b35e703742df4ad075cc5112b89ab8393b0ffd4348d5bd285",
+      "agent_manifest_sha256": "4be96ef7797741f7337c9a4293198ce2ffb6c433bc41917b1226bd9849d8e313",
+      "rebuild_verified": true
+    },
+    {
+      "case_id": "shaw-test-normal-audit-early",
+      "scenario": "shaw",
+      "class": "normal",
+      "phase": "intranet-audit-background-early",
+      "profiles": [
+        "intranet-audit"
+      ],
+      "time_from": "2022-01-25T00:00:00Z",
+      "time_to": "2022-01-25T00:10:00Z",
+      "expected_count": {
+        "normal": 8
+      },
+      "actual_count": {
+        "selected": 8,
+        "attack": 0,
+        "normal": 8,
+        "unknown": 0
+      },
+      "scoring_manifest_sha256": "6ba91c3614189a785c6f0070449016ffc1617e436120262f6514a349766b3c80",
+      "agent_manifest_sha256": "fc066dc975b2e95196a5c443e824d4ca5456ed52e6198657120cc2c0f6730b6f",
+      "rebuild_verified": true
+    },
+    {
+      "case_id": "shaw-test-normal-audit-late",
+      "scenario": "shaw",
+      "class": "normal",
+      "phase": "intranet-audit-background-late",
+      "profiles": [
+        "intranet-audit"
+      ],
+      "time_from": "2022-01-30T23:30:00Z",
+      "time_to": "2022-01-30T23:40:00Z",
+      "expected_count": {
+        "normal": 8
+      },
+      "actual_count": {
+        "selected": 8,
+        "attack": 0,
+        "normal": 8,
+        "unknown": 0
+      },
+      "scoring_manifest_sha256": "b980525bc9b2584c8254667104a21b9c8bff297dc36edb4925eef7be7f4e6983",
+      "agent_manifest_sha256": "1bb2293a2f48d10f80206e2f5752073cb22515d52a87038f37e8302ec2049bd9",
+      "rebuild_verified": true
+    },
+    {
+      "case_id": "shaw-test-normal-dnsmasq-early",
+      "scenario": "shaw",
+      "class": "normal",
+      "phase": "dnsmasq-background-early",
+      "profiles": [
+        "dnsmasq"
+      ],
+      "time_from": "2022-01-25T02:00:00Z",
+      "time_to": "2022-01-25T02:10:00Z",
+      "expected_count": {
+        "normal": 56
+      },
+      "actual_count": {
+        "selected": 56,
+        "attack": 0,
+        "normal": 56,
+        "unknown": 0
+      },
+      "scoring_manifest_sha256": "ab1a1e5fb341418966a6bc119c33158836f21ecf4dd1a32266006d1414f67797",
+      "agent_manifest_sha256": "28ac9f5af69748d02124690b08d5d39f6cdf848238df7c23437a80601a3e1ac1",
+      "rebuild_verified": true
+    },
+    {
+      "case_id": "wilson-test-attack-dns-exfiltration",
+      "scenario": "wilson",
+      "class": "attack",
+      "phase": "dns-exfiltration",
+      "profiles": [
+        "dnsmasq"
+      ],
+      "time_from": "2022-02-03T02:26:55Z",
+      "time_to": "2022-02-03T02:27:05Z",
+      "expected_count": {
+        "attack": 6
+      },
+      "actual_count": {
+        "selected": 6,
+        "attack": 6,
+        "normal": 0,
+        "unknown": 0
+      },
+      "scoring_manifest_sha256": "0bb5f9caa8ca934752782e6d12dc711cc1ce4112d1fe4bd5fea4b9348b280d51",
+      "agent_manifest_sha256": "8980ad56f29bfad1c3504cfdce3b17382b7af05f7da1096b13b29d9c7dab6ac5",
+      "rebuild_verified": true
+    },
+    {
+      "case_id": "wilson-test-attack-dns-recon",
+      "scenario": "wilson",
+      "class": "attack",
+      "phase": "dns-recon",
+      "profiles": [
+        "dnsmasq"
+      ],
+      "time_from": "2022-02-07T10:58:19Z",
+      "time_to": "2022-02-07T10:58:29Z",
+      "expected_count": {
+        "attack": 407
+      },
+      "actual_count": {
+        "selected": 407,
+        "attack": 407,
+        "normal": 0,
+        "unknown": 0
+      },
+      "scoring_manifest_sha256": "402d3219c5cdf35d11c5c048655b9662f9757611c669354666e12abe6de08e0e",
+      "agent_manifest_sha256": "67b3849113a9c19d84fc4fa448ac3ea4413a84af42eefae1083bc438ee8bf997",
+      "rebuild_verified": true
+    },
+    {
+      "case_id": "wilson-test-attack-privilege-escalation",
+      "scenario": "wilson",
+      "class": "attack",
+      "phase": "privilege-escalation",
+      "profiles": [
+        "apache",
+        "intranet-audit",
+        "dnsmasq"
+      ],
+      "time_from": "2022-02-07T11:48:39Z",
+      "time_to": "2022-02-07T11:49:04Z",
+      "expected_count": {
+        "normal": 8,
+        "attack": 13
+      },
+      "actual_count": {
+        "selected": 21,
+        "attack": 13,
+        "normal": 8,
+        "unknown": 0
+      },
+      "scoring_manifest_sha256": "6a21dcd452affce47a046ced85264d8e0d049425d1f62cce7b15a34f18d5d307",
+      "agent_manifest_sha256": "f8d4dacdf8911b9c8d4a9566c47e8c47fef1a816c3ed3c68efa07a722507b646",
+      "rebuild_verified": true
+    },
+    {
+      "case_id": "wilson-test-attack-remote-command",
+      "scenario": "wilson",
+      "class": "attack",
+      "phase": "remote-command",
+      "profiles": [
+        "apache"
+      ],
+      "time_from": "2022-02-07T11:20:31Z",
+      "time_to": "2022-02-07T11:20:36Z",
+      "expected_count": {
+        "attack": 3
+      },
+      "actual_count": {
+        "selected": 3,
+        "attack": 3,
+        "normal": 0,
+        "unknown": 0
+      },
+      "scoring_manifest_sha256": "fe1403249380ffb19a7a0cf18d5e2f8754c854ed18682e755d952f7a7790e201",
+      "agent_manifest_sha256": "ae0796b090f4888f99c4a9672be75fbb61a52a9371cb47bae79bfce060bf9f47",
+      "rebuild_verified": true
+    },
+    {
+      "case_id": "wilson-test-attack-web-recon",
+      "scenario": "wilson",
+      "class": "attack",
+      "phase": "web-recon",
+      "profiles": [
+        "apache"
+      ],
+      "time_from": "2022-02-07T11:05:10Z",
+      "time_to": "2022-02-07T11:05:20Z",
+      "expected_count": {
+        "attack": 4083
+      },
+      "actual_count": {
+        "selected": 4083,
+        "attack": 4083,
+        "normal": 0,
+        "unknown": 0
+      },
+      "scoring_manifest_sha256": "8fde014e2eada19a175961671c0efcb684df6768ef0e13400813d81ae74c5609",
+      "agent_manifest_sha256": "ccebb4653486785256739594a555aad68cd4da46e671a75868acf5356a7b3a79",
+      "rebuild_verified": true
+    },
+    {
+      "case_id": "wilson-test-attack-webshell-upload",
+      "scenario": "wilson",
+      "class": "attack",
+      "phase": "webshell-upload",
+      "profiles": [
+        "apache"
+      ],
+      "time_from": "2022-02-07T11:20:27Z",
+      "time_to": "2022-02-07T11:20:31Z",
+      "expected_count": {
+        "attack": 3
+      },
+      "actual_count": {
+        "selected": 3,
+        "attack": 3,
+        "normal": 0,
+        "unknown": 0
+      },
+      "scoring_manifest_sha256": "2d27eb63cec00658a6e173ee8d4e9a22b365b9abb89dbf8a24e49d413a430cf5",
+      "agent_manifest_sha256": "11255440a33736a37240b8022efec8684ef08c9334ccd51d3121e7ad629cfaf6",
+      "rebuild_verified": true
+    },
+    {
+      "case_id": "wilson-test-normal-apache-early",
+      "scenario": "wilson",
+      "class": "normal",
+      "phase": "apache-background-early",
+      "profiles": [
+        "apache"
+      ],
+      "time_from": "2022-02-07T06:30:00Z",
+      "time_to": "2022-02-07T06:40:00Z",
+      "expected_count": {
+        "normal": 18
+      },
+      "actual_count": {
+        "selected": 18,
+        "attack": 0,
+        "normal": 18,
+        "unknown": 0
+      },
+      "scoring_manifest_sha256": "343fca986aca861f4daa27a96947a2330f1984c53306a4cb7e687acde5de64d4",
+      "agent_manifest_sha256": "cb2a0079e7636ed0fba97711ddaf1cb08b1dc7dafea6d250c752ad4438d7844b",
+      "rebuild_verified": true
+    },
+    {
+      "case_id": "wilson-test-normal-apache-late",
+      "scenario": "wilson",
+      "class": "normal",
+      "phase": "apache-background-late",
+      "profiles": [
+        "apache"
+      ],
+      "time_from": "2022-02-07T22:50:00Z",
+      "time_to": "2022-02-07T23:00:00Z",
+      "expected_count": {
+        "normal": 14
+      },
+      "actual_count": {
+        "selected": 14,
+        "attack": 0,
+        "normal": 14,
+        "unknown": 0
+      },
+      "scoring_manifest_sha256": "e2b6b4208782e4b47c0f417c292e1dcea7d7da1a7abb1a5e4ee2451fe3ae4ae4",
+      "agent_manifest_sha256": "068d387a76d9b75d2d90581275c42b9b5f2aa132a187f7026cd66fb9f96e1031",
+      "rebuild_verified": true
+    },
+    {
+      "case_id": "wilson-test-normal-audit-early",
+      "scenario": "wilson",
+      "class": "normal",
+      "phase": "intranet-audit-background-early",
+      "profiles": [
+        "intranet-audit"
+      ],
+      "time_from": "2022-02-06T11:00:00Z",
+      "time_to": "2022-02-06T11:10:00Z",
+      "expected_count": {
+        "normal": 8
+      },
+      "actual_count": {
+        "selected": 8,
+        "attack": 0,
+        "normal": 8,
+        "unknown": 0
+      },
+      "scoring_manifest_sha256": "d17fd6f0c5e25c422e003beb49d2d07ab998b4fd6c72165bcf6366dd070ca8c5",
+      "agent_manifest_sha256": "004bf10114a2e28e875f82508f9c35f3c7eb4c719a39fba0e8cdbeced18911ca",
+      "rebuild_verified": true
+    },
+    {
+      "case_id": "wilson-test-normal-audit-late",
+      "scenario": "wilson",
+      "class": "normal",
+      "phase": "intranet-audit-background-late",
+      "profiles": [
+        "intranet-audit"
+      ],
+      "time_from": "2022-02-08T23:30:00Z",
+      "time_to": "2022-02-08T23:40:00Z",
+      "expected_count": {
+        "normal": 10
+      },
+      "actual_count": {
+        "selected": 10,
+        "attack": 0,
+        "normal": 10,
+        "unknown": 0
+      },
+      "scoring_manifest_sha256": "d588942c783fdde6f289fb6007bfe030a6f1bb41d4e805330bb73d3de4986210",
+      "agent_manifest_sha256": "714b9e86fef2044d4d1ab4d2b3d5d0aeb0cb52ab26b220ab07429301556dd918",
+      "rebuild_verified": true
+    },
+    {
+      "case_id": "wilson-test-normal-dnsmasq-early",
+      "scenario": "wilson",
+      "class": "normal",
+      "phase": "dnsmasq-background-early",
+      "profiles": [
+        "dnsmasq"
+      ],
+      "time_from": "2022-02-06T13:00:00Z",
+      "time_to": "2022-02-06T13:10:00Z",
+      "expected_count": {
+        "normal": 746
+      },
+      "actual_count": {
+        "selected": 746,
+        "attack": 0,
+        "normal": 746,
+        "unknown": 0
+      },
+      "scoring_manifest_sha256": "ecf7e87c8cdfa705073ff4040e6d9574f43d088bb0157ca90a227caf3de84fe4",
+      "agent_manifest_sha256": "8c2c8578469ed10bf4934e74490d95c6a4190d6ef202e0500f4e6a6fb9039af8",
+      "rebuild_verified": true
+    },
+    {
+      "case_id": "wilson-test-normal-dnsmasq-late",
+      "scenario": "wilson",
+      "class": "normal",
+      "phase": "dnsmasq-background-late",
+      "profiles": [
+        "dnsmasq"
+      ],
+      "time_from": "2022-02-08T21:30:00Z",
+      "time_to": "2022-02-08T21:40:00Z",
+      "expected_count": {
+        "normal": 110
+      },
+      "actual_count": {
+        "selected": 110,
+        "attack": 0,
+        "normal": 110,
+        "unknown": 0
+      },
+      "scoring_manifest_sha256": "816cf25c3e5932962786f6647db0370ed4f0f1873bca89687cebe0365fa646b8",
+      "agent_manifest_sha256": "d0203ef11cc63671baf9d74d3a06e6c7d0d3bd077555158c0cecc17f3aa80bd8",
+      "rebuild_verified": true
+    }
+  ]
+}

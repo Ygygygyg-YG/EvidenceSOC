@@ -1,0 +1,11 @@
+﻿{
+  "development": [
+    "fox",
+    "harrison",
+    "russellmitchell",
+    "santos",
+    "wheeler"
+  ],
+  "validation": ["wardbeck"],
+  "test": ["shaw", "wilson"]
+}

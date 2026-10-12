@@ -1,0 +1,26 @@
+{
+  "schema_version": 2,
+  "dataset_id": "ait-v2.1:wheeler",
+  "scenario": "wheeler",
+  "split": "development",
+  "sources": [
+    {
+      "relative_log_path": "intranet_server/logs/apache2/intranet.flores.wheeler.biz-access.log.1",
+      "events": "../ait/scenarios/wheeler/processed/agent/wheeler-apache-events.jsonl",
+      "scored_gold": "../ait/scenarios/wheeler/processed/gold/wheeler-apache-scored-gold.jsonl",
+      "proof": "../ait/scenarios/wheeler/processed/reports/wheeler-apache-completeness.json"
+    },
+    {
+      "relative_log_path": "intranet_server/logs/audit/audit.log",
+      "events": "../ait/scenarios/wheeler/processed/agent/wheeler-intranet-audit-events.jsonl",
+      "scored_gold": "../ait/scenarios/wheeler/processed/gold/wheeler-intranet-audit-scored-gold.jsonl",
+      "proof": "../ait/scenarios/wheeler/processed/reports/wheeler-intranet-audit-completeness.json"
+    },
+    {
+      "relative_log_path": "inet-firewall/logs/dnsmasq.log",
+      "events": "../ait/scenarios/wheeler/processed/agent/wheeler-dnsmasq-events.jsonl",
+      "scored_gold": "../ait/scenarios/wheeler/processed/gold/wheeler-dnsmasq-scored-gold.jsonl",
+      "proof": "../ait/scenarios/wheeler/processed/reports/wheeler-dnsmasq-completeness.json"
+    }
+  ]
+}
