@@ -517,6 +517,17 @@ class InvestigationWorkflow:
                     "simulation_execution": None,
                     "fallback_count": 0,
                     "fallback_used": False,
+                    "collection_round": 0,
+                    "collection_budget_used": 0,
+                    "collection_round_used": 0,
+                    "collection_ledger_ids": [],
+                    "collection_tool_attempts": 0,
+                    "collection_model_attempts": 0,
+                    "collection_observations": [],
+                    "collection_stop_reason": None,
+                    "verification_call_count": 0,
+                    "verification_attempts": 0,
+                    "verification_duration_ms": 0,
                     "errors": [],
                     "events": [],
                     "stop_reason": None,
@@ -586,7 +597,7 @@ class InvestigationWorkflow:
                 != response_plan_id
             ):
                 raise ValueError("investigation has no matching pending plan")
-            command = Command(
+            command: Command[str] = Command(
                 resume={
                     "renewal": {
                         "response_plan_id": response_plan_id,
@@ -695,6 +706,7 @@ async def open_workflow(settings: Settings | None = None):
                 if settings.llm_mode == "deepseek"
                 else None
             )
+            services.planner_model = model
             yield InvestigationWorkflow(
                 services=services,
                 settings=settings,

@@ -3,8 +3,6 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from sqlalchemy import delete
-
 from evidencesoc.config import Settings
 from evidencesoc.ids import new_ulid
 from evidencesoc.persistence.database import (
@@ -14,6 +12,7 @@ from evidencesoc.persistence.database import (
 from evidencesoc.persistence.tables import KnowledgeChunkTable
 from evidencesoc.rag.ingest_attack import PINNED_STIX_SHA256
 from evidencesoc.rag.retriever import PostgresKnowledgeRepository
+from sqlalchemy import delete
 
 
 @contextmanager

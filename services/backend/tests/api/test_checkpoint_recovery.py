@@ -2,12 +2,11 @@ import asyncio
 import os
 
 import pytest
-from langgraph.graph import END, START, StateGraph
-from psycopg import Connection
-
 from evidencesoc.agents.checkpoint import open_checkpointer, psycopg_url
 from evidencesoc.config import Settings
 from evidencesoc.ids import new_ulid
+from langgraph.graph import END, START, StateGraph
+from psycopg import Connection
 
 
 @pytest.mark.skipif(

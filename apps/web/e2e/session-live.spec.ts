@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-test('同源会话代理签发 HttpOnly 演示 cookie，并由真实后端确认身份', async ({ page }) => {
+test('同源会话代理签发 HttpOnly 演示 cookie，并由真实后端确认身份', async ({ page, baseURL }) => {
   let loginHeaders: Record<string, string> = {};
   await page.route('**/api/v1/session/demo', async (route) => {
     loginHeaders = route.request().headers();
@@ -28,7 +28,7 @@ test('同源会话代理签发 HttpOnly 演示 cookie，并由真实后端确认
     actor_id: 'demo-reviewer', role: 'reviewer', allowed_actions: ['approve', 'reject'],
   });
   expect(result.decisionStatus, JSON.stringify(result.decisionError)).toBe(404);
-  const cookies = await page.context().cookies('http://127.0.0.1:3000');
+  const cookies = await page.context().cookies(baseURL!);
   expect(cookies).toEqual(expect.arrayContaining([expect.objectContaining({
     name: 'evidencesoc_demo_session', httpOnly: true, sameSite: 'Strict', path: '/',
   })]));

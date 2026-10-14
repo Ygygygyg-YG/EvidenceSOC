@@ -667,6 +667,114 @@ def test_investigation_snapshot_uses_persisted_current_incident_records(
         store.get_investigation_snapshot("IV-missing-private")
 
 
+@pytest.mark.parametrize(
+    ("raw_events", "corrupt", "expected_host", "expected_service"),
+    [
+        (
+            [{"host": "step-host", "service": "checkout-api"}],
+            False,
+            "step-host",
+            "checkout-api",
+        ),
+        (
+            [{"hostname": "alias-host", "service": "nginx"}],
+            False,
+            "alias-host",
+            "nginx",
+        ),
+        (
+            [{"host": "one", "service": "api"}, {"host": "two", "service": "api"}],
+            False,
+            None,
+            "api",
+        ),
+        ([{"host": "step-host", "service": "checkout-api"}], True, None, None),
+        ([{}], False, None, None),
+    ],
+)
+def test_attack_graph_projects_entities_only_from_verified_step_citations(
+    database: Any,
+    raw_events: list[dict[str, str]],
+    corrupt: bool,
+    expected_host: str | None,
+    expected_service: str | None,
+) -> None:
+    store, sessions = database
+    alert, _ = store.ingest_alert(PAYLOAD, None)
+    investigation, _ = store.create_investigation(
+        alert_id=alert["alert_id"], incident_id=None
+    )
+    incident_id = investigation["incident_id"]
+    citations = []
+    with sessions.begin() as session:
+        for index, raw in enumerate(raw_events, start=1):
+            event_id = f"SE-{index}"
+            event_row = session.get(SecurityEventTable, event_id)
+            digest = calculate_content_sha256(raw)
+            if event_row is None:
+                event_row = SecurityEventTable(
+                    event_id=event_id,
+                    source="nginx",
+                    external_id=str(index),
+                    deduplication_key=f"id:{index}",
+                    observed_at=NOW,
+                    ingested_at=NOW,
+                    severity="high",
+                    event_type="web.request",
+                    index_status="indexed",
+                    raw=raw,
+                    content_sha256=digest,
+                )
+                session.add(event_row)
+            else:
+                event_row.raw = raw
+                event_row.content_sha256 = digest
+            evidence_id = "EV-" + str(index) * 26
+            citations.append(evidence_id)
+            session.add(
+                EvidenceItemTable(
+                    evidence_id=evidence_id,
+                    incident_id=incident_id,
+                    event_id=event_id,
+                    source="nginx",
+                    observed_at=NOW,
+                    query={"event_id": event_id},
+                    summary="Cited step observation",
+                    content_sha256="a" * 64 if corrupt else digest,
+                )
+            )
+        session.add(
+            AttackStepTable(
+                attack_step_id="AS-cited",
+                incident_id=incident_id,
+                sequence=1,
+                phase="initial_access",
+                technique_id="T1190",
+                description="Observed request",
+                occurred_at=NOW,
+                evidence_ids=citations,
+            )
+        )
+    store.save_state(
+        investigation["investigation_id"],
+        {
+            "origin": {
+                "entry_host": "unrelated-origin",
+                "entry_service": "unrelated-service",
+            },
+            "classification": {"confidence": 0.8},
+        },
+    )
+    snapshot = store.get_investigation_snapshot(investigation["investigation_id"])
+    node = snapshot["attack_graph"]["nodes"][0]
+    assert node["host"] == expected_host
+    assert node["service"] == expected_service
+    assert node["observed_at"] == NOW.isoformat()
+    assert node["phase"] == "initial_access"
+    assert node["confidence"] is None
+    assert snapshot["attack_graph"]["edges"] == []
+
+
 def test_investigation_snapshot_gates_decisions_and_sees_atomic_terminal_event(
     database: Any,
 ) -> None:

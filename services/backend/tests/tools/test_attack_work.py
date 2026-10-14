@@ -3,15 +3,14 @@ from __future__ import annotations
 from contextlib import nullcontext
 
 import pytest
-from sqlalchemy.dialects import postgresql
-from sqlalchemy.exc import OperationalError
-
 from evidencesoc.tools.attack_work import (
     AttackKnowledgeRepository,
     AttackLookupWork,
     _escape_like,
 )
 from evidencesoc.tools.errors import ToolDependencyError
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.exc import OperationalError
 
 
 def test_escape_like_quotes_wildcards_and_backslashes() -> None:
@@ -34,6 +33,21 @@ def test_attack_work_retries_operational_errors() -> None:
     with pytest.raises(ToolDependencyError, match="unavailable"):
         work(query="dns", limit=3)
     assert factory.calls == 3
+
+
+def test_managed_attack_lookup_has_no_hidden_retry() -> None:
+    class FailingFactory:
+        calls = 0
+
+        def __call__(self) -> object:
+            self.calls += 1
+            raise OperationalError("SELECT", {}, RuntimeError("temporary"))
+
+    factory = FailingFactory()
+    work = AttackLookupWork(session_factory=factory, max_attempts=1)  # type: ignore[arg-type]
+    with pytest.raises(ToolDependencyError):
+        work(query="dns", limit=3)
+    assert factory.calls == 1
 
 
 def test_repository_uses_bound_escaped_keyword_query() -> None:

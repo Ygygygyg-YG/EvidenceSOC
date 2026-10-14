@@ -34,9 +34,18 @@ class DeepSeekStructuredModel:
                 "attack_steps",
                 "response_plan",
                 "simulation",
+                "collection_context",
             )
             if key in state
         }
+        collection_instruction = (
+            "In collection, choose exactly one allowed read-only tool call or stop. "
+            "Use only the supplied incident scope, never other alerts, scenarios, indexes, "
+            "paths, labels, or attacker truth. Explain the evidence gap in rationale. "
+            "A failed or empty result is an observation; do not claim success from it."
+            if role == "collect"
+            else ""
+        )
         messages = [
             (
                 "system",
@@ -53,7 +62,8 @@ class DeepSeekStructuredModel:
                     "simulated action, target, parameters containing only that target, expected_effect, "
                     "risk, impact, preview, rollback, rollback_ref naming a plan rollback step, "
                     "verification_query, and evidence_ids drawn from the plan's observed incident "
-                    "evidence. Never cite evidence from another incident."
+                    "evidence. Never cite evidence from another incident. "
+                    + collection_instruction
                 ),
             ),
             ("human", json.dumps(context, ensure_ascii=False, default=str)),

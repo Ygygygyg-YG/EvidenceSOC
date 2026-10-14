@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from hashlib import sha256
 from typing import Any
 
 from sqlalchemy import Select, select, update
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from evidencesoc.domain.models import (
@@ -258,23 +261,58 @@ class EvidenceRepository:
         if not items:
             return []
 
-        values = [
-            {
-                "evidence_id": item.evidence_id,
-                "incident_id": incident_id,
-                "event_id": item.event_id,
-                "source": item.source,
-                "observed_at": item.observed_at,
-                "query": safe_json(item.query),
-                "summary": item.summary,
-                "content_sha256": item.content_sha256,
-            }
-            for item in items
-        ]
-        self._session.execute(insert(EvidenceItemTable).values(values))
+        values_by_query: dict[tuple[str, str], dict[str, Any]] = {}
+        keys: list[tuple[str, str]] = []
+        for item in items:
+            canonical_query = json.dumps(
+                item.query,
+                ensure_ascii=True,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            )
+            stored_query = safe_json(json.loads(canonical_query))
+            fingerprint = sha256(canonical_query.encode("utf-8")).hexdigest()
+            key = (item.event_id, fingerprint)
+            keys.append(key)
+            values_by_query.setdefault(
+                key,
+                {
+                    "evidence_id": item.evidence_id,
+                    "incident_id": incident_id,
+                    "event_id": item.event_id,
+                    "source": item.source,
+                    "observed_at": item.observed_at,
+                    "query": stored_query,
+                    "query_fingerprint": fingerprint,
+                    "summary": item.summary,
+                    "content_sha256": item.content_sha256,
+                },
+            )
+        dialect = self._session.get_bind().dialect.name
+        statement = (sqlite_insert if dialect == "sqlite" else insert)(
+            EvidenceItemTable
+        ).values(list(values_by_query.values()))
+        upsert_statement = statement.on_conflict_do_update(
+            index_elements=["incident_id", "event_id", "query_fingerprint"],
+            set_={"evidence_id": EvidenceItemTable.evidence_id},
+        ).returning(
+            EvidenceItemTable.event_id,
+            EvidenceItemTable.query_fingerprint,
+            EvidenceItemTable.evidence_id,
+        )
+        stored_ids = {
+            (row.event_id, row.query_fingerprint): row.evidence_id
+            for row in self._session.execute(upsert_statement).all()
+        }
+        if set(keys) != set(stored_ids):
+            raise RuntimeError("evidence upsert did not return every query")
         check_execution()
         self._session.commit()
-        return list(items)
+        return [
+            item.model_copy(update={"evidence_id": stored_ids[key]})
+            for item, key in zip(items, keys, strict=True)
+        ]
 
     def get(self, evidence_id: str) -> EvidenceItem:
         row = self._session.execute(

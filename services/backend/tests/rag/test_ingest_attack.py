@@ -9,10 +9,6 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
-from sqlalchemy import delete, func, select
-from sqlalchemy.dialects import postgresql
-from sqlalchemy.exc import StatementError
-
 from evidencesoc.config import Settings
 from evidencesoc.ids import new_ulid
 from evidencesoc.persistence.database import (
@@ -20,6 +16,9 @@ from evidencesoc.persistence.database import (
     create_session_factory,
 )
 from evidencesoc.persistence.tables import KnowledgeChunkTable
+from sqlalchemy import delete, func, select
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.exc import StatementError
 
 
 def ingestion_module() -> Any:

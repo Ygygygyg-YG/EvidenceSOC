@@ -21,6 +21,7 @@ from evidencesoc.domain.models import (
     ApprovalRecord,
     EvidenceItem,
     ResponsePlan,
+    ValidationCheckResult,
     ValidationOutcome,
     ValidationResult,
 )
@@ -211,8 +212,20 @@ class NodeHandlers:
 
     async def collect(self, state: dict[str, Any]) -> dict[str, Any]:
         result = await self.services.collect(state, state["_run_id"])
+        recovery_failed = result.get("collection_stop_reason") == "recovery_failed"
         return {
-            "status": "collecting",
+            "status": "manual_review" if recovery_failed else "collecting",
+            **(
+                {
+                    "stop_reason": "recovery_failed",
+                    "errors": [
+                        *state.get("errors", []),
+                        {"node": "collect", "code": "RECOVERY_FAILED"},
+                    ],
+                }
+                if recovery_failed
+                else {}
+            ),
             "evidence": merge_by_id(
                 state.get("evidence", []), result.get("evidence", []), "evidence_id"
             ),
@@ -221,6 +234,23 @@ class NodeHandlers:
                 result.get("knowledge", []),
                 "knowledge_chunk_id",
             ),
+            **{
+                key: result[key]
+                for key in (
+                    "collection_round",
+                    "collection_budget_used",
+                    "collection_round_used",
+                    "collection_ledger_ids",
+                    "collection_tool_attempts",
+                    "collection_model_attempts",
+                    "collection_observations",
+                    "collection_stop_reason",
+                )
+                if key in result
+            },
+            "fallback_used": bool(state.get("fallback_used"))
+            or bool(result.get("fallback_used"))
+            or self.settings.llm_mode == "fixture",
         }
 
     async def analyze(self, state: dict[str, Any]) -> dict[str, Any]:
@@ -289,6 +319,15 @@ class NodeHandlers:
             "evidence": merge_by_id(state.get("evidence", []), fresh, "evidence_id"),
             "fallback_used": self.settings.llm_mode == "fixture"
             or bool(state.get("fallback_used")),
+            **{
+                key: result[key]
+                for key in (
+                    "verification_call_count",
+                    "verification_attempts",
+                    "verification_duration_ms",
+                )
+                if key in result
+            },
         }
         if not fresh:
             previous = state.get("evidence", [])
@@ -311,11 +350,13 @@ class NodeHandlers:
                 time_from=time_from,
                 time_to=time_to,
                 checks=[
-                    {
-                        **check,
-                        "outcome": ValidationOutcome.INSUFFICIENT_EVIDENCE,
-                        "explanation": "The executed query returned no target evidence; the simulation effect remains unverified.",
-                    }
+                    ValidationCheckResult.model_validate(
+                        {
+                            **check,
+                            "outcome": ValidationOutcome.INSUFFICIENT_EVIDENCE,
+                            "explanation": "The executed query returned no target evidence; the simulation effect remains unverified.",
+                        }
+                    )
                     for check in executed_checks
                 ],
             )
@@ -438,7 +479,7 @@ class NodeHandlers:
             evidence_ids=[item["evidence_id"] for item in fresh],
             time_from=time_from,
             time_to=time_to,
-            checks=checks,
+            checks=[ValidationCheckResult.model_validate(check) for check in checks],
         )
         return {
             **delta,

@@ -6,10 +6,6 @@ from datetime import UTC, datetime
 from typing import Any, Self
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.exc import OperationalError
-from sqlalchemy.orm import Session, sessionmaker
-
 from evidencesoc.evidence.service import EvidenceIntegrityError
 from evidencesoc.tools.alert_work import AlertContextRepository, AlertContextWork
 from evidencesoc.tools.errors import (
@@ -17,6 +13,9 @@ from evidencesoc.tools.errors import (
     ToolDependencyTimeout,
     ToolNotFoundError,
 )
+from sqlalchemy import create_engine
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import Session, sessionmaker
 
 
 def _database() -> sessionmaker[Session]:
@@ -151,6 +150,23 @@ def test_work_retries_read_only_lookup_at_most_twice() -> None:
     ) == []
     assert repository.calls == 3
     assert evidence.calls == 0
+
+
+def test_managed_alert_lookup_has_no_hidden_retry() -> None:
+    repository = FlakyRepository()
+    work = AlertContextWork(
+        repository_factory=lambda: nullcontext(repository),
+        evidence_factory=lambda: EvidenceSpy(),
+        max_attempts=1,
+    )
+    with pytest.raises(ToolDependencyError):
+        work(
+            alert_id="AL-1",
+            before_seconds=300,
+            after_seconds=300,
+            incident_id="IN-1",
+        )
+    assert repository.calls == 1
 
 
 def test_work_stops_before_evidence_when_deadline_is_exhausted() -> None:

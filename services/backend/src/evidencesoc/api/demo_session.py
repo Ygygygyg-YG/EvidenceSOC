@@ -22,7 +22,7 @@ from evidencesoc.api.models import ERROR_RESPONSES, ErrorEnvelope
 from evidencesoc.config import Settings
 
 COOKIE_NAME = "evidencesoc_demo_session"
-ACTOR_ID = "demo-reviewer"
+ACTOR_ID: Literal["demo-reviewer"] = "demo-reviewer"
 SESSION_LIFETIME_SECONDS = 30 * 60
 
 

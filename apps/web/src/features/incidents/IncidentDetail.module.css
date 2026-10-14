@@ -48,18 +48,25 @@
 .graphCanvas :global(.react-flow__controls-button svg) { fill: var(--soc-text); }
 .graphCanvas :global(.react-flow__node) { border: 0; background: transparent; }
 .graphLoading { display: grid; place-items: center; height: 540px; color: var(--soc-text-secondary); background: var(--soc-canvas); }
-.graphStep { display: grid; gap: 8px; width: 240px; min-height: 128px; padding: 12px; border: 1px solid var(--soc-control-border); border-radius: 8px; background: var(--soc-surface); color: var(--soc-text); text-align: left; cursor: pointer; }
+.graphStep { display: grid; align-content: start; gap: 6px; width: 240px; height: 224px; padding: 12px; border: 1px solid var(--soc-control-border); border-radius: 8px; background: var(--soc-surface); color: var(--soc-text); text-align: left; cursor: pointer; }
+.graphStep[data-support-status='candidate'] { border-style: dashed; }
+.graphStep[data-support-status='insufficient'] { border-style: dotted; }
+.graphStep:focus-visible, .stageList button:focus-visible { outline: 2px solid var(--soc-primary); outline-offset: 3px; }
 .graphStep:hover, .graphStep[aria-pressed='true'] { border-color: var(--soc-primary); background: var(--soc-elevated); }
 .graphStepTop { display: flex; justify-content: space-between; gap: 4px; color: var(--soc-primary); font-size: 12px; }
 .graphStepTop span:last-child { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--soc-text-muted); }
 .graphStep strong { display: -webkit-box; overflow: hidden; -webkit-line-clamp: 2; -webkit-box-orient: vertical; font-size: 14px; line-height: 1.4; }
 .graphStepMeta, .graphStepHint { color: var(--soc-text-muted); font-size: 11px; }
+.graphStepEntities { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--soc-text-secondary); font-size: 11px; }
+.graphStepMeta { font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .graphStepHint { border-top: 1px solid var(--soc-border); padding-top: 5px; }
 .stageList { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--soc-border); }
 .stageList li + li { border-top: 1px solid var(--soc-border); }
 .stageList button { display: flex; align-items: center; gap: 14px; width: 100%; min-height: 84px; padding: 16px 20px; border: 0; background: transparent; color: var(--soc-text); text-align: left; cursor: pointer; }
 .stageList button:hover, .stageList button[aria-pressed='true'] { background: var(--soc-elevated); }
 .stageList button[aria-pressed='true'] { box-shadow: inset 3px 0 0 var(--soc-primary); }
+.stageList button[data-support-status='candidate'] { border-left: 2px dashed var(--soc-text-muted); }
+.stageList button[data-support-status='insufficient'] { border-left: 2px dotted var(--soc-text-muted); }
 .stageNumber { flex: none; color: var(--soc-primary); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 20px; }
 .stageBody { display: grid; gap: 5px; min-width: 0; flex: 1; }
 .stageBody strong { font-weight: 550; overflow-wrap: anywhere; }
@@ -67,6 +74,9 @@
 .inspector { height: min(900px, calc(100dvh - 120px)); min-height: 480px; display: flex; flex-direction: column; }
 .inspectorBody { min-height: 0; padding: 0 16px 20px; overflow: auto; }
 .inspectorContext { margin: 0; padding: 14px 4px 8px; color: var(--soc-text-muted); font-size: 12px; }
+.stepDetail { margin: 0 0 16px; padding: 12px; border: 1px solid var(--soc-border); border-radius: 6px; background: var(--soc-elevated); overflow-wrap: anywhere; }
+.stepDetail h3 { margin: 0 0 8px; font-size: 13px; }
+.stepDetail p { margin: 0 0 14px; color: var(--soc-text-secondary); font-size: 12px; }
 .evidenceList { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .evidenceList button, .missingEvidence { display: flex; align-items: start; gap: 10px; width: 100%; min-height: 52px; padding: 10px; border: 1px solid var(--soc-border); border-radius: 6px; background: var(--soc-elevated); color: var(--soc-text); text-align: left; overflow-wrap: anywhere; }
 .evidenceList button { cursor: pointer; }

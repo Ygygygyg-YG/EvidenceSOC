@@ -1,7 +1,7 @@
 import dagre from '@dagrejs/dagre';
 
 const NODE_WIDTH = 240;
-const NODE_HEIGHT = 128;
+const NODE_HEIGHT = 224;
 
 /** Sequence constrains placement only. The returned positions are not attack relationships. */
 export function layoutStepPositions(steps: readonly { attack_step_id: string; sequence: number }[]) {

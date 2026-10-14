@@ -3,7 +3,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-
 from evidencesoc.tools.attack import AttackTools
 from evidencesoc.tools.errors import ToolDependencyError
 from evidencesoc.tools.policy import PolicyDeniedError

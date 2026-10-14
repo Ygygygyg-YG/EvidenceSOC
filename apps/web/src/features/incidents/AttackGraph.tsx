@@ -9,6 +9,7 @@ import '@xyflow/react/dist/style.css';
 import type { IncidentSummary } from './incidentContract';
 import type { AttackGraphData } from './investigationSnapshotContract';
 import { layoutStepPositions } from './graphLayout';
+import { StepMetadata, stepDetails } from './attackStepDetails';
 import styles from './IncidentDetail.module.css';
 
 type AttackStep = IncidentSummary['attack_steps'][number];
@@ -21,18 +22,18 @@ type StepNode = Node<{
 
 function StepCard({ data }: NodeProps<StepNode>) {
   const { step, graphNode, selected, selectStep } = data;
-  const support = graphNode?.support_status === 'supported' ? '证据引用完整' :
-    graphNode?.support_status === 'candidate' ? '候选步骤' :
-      graphNode?.support_status === 'insufficient' ? '证据引用不足' : '支持状态未提供';
+  const details = stepDetails(step, graphNode);
   return (
     <button type="button" className={styles.graphStep} aria-pressed={selected}
+      data-support-status={graphNode?.support_status ?? 'unknown'}
       aria-label={`第 ${step.sequence} 步 ${step.description}`}
       onClick={() => selectStep(step.attack_step_id)}>
       <Handle type="target" position={Position.Left} isConnectable={false} style={{ opacity: 0 }} />
-      <span className={styles.graphStepTop}><span>第 {step.sequence} 步</span><span>{step.phase ?? '阶段未提供'}</span></span>
+      <span className={styles.graphStepTop}><span>第 {step.sequence} 步</span><span title={details.phase}>{details.phase}</span></span>
       <strong>{step.description}</strong>
-      <span className={styles.graphStepMeta}>{step.technique_id ?? '技术未提供'} · {step.evidence_ids.length} 条证据引用</span>
-      <span className={styles.graphStepHint}>{support}</span>
+      <StepMetadata step={step} node={graphNode} />
+      <span className={styles.graphStepMeta} title={details.techniques}>{details.techniques} · {step.evidence_ids.length} 条证据引用</span>
+      <span className={styles.graphStepHint}>{details.support}</span>
       <Handle type="source" position={Position.Right} isConnectable={false} style={{ opacity: 0 }} />
     </button>
   );

@@ -19,6 +19,7 @@ class OpenSearchIndexClient(Protocol):
 
 
 _TEMPLATE_SEARCH_FIELDS = (
+    "dataset_id",
     "source_ip",
     "destination_ip",
     "source_port",

@@ -7,12 +7,11 @@ from types import SimpleNamespace
 from typing import Self
 
 import pytest
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import Session, sessionmaker
-
 from evidencesoc.tools.audit import ToolCallRecord
 from evidencesoc.tools.policy import PolicyDeniedError
 from evidencesoc.tools.security_events import SecurityEventTools
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import Session, sessionmaker
 
 NOW = datetime(2026, 9, 21, 12, 0, tzinfo=UTC)
 

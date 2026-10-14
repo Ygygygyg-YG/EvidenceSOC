@@ -2,7 +2,6 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
-
 from evidencesoc.domain.models import EvidenceItem
 from evidencesoc.tools import security_events
 from evidencesoc.tools.policy import PolicyDeniedError

@@ -9,7 +9,11 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from evidencesoc.config import Settings
 from evidencesoc.domain.models import EvidenceItem
-from evidencesoc.mcp_server.context import RunContext, load_run_context
+from evidencesoc.mcp_server.context import (
+    RunContext,
+    load_run_context,
+    tool_attempt_limit,
+)
 from evidencesoc.mcp_server.restricted import RestrictedFastMCP
 from evidencesoc.persistence.database import (
     create_database_engine,
@@ -101,6 +105,7 @@ def build_server(
     context: RunContext,
     settings: Settings,
     session_factory: sessionmaker[Session],
+    max_attempts: int = 3,
 ) -> RestrictedFastMCP:
     validate_run_context(session_factory, context)
     audit = SqlAuditWriter(session_factory=session_factory)
@@ -108,6 +113,7 @@ def build_server(
         opensearch_url=settings.opensearch_url,
         index_name=settings.opensearch_index,
         session_factory=session_factory,
+        max_attempts=max_attempts,
     )
     event_tools = SecurityEventTools(
         context=context,
@@ -120,6 +126,7 @@ def build_server(
             opensearch_url=settings.opensearch_url,
             index_name=settings.opensearch_index,
             session_factory=session_factory,
+            max_attempts=max_attempts,
         ),
         audit=audit,
     )
@@ -128,6 +135,7 @@ def build_server(
         work=build_attack_lookup_work(
             session_factory=session_factory,
             model_path=settings.rag_data_directory / "model",
+            max_attempts=max_attempts,
         ),
         audit=audit,
     )
@@ -143,12 +151,15 @@ def build_server(
 def main() -> None:
     context = load_run_context(os.environ)
     settings = Settings()
-    engine = create_database_engine(settings.database_url, bounded_tool_connections=True)
+    engine = create_database_engine(
+        settings.database_url, bounded_tool_connections=True
+    )
     try:
         server = build_server(
             context=context,
             settings=settings,
             session_factory=create_session_factory(engine),
+            max_attempts=tool_attempt_limit(os.environ),
         )
         server.run(transport="stdio")
     finally:

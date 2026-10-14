@@ -5,7 +5,13 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from evidencesoc.domain.models import AttackClassification, AttackOrigin, ResponsePlan
+from evidencesoc.domain.models import (
+    AttackClassification,
+    AttackOrigin,
+    PlanRollbackStep,
+    PlanValidationCheck,
+    ResponsePlan,
+)
 from evidencesoc.domain.response_action import SimulatedAction
 
 
@@ -94,7 +100,11 @@ class ResponseOutput(BaseModel):
                     or rollbacks[action.rollback_ref].target != action.target
                 ):
                     raise ValueError("response action must cite its plan and rollback")
-            for step in (*plan.rollback_steps, *plan.validation_checks):
+            review_steps: list[PlanRollbackStep | PlanValidationCheck] = [
+                *plan.rollback_steps,
+                *plan.validation_checks,
+            ]
+            for step in review_steps:
                 if (
                     step.target not in targets
                     or not set(step.evidence_ids) <= citations

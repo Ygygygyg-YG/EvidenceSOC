@@ -176,6 +176,48 @@ test('一致性快照提供关系边时仅绘制后端关系并展示节点支�
   await expect(page.getByRole('region', { name: '攻击链' })).toContainText('后端关系');
 });
 
+test('攻击节点和阶段列表展示步骤自己的实体时间与置信度，选中后可查看完整事实', async ({ page }) => {
+  const snapshot = snapshotWithEdge('temporal');
+  const enriched = {
+    ...snapshot,
+    attack_graph: { ...snapshot.attack_graph, nodes: snapshot.attack_graph.nodes.map((node, index) => index === 0 ? {
+      ...node, host: 'step-host', service: 'step-service', confidence: 0.63, support_status: 'candidate',
+    } : node) },
+  };
+  await page.route('**/api/v1/investigations/IV-WORKBENCH', (route) => route.fulfill({ json: enriched }));
+  await page.setViewportSize({ width: 1920, height: 1000 });
+  await page.goto('/incidents/IN-WORKBENCH');
+  const step = page.getByRole('button', { name: /第 1 步.*外部应用访问异常/ });
+  await expect(step).toContainText('step-host / step-service');
+  await expect(step).toContainText('2026/09/21 18:20:24');
+  await expect(step).toContainText('步骤输出置信度 63%');
+  await expect(step).toContainText('候选步骤 · 待证实');
+  await expect(step).toHaveAttribute('data-support-status', 'candidate');
+  await step.click();
+  const inspector = page.getByRole('region', { name: '证据检查器' });
+  await expect(inspector).toContainText('步骤详情');
+  await expect(inspector).toContainText('step-host / step-service');
+  await expect(inspector).toContainText('计算依据未提供');
+  await expect(inspector).not.toContainText('edge-01');
+  await page.getByRole('button', { name: '阶段列表' }).click();
+  await expect(step).toContainText('step-host / step-service');
+  await expect(step).toContainText('步骤输出置信度 63%');
+});
+
+test('攻击步骤缺少实体或置信度时显示未提供并保留观察时间', async ({ page }) => {
+  await page.route('**/api/v1/investigations/IV-WORKBENCH', (route) => route.fulfill({ json: snapshotWithEdge('temporal') }));
+  await page.setViewportSize({ width: 1920, height: 1000 });
+  await page.goto('/incidents/IN-WORKBENCH');
+  const step = page.getByRole('button', { name: /第 2 步.*可疑请求被规则捕获/ });
+  await expect(step).toContainText('主机未提供 / 服务未提供');
+  await expect(step).toContainText('置信度未提供');
+  await expect(step).toContainText('2026/09/21 18:21:24');
+  await expect(step).not.toContainText('80%');
+  await page.getByRole('button', { name: '阶段列表' }).click();
+  await expect(step).toContainText('主机未提供 / 服务未提供');
+  await expect(step).toContainText('置信度未提供');
+});
+
 test('因果候选保持虚线箭头和待证实语义', async ({ page }) => {
   await page.route('**/api/v1/investigations/IV-WORKBENCH', (route) => route.fulfill({
     json: snapshotWithEdge('causal_candidate', 'candidate'),

@@ -45,3 +45,6 @@ pytest-cache-files-*/
 
 # AIT 原始数据和生成结果
 /data/ait/
+
+# 本地文件备份
+/.backups/

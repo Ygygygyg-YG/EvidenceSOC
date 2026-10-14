@@ -25,6 +25,9 @@
         "external_id": {
           "type": "keyword"
         },
+        "dataset_id": {
+          "type": "keyword"
+        },
         "source": {
           "type": "keyword"
         },

@@ -7,7 +7,6 @@ from pathlib import Path
 
 import httpx
 import pytest
-
 from evidencesoc.rag import cli
 
 

@@ -12,6 +12,7 @@ import type { AttackGraphData } from './investigationSnapshotContract';
 import { EvidenceDetailRequestError, loadEvidenceDetail } from './evidenceDetailContract';
 import { EvidencePageRequestError, loadEvidencePage } from './evidencePageContract';
 import { loadDemoSession, startDemoSession } from '../responses/sessionContract';
+import { StepMetadata, StepTime, stepDetails, type GraphStep } from './attackStepDetails';
 import styles from './IncidentDetail.module.css';
 
 const AttackGraph = dynamic(() => import('./AttackGraph'), { ssr: false,
@@ -92,28 +93,37 @@ function ContextPanel({ incident, evidenceItems, evidenceTotal, compactEvidence,
   );
 }
 
-function StageList({ steps, selectedStepId, selectStep }: {
-  steps: AttackStep[]; selectedStepId: string | null; selectStep: (id: string) => void;
+function StageList({ steps, graphNodes, selectedStepId, selectStep }: {
+  steps: AttackStep[]; graphNodes: Map<string, GraphStep>; selectedStepId: string | null; selectStep: (id: string) => void;
 }) {
-  return <ol className={styles.stageList}>{steps.map((step) => <li key={step.attack_step_id}>
+  return <ol className={styles.stageList}>{steps.map((step) => {
+    const node = graphNodes.get(step.attack_step_id);
+    const details = stepDetails(step, node);
+    return <li key={step.attack_step_id}>
     <button type="button" aria-pressed={selectedStepId === step.attack_step_id}
+      data-support-status={node?.support_status ?? 'unknown'}
       aria-label={`第 ${step.sequence} 步 ${step.description}`} onClick={() => selectStep(step.attack_step_id)}>
       <span className={styles.stageNumber}>{String(step.sequence).padStart(2, '0')}</span>
-      <span className={styles.stageBody}><strong>{step.description}</strong><small>{step.phase ?? '阶段未提供'} · {step.technique_id ?? '技术未提供'} · {step.evidence_ids.length} 条证据引用</small></span>
+      <span className={styles.stageBody}><strong>{step.description}</strong>
+        <small>{details.phase} · {details.techniques} · {step.evidence_ids.length} 条证据引用</small>
+        <StepMetadata step={step} node={node} /><small>{details.support}</small>
+      </span>
       <ArrowUpRight size={16} aria-hidden="true" />
     </button>
-  </li>)}</ol>;
+  </li>;
+  })}</ol>;
 }
 
 function EvidenceInspector({ incident, evidenceItems, evidenceTotal, evidencePageError, hasMoreEvidence,
-  loadingMoreEvidence, retryEvidencePage, loadMoreEvidence, selectedStep, selectedEvidenceId, selectEvidence }: {
-  incident: IncidentSummary; selectedStep: AttackStep | undefined;
+  loadingMoreEvidence, retryEvidencePage, loadMoreEvidence, selectedStep, selectedGraphNode, selectedEvidenceId, selectEvidence }: {
+  incident: IncidentSummary; selectedStep: AttackStep | undefined; selectedGraphNode?: GraphStep;
   evidenceItems: EvidenceItem[]; evidenceTotal: number | null; evidencePageError: Error | null;
   hasMoreEvidence: boolean; loadingMoreEvidence: boolean;
   retryEvidencePage: () => void; loadMoreEvidence: () => void;
   selectedEvidenceId: string | null; selectEvidence: (id: string) => void;
 }) {
   const referenced = selectedStep?.evidence_ids ?? evidenceItems.map((item) => item.evidence_id);
+  const selectedDetails = selectedStep ? stepDetails(selectedStep, selectedGraphNode) : null;
   const evidenceById = new Map([...incident.evidence, ...evidenceItems].map((item) => [item.evidence_id, item]));
   const evidence = selectedEvidenceId ? evidenceById.get(selectedEvidenceId) : undefined;
   const [sessionStarting, setSessionStarting] = useState(false);
@@ -153,6 +163,19 @@ function EvidenceInspector({ incident, evidenceItems, evidenceTotal, evidencePag
     <div className={styles.sectionHeading}><h2>证据检查器</h2><span>{referenced.length} 条引用</span></div>
     <div className={styles.inspectorBody}>
       <p className={styles.inspectorContext}>{selectedStep ? `第 ${selectedStep.sequence} 步引用的证据` : '当前案件已收集证据'}</p>
+      {selectedStep && selectedDetails && <div className={styles.stepDetail}>
+        <h3>步骤详情</h3><p>{selectedStep.description}</p>
+        <dl className={styles.evidenceFacts}>
+          <div><dt>阶段</dt><dd>{selectedDetails.phase}</dd></div>
+          <div><dt>主机 / 服务</dt><dd>{selectedDetails.entities}</dd></div>
+          <div><dt>观察时间（UTC+8）</dt><dd><StepTime value={selectedDetails.observedAt} /></dd></div>
+          <div><dt>ATT&CK 技术</dt><dd>{selectedDetails.techniques}</dd></div>
+          <div><dt>置信度</dt><dd>{selectedDetails.confidence}
+            {selectedGraphNode?.confidence != null && <span className={styles.listMeta}>计算依据未提供；不表示校准后的发生概率。</span>}
+          </dd></div>
+          <div><dt>证据支持状态</dt><dd>{selectedDetails.support}</dd></div>
+        </dl>
+      </div>}
       {referenced.length ? <ul className={styles.evidenceList}>{referenced.map((id) => {
         const item = evidenceById.get(id);
         return <li key={id}>{item ? <button type="button" aria-pressed={selectedEvidenceId === id}
@@ -281,6 +304,8 @@ export default function IncidentWorkbench({ incident, attackGraph }: {
   const view = chosenView ?? (mobile ? 'list' : 'graph');
   const useDrawer = width !== null && width < 1500;
   const selectedStep = incident.attack_steps.find((step) => step.attack_step_id === selectedStepId);
+  const graphNodes = useMemo(() => new Map(attackGraph?.nodes.map((node) => [node.step_id, node]) ?? []), [attackGraph]);
+  const selectedGraphNode = selectedStepId ? graphNodes.get(selectedStepId) : undefined;
   const phases = useMemo(() => [...new Set(incident.attack_steps.map((step) => step.phase ?? '阶段未提供'))], [incident.attack_steps]);
   const visibleSteps = useMemo(() => incident.attack_steps.filter((step) => phase === 'all' || (step.phase ?? '阶段未提供') === phase)
     .sort((a, b) => a.sequence - b.sequence || a.attack_step_id.localeCompare(b.attack_step_id)), [incident.attack_steps, phase]);
@@ -321,7 +346,7 @@ export default function IncidentWorkbench({ incident, attackGraph }: {
                 selectedStepId={selectedStepId} selectStep={selectStep} />
             </div>
             {view === 'list' && <div className={styles.listVisible}>
-              <StageList steps={visibleSteps} selectedStepId={selectedStepId} selectStep={selectStep} />
+              <StageList steps={visibleSteps} graphNodes={graphNodes} selectedStepId={selectedStepId} selectStep={selectStep} />
             </div>}
           </> : <p className={styles.empty}>尚无重构出的攻击步骤。</p>}
         </section>
@@ -330,7 +355,7 @@ export default function IncidentWorkbench({ incident, attackGraph }: {
       {!useDrawer && <aside className={styles.inspectorColumn}><EvidenceInspector incident={incident}
         evidenceItems={evidenceItems} evidenceTotal={evidenceTotal} evidencePageError={evidencePageError}
         hasMoreEvidence={Boolean(evidencePageQuery.hasNextPage)} loadingMoreEvidence={evidencePageQuery.isFetchingNextPage}
-        retryEvidencePage={retryEvidencePage} loadMoreEvidence={loadMoreEvidence} selectedStep={selectedStep}
+        retryEvidencePage={retryEvidencePage} loadMoreEvidence={loadMoreEvidence} selectedStep={selectedStep} selectedGraphNode={selectedGraphNode}
         selectedEvidenceId={selectedEvidenceId} selectEvidence={setSelectedEvidenceId} /></aside>}
     </div>
     <Drawer title="证据检查器" placement="right" size="min(440px, 100vw)" open={useDrawer && drawerOpen}
@@ -339,7 +364,7 @@ export default function IncidentWorkbench({ incident, attackGraph }: {
       <EvidenceInspector incident={incident} evidenceItems={evidenceItems} evidenceTotal={evidenceTotal}
         evidencePageError={evidencePageError} hasMoreEvidence={Boolean(evidencePageQuery.hasNextPage)}
         loadingMoreEvidence={evidencePageQuery.isFetchingNextPage} retryEvidencePage={retryEvidencePage}
-        loadMoreEvidence={loadMoreEvidence} selectedStep={selectedStep} selectedEvidenceId={selectedEvidenceId}
+        loadMoreEvidence={loadMoreEvidence} selectedStep={selectedStep} selectedGraphNode={selectedGraphNode} selectedEvidenceId={selectedEvidenceId}
         selectEvidence={setSelectedEvidenceId} />
     </Drawer>
   </div>;

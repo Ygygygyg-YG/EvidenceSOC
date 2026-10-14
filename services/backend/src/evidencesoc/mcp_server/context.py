@@ -30,3 +30,11 @@ def load_run_context(environ: Mapping[str, str]) -> RunContext:
             raise ValueError(f"{key} must not be blank")
         values[field] = value
     return RunContext(**values)
+
+
+def tool_attempt_limit(environ: Mapping[str, str]) -> int:
+    """Use one worker attempt when an outer durable ledger owns retries."""
+    value = environ.get("EVIDENCESOC_MAX_TOOL_ATTEMPTS", "3")
+    if value not in {"1", "2", "3"}:
+        raise ValueError("EVIDENCESOC_MAX_TOOL_ATTEMPTS must be 1, 2, or 3")
+    return int(value)

@@ -1,7 +1,6 @@
 import asyncio
 
 import pytest
-
 from evidencesoc.api.runner import InvestigationRunner
 
 

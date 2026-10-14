@@ -31,6 +31,37 @@ const detail = { ...item, plan_version: planVersion, approval: null, validation_
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe('响应方案读模型', () => {
+  it('接受真实批准流程中新查询的验证证据和带偏移的时间戳', async () => {
+    // The live ApiStore payload cites fresh validation evidence outside the plan's baseline.
+    const validation = {
+      validation_id: 'VR-6119694c2e22e29233e094f5', response_plan_id: 'RP-123',
+      outcome: 'success', summary: 'Approved simulated actions match freshly queried target evidence.',
+      checked_at: '2026-10-14T18:02:57.023023+08:00',
+      evidence_ids: ['EV-fresh', 'EV-123'],
+      time_from: '2026-09-21T18:05:24+08:00', time_to: '2026-09-21T18:35:24+08:00',
+      checks: [{ check_id: 'VC-1', condition: { filters: { source_ip: action.target } },
+        outcome: 'success', evidence_ids: ['EV-fresh', 'EV-123'], explanation: 'Fresh target evidence matched.' }],
+    };
+    const completed = { ...detail, incident_status: 'completed', decision_state: 'approved',
+      available_actions: [], validation_result: validation };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(completed))));
+    const parsed = await loadResponseDetail('RP-123');
+    expect(parsed.validation_result).toEqual(validation);
+    expect(parsed.evidence_ids).toEqual(['EV-123']);
+    expect(Date.parse(parsed.validation_result!.checked_at)).toBe(Date.parse('2026-10-14T10:02:57.023023Z'));
+    expect(responseDetailSchema.safeParse({ ...completed, validation_result: {
+      ...validation, checks: [{ ...validation.checks[0], evidence_ids: ['EV-unlisted'] }],
+    } }).success).toBe(false);
+    expect(responseDetailSchema.safeParse({ ...completed, validation_result: {
+      ...validation, checks: [{ ...validation.checks[0], check_id: 'VC-unknown' }],
+    } }).success).toBe(false);
+    expect(responseDetailSchema.safeParse({ ...completed, validation_result: {
+      ...validation, checks: [{ ...validation.checks[0], outcome: 'unknown' }],
+    } }).success).toBe(false);
+    for (const checked_at of ['2026-10-14T18:02:57+99:00', '2026-02-30T18:02:57+08:00', 'not-a-date']) {
+      expect(responseDetailSchema.safeParse({ ...completed, validation_result: { ...validation, checked_at } }).success).toBe(false);
+    }
+  });
   it('解析真实分页与详情，保留服务端的可用操作和提交中状态', () => {
     expect(responsePageSchema.parse({ items: [item], total: 1, page: 1, page_size: 20 }).items[0].response_plan_id).toBe('RP-123');
     expect(responsePageSchema.safeParse({ items: [{ ...item, plan_version: undefined }], total: 1, page: 1, page_size: 20 }).success).toBe(false);

@@ -3,14 +3,17 @@ from typing import Any
 
 from pgvector.sqlalchemy import Vector  # type: ignore[import-untyped]
 from sqlalchemy import (
+    JSON,
     Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -132,6 +135,12 @@ class IncidentTable(Base):
 class EvidenceItemTable(Base):
     __tablename__ = "evidence_items"
     __table_args__ = (
+        UniqueConstraint(
+            "incident_id",
+            "event_id",
+            "query_fingerprint",
+            name="uq_evidence_items_incident_event_query",
+        ),
         CheckConstraint(
             "content_sha256 ~ '^[0-9a-f]{64}$'",
             name="ck_evidence_items_content_sha256",
@@ -154,6 +163,7 @@ class EvidenceItemTable(Base):
     source: Mapped[str] = mapped_column(String(128))
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     query: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    query_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
     summary: Mapped[str] = mapped_column(Text)
     content_sha256: Mapped[str] = mapped_column(String(64))
 
@@ -219,6 +229,9 @@ class AgentRunTable(Base):
         nullable=True,
     )
     evidence_ids: Mapped[list[str]] = mapped_column(JSONB)
+    output_summary: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON().with_variant(JSONB(), "postgresql"), nullable=True
+    )
 
 
 class ToolCallTable(Base):
@@ -254,6 +267,65 @@ class ToolCallTable(Base):
     )
 
 
+class InvestigationToolCallTable(Base):
+    """Durable logical investigation calls, separate from physical-call audit."""
+
+    __tablename__ = "investigation_tool_calls"
+    __table_args__ = (
+        CheckConstraint("round_no > 0", name="ck_investigation_tool_calls_round"),
+        CheckConstraint(
+            "purpose IN ('collection', 'verification')",
+            name="ck_investigation_tool_calls_purpose",
+        ),
+        CheckConstraint(
+            "status IN ('reserved', 'running', 'completed', 'failed')",
+            name="ck_investigation_tool_calls_status",
+        ),
+        CheckConstraint(
+            "attempts >= 0 AND attempts <= 3",
+            name="ck_investigation_tool_calls_attempts",
+        ),
+        Index(
+            "ix_investigation_tool_calls_fingerprint",
+            "incident_id",
+            "purpose",
+            "fingerprint",
+        ),
+    )
+
+    call_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    incident_id: Mapped[str] = mapped_column(
+        ForeignKey("incidents.incident_id", ondelete="CASCADE"), nullable=False
+    )
+    run_id: Mapped[str] = mapped_column(
+        ForeignKey("agent_runs.run_id", ondelete="CASCADE"), nullable=False
+    )
+    round_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    purpose: Mapped[str] = mapped_column(String(16), nullable=False)
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    tool_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    arguments: Mapped[dict[str, Any]] = mapped_column(
+        JSON().with_variant(JSONB(), "postgresql"), nullable=False
+    )
+    rationale: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    charged: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    source_call_id: Mapped[str | None] = mapped_column(
+        ForeignKey("investigation_tool_calls.call_id"), nullable=True
+    )
+    result: Mapped[Any | None] = mapped_column(
+        JSON().with_variant(JSONB(), "postgresql"), nullable=True
+    )
+    error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
 class ResponsePlanTable(Base):
     __tablename__ = "response_plans"
     __table_args__ = (
@@ -277,16 +349,24 @@ class ResponsePlanTable(Base):
         default=True,
     )
     evidence_ids: Mapped[list[str]] = mapped_column(JSONB)
-    execution_mode: Mapped[str] = mapped_column(String(16), default="simulation")
+    execution_mode: Mapped[str] = mapped_column(
+        String(16), default="simulation", server_default="simulation"
+    )
     risk_level: Mapped[str | None] = mapped_column(String(16), nullable=True)
     risk_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
-    affected_assets: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    affected_assets: Mapped[list[str]] = mapped_column(
+        JSONB, default=list, server_default=text("'[]'")
+    )
     business_impact: Mapped[str | None] = mapped_column(Text, nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-    rollback_steps: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
-    validation_checks: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
+    rollback_steps: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, default=list, server_default=text("'[]'")
+    )
+    validation_checks: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, default=list, server_default=text("'[]'")
+    )
 
 
 class ApprovalTable(Base):
@@ -339,9 +419,15 @@ class ValidationResultTable(Base):
     summary: Mapped[str] = mapped_column(Text)
     checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     evidence_ids: Mapped[list[str]] = mapped_column(JSONB)
-    time_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    time_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    checks: Mapped[list[dict]] = mapped_column(JSONB, default=list)
+    time_from: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    time_to: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    checks: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, default=list, server_default=text("'[]'")
+    )
 
 
 class KnowledgeChunkTable(Base):

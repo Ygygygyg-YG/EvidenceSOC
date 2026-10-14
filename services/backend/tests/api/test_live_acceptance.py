@@ -37,9 +37,11 @@ from evidencesoc.persistence.event_search import (
     create_opensearch_client,
 )
 from evidencesoc.persistence.tables import (
+    AgentRunTable,
     AlertTable,
     ApprovalTable,
     IncidentTable,
+    InvestigationToolCallTable,
     SecurityEventTable,
     ValidationResultTable,
 )
@@ -49,17 +51,54 @@ ROOT = Path(__file__).resolve().parents[4]
 API = "/api/v1"
 FRONTEND_ORIGIN = "http://127.0.0.1:3000"
 CHILD_CODE = """
-import asyncio, sys
+import asyncio, os, sys
+from pathlib import Path
 import uvicorn
 from evidencesoc.config import Settings
 from evidencesoc.main import create_app
 from evidencesoc.agents.services import PostgresWorkflowServices
+from evidencesoc.tools.ledger import Ledger
+
+crash_stage = os.environ.get('EVIDENCESOC_TEST_COLLECT_CRASH_STAGE')
+crash_alert = os.environ.get('EVIDENCESOC_TEST_COLLECT_CRASH_ALERT')
+crash_marker = os.environ.get('EVIDENCESOC_TEST_COLLECT_CRASH_MARKER')
+
+def crash_if(stage, alert_id):
+    if stage == crash_stage and alert_id == crash_alert:
+        Path(crash_marker).write_text(stage, encoding='utf-8')
+        os._exit(73)
+
+if crash_stage == 'after_reservation':
+    original_reserve = Ledger.reserve
+    def interrupted_reserve(self, *args, **kwargs):
+        row = original_reserve(self, *args, **kwargs)
+        if row.purpose == 'collection' and row.tool_name == 'get_alert_context':
+            crash_if('after_reservation', row.arguments.get('alert_id'))
+        return row
+    Ledger.reserve = interrupted_reserve
+elif crash_stage == 'before_result_confirmation':
+    original_call = PostgresWorkflowServices._call
+    async def interrupted_call(session, name, arguments):
+        values = await original_call(session, name, arguments)
+        if name == 'get_alert_context':
+            crash_if('before_result_confirmation', arguments.get('alert_id'))
+        return values
+    PostgresWorkflowServices._call = staticmethod(interrupted_call)
+elif crash_stage == 'before_node_return':
+    original_collect_for_crash = PostgresWorkflowServices.collect
+    async def interrupted_collect(self, state, run_id):
+        result = await original_collect_for_crash(self, state, run_id)
+        alert_id = (state.get('alerts') or [{}])[0].get('alert_id')
+        crash_if('before_node_return', alert_id)
+        return result
+    PostgresWorkflowServices.collect = interrupted_collect
+
 delay = float(sys.argv[3])
 if delay:
-    original_collect = PostgresWorkflowServices.collect
+    original_collect_for_delay = PostgresWorkflowServices.collect
     async def delayed_collect(self, state, run_id):
         await asyncio.sleep(delay)
-        return await original_collect(self, state, run_id)
+        return await original_collect_for_delay(self, state, run_id)
     PostgresWorkflowServices.collect = delayed_collect
 settings = Settings(llm_mode='fixture', opensearch_index=sys.argv[1],
                     demo_session_enabled=True,
@@ -76,6 +115,9 @@ class LiveApi:
     event_ids: list[str]
     port: int
     collect_delay: float = 0
+    collect_crash_stage: str | None = None
+    collect_crash_alert: str | None = None
+    collect_crash_marker: Path | None = None
     process: subprocess.Popen | None = None
     log_handle: Any = None
     alert_ids: set[str] = field(default_factory=set)
@@ -127,6 +169,24 @@ class LiveApi:
         self.log_handle = self.log_path.open("ab")
         environment = os.environ.copy()
         environment["PYTHONDONTWRITEBYTECODE"] = "1"
+        if self.collect_crash_stage is not None:
+            assert self.collect_crash_alert and self.collect_crash_marker
+            environment["EVIDENCESOC_TEST_COLLECT_CRASH_STAGE"] = (
+                self.collect_crash_stage
+            )
+            environment["EVIDENCESOC_TEST_COLLECT_CRASH_ALERT"] = (
+                self.collect_crash_alert
+            )
+            environment["EVIDENCESOC_TEST_COLLECT_CRASH_MARKER"] = str(
+                self.collect_crash_marker
+            )
+        else:
+            for key in (
+                "EVIDENCESOC_TEST_COLLECT_CRASH_STAGE",
+                "EVIDENCESOC_TEST_COLLECT_CRASH_ALERT",
+                "EVIDENCESOC_TEST_COLLECT_CRASH_MARKER",
+            ):
+                environment.pop(key, None)
         self.process = subprocess.Popen(
             [
                 sys.executable,
@@ -172,6 +232,8 @@ class LiveApi:
                         timeout=10,
                         creationflags=subprocess.CREATE_NO_WINDOW,
                     )
+                    if self.process.poll() is None:
+                        self.process.terminate()
                 else:
                     self.process.kill()
                 self.process.wait(timeout=10)
@@ -759,3 +821,136 @@ def test_live_tcp_collect_interruption_resumes_without_event_loss(live_api):
         all_ids = [int(frame["id"]) for frame in [*initial, *recovered, *tail]]
         assert all_ids == list(range(1, all_ids[-1] + 1))
         assert_completed(wait_status(client, metadata, "completed"), metadata)
+
+
+@pytest.mark.parametrize(
+    ("stage", "interrupted_status", "interrupted_attempts", "recovered_attempts"),
+    [
+        ("after_reservation", "reserved", 0, 1),
+        ("before_result_confirmation", "running", 1, 2),
+        ("before_node_return", "completed", 1, 1),
+    ],
+)
+def test_live_tcp_collect_internal_crash_keeps_budget_and_recovers(
+    live_api, stage, interrupted_status, interrupted_attempts, recovered_attempts
+):
+    server, sessions = live_api
+    with server.client() as client:
+        alert_id = server.create_alert(client)
+    server.stop()
+
+    marker = server.log_path.with_name(f"collect-crash-{stage}.marker")
+    assert not marker.exists()
+    server.collect_crash_stage = stage
+    server.collect_crash_alert = alert_id
+    server.collect_crash_marker = marker
+    server.collect_delay = 0.3
+    server.start()
+    with server.client() as client:
+        metadata = server.investigate(client, alert_id)
+
+    assert server.process is not None
+    try:
+        exit_code = server.process.wait(timeout=45)
+    except subprocess.TimeoutExpired:
+        with sessions() as session:
+            rows = session.scalars(
+                select(InvestigationToolCallTable).where(
+                    InvestigationToolCallTable.incident_id == metadata["incident_id"]
+                )
+            ).all()
+            statuses = [(row.tool_name, row.status, row.attempts) for row in rows]
+            investigation = session.scalar(
+                select(ApiInvestigationTable).where(
+                    ApiInvestigationTable.incident_id == metadata["incident_id"]
+                )
+            )
+        pytest.fail(
+            f"collect crash hook did not fire: {stage}, "
+            f"investigation={investigation.status if investigation else None}, "
+            f"calls={statuses}"
+        )
+    assert exit_code == 73
+    assert marker.read_text(encoding="utf-8") == stage
+    with sessions() as session:
+        interrupted = session.scalars(
+            select(InvestigationToolCallTable).where(
+                InvestigationToolCallTable.incident_id == metadata["incident_id"],
+                InvestigationToolCallTable.purpose == "collection",
+            )
+        ).all()
+        seed = next(row for row in interrupted if row.tool_name == "get_alert_context")
+        assert seed.status == interrupted_status
+        assert seed.attempts == interrupted_attempts
+        assert seed.charged is True
+        assert sum(row.charged for row in interrupted) == (
+            3 if stage == "before_node_return" else 1
+        )
+        seed_id = seed.call_id
+
+    server.stop()
+    server.collect_crash_stage = None
+    server.collect_crash_alert = None
+    server.collect_crash_marker = None
+    server.collect_delay = 0
+    server.start()
+    with server.client() as client:
+        initial = read_sse(client, metadata, until="approval.required")
+        collect_started = [
+            frame
+            for frame in initial
+            if frame["event"] == "agent.started" and frame["data"]["agent"] == "collect"
+        ]
+        collect_completed = [
+            frame
+            for frame in initial
+            if frame["event"] == "agent.completed"
+            and frame["data"]["agent"] == "collect"
+        ]
+        assert len(collect_started) == 2
+        assert len(collect_completed) == 1
+        before = wait_status(client, metadata, "awaiting_approval")
+        plan_id = before["response_plan"]["response_plan_id"]
+        server.create_review_session(client)
+        response = server.decide(
+            client,
+            plan_id,
+            "approve",
+            version=server.plan_version(client, plan_id),
+            reason="reviewed recovered plan",
+            key="task12-collect-recovery-" + new_ulid(),
+        )
+        assert response.status_code == 202
+        tail = read_sse(
+            client,
+            metadata,
+            until="investigation.completed",
+            cursor=int(initial[-1]["id"]),
+        )
+        all_ids = [int(frame["id"]) for frame in [*initial, *tail]]
+        assert all_ids == list(range(1, all_ids[-1] + 1))
+        assert_completed(wait_status(client, metadata, "completed"), metadata)
+
+    with sessions() as session:
+        rows = session.scalars(
+            select(InvestigationToolCallTable).where(
+                InvestigationToolCallTable.incident_id == metadata["incident_id"],
+                InvestigationToolCallTable.purpose == "collection",
+            )
+        ).all()
+        assert len(rows) == 3
+        assert all(row.status == "completed" for row in rows)
+        assert sum(row.charged for row in rows) == 3
+        recovered_seed = next(row for row in rows if row.call_id == seed_id)
+        assert recovered_seed.attempts == recovered_attempts
+        collect_run = session.scalar(
+            select(AgentRunTable).where(
+                AgentRunTable.incident_id == metadata["incident_id"],
+                AgentRunTable.agent_name == "collect",
+            )
+        )
+        assert collect_run is not None
+        assert collect_run.output_summary["collection_budget_used"] == 3
+        assert collect_run.output_summary["collection_tool_attempts"] == sum(
+            row.attempts for row in rows
+        )

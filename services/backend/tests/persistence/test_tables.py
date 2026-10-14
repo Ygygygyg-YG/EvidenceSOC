@@ -13,6 +13,7 @@ EXPECTED_TABLES = {
     "attack_steps",
     "agent_runs",
     "tool_calls",
+    "investigation_tool_calls",
     "response_plans",
     "approvals",
     "validation_results",
@@ -72,6 +73,7 @@ CORE_REQUIRED_COLUMNS = {
         "source",
         "observed_at",
         "query",
+        "query_fingerprint",
         "summary",
         "content_sha256",
         "event_id",
@@ -177,6 +179,7 @@ SUPPORT_REQUIRED_COLUMNS = {
         "started_at",
         "finished_at",
         "evidence_ids",
+        "output_summary",
     },
     "tool_calls": {
         "tool_call_id",
@@ -188,6 +191,25 @@ SUPPORT_REQUIRED_COLUMNS = {
         "finished_at",
         "success",
         "error_code",
+    },
+    "investigation_tool_calls": {
+        "call_id",
+        "incident_id",
+        "run_id",
+        "round_no",
+        "purpose",
+        "fingerprint",
+        "tool_name",
+        "arguments",
+        "rationale",
+        "status",
+        "attempts",
+        "charged",
+        "source_call_id",
+        "result",
+        "error_code",
+        "created_at",
+        "updated_at",
     },
     "knowledge_chunks": {
         "knowledge_chunk_id",
@@ -223,6 +245,21 @@ EXPECTED_SUPPORT_FOREIGN_KEYS = {
         "tool_calls",
         "run_id",
         "agent_runs.run_id",
+    ),
+    (
+        "investigation_tool_calls",
+        "incident_id",
+        "incidents.incident_id",
+    ),
+    (
+        "investigation_tool_calls",
+        "run_id",
+        "agent_runs.run_id",
+    ),
+    (
+        "investigation_tool_calls",
+        "source_call_id",
+        "investigation_tool_calls.call_id",
     ),
 }
 
@@ -270,6 +307,7 @@ EXPECTED_CONSTRAINT_NAMES = {
     },
     "evidence_items": {
         "ck_evidence_items_content_sha256",
+        "uq_evidence_items_incident_event_query",
     },
     "attack_steps": {
         "uq_attack_steps_incident_sequence",
@@ -280,6 +318,12 @@ EXPECTED_CONSTRAINT_NAMES = {
     },
     "tool_calls": {
         "ck_tool_calls_time_order",
+    },
+    "investigation_tool_calls": {
+        "ck_investigation_tool_calls_round",
+        "ck_investigation_tool_calls_purpose",
+        "ck_investigation_tool_calls_status",
+        "ck_investigation_tool_calls_attempts",
     },
     "response_plans": {
         "ck_response_plans_requires_approval",

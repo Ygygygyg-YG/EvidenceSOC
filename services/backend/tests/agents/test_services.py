@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import importlib
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -18,6 +19,7 @@ from evidencesoc.persistence.tables import (
     AttackStepTable,
     EvidenceItemTable,
     IncidentTable,
+    InvestigationToolCallTable,
     ResponsePlanTable,
     SecurityEventTable,
     ValidationResultTable,
@@ -39,6 +41,7 @@ def database(tmp_path: Any) -> Any:
         SecurityEventTable,
         EvidenceItemTable,
         AgentRunTable,
+        InvestigationToolCallTable,
         ResponsePlanTable,
         ApprovalTable,
         ValidationResultTable,
@@ -122,6 +125,52 @@ def service(database: Any) -> Any:
         Settings(_env_file=None),
         session_factory=database[0],
     )
+
+
+def test_collection_scope_keeps_ait_scenario_inside_a_shared_index(
+    database: Any,
+) -> None:
+    with database[0]() as session:
+        event = session.get(SecurityEventTable, "SE-1")
+        event.raw = {**event.raw, "dataset_id": "ait-v2.1:shaw"}
+        event.content_sha256 = calculate_content_sha256(event.raw)
+        session.commit()
+
+    scope = service(database)._scope("IN-1")
+    assert scope["filters"] == {
+        "source_ip": "203.0.113.42",
+        "host": "shop.example.test",
+        "service": "checkout-api",
+        "dataset_id": "ait-v2.1:shaw",
+    }
+
+
+def test_collection_scope_rejects_mixed_ait_scenarios(database: Any) -> None:
+    with database[0]() as session:
+        first = session.get(SecurityEventTable, "SE-1")
+        first.raw = {**first.raw, "dataset_id": "ait-v2.1:shaw"}
+        first.content_sha256 = calculate_content_sha256(first.raw)
+        second_raw = {**first.raw, "dataset_id": "ait-v2.1:wilson"}
+        session.add(
+            SecurityEventTable(
+                event_id="SE-2",
+                source="nginx",
+                external_id="request-2",
+                deduplication_key="id:request-2",
+                observed_at=NOW,
+                ingested_at=NOW,
+                severity="high",
+                event_type="web.request",
+                raw=second_raw,
+                content_sha256=calculate_content_sha256(second_raw),
+                index_status="indexed",
+            )
+        )
+        session.get(AlertTable, "AL-1").event_ids = ["SE-1", "SE-2"]
+        session.commit()
+
+    with pytest.raises(PermissionError, match="dataset"):
+        service(database)._scope("IN-1")
 
 
 def test_close_preserves_injected_database_engine(database: Any) -> None:
@@ -251,7 +300,9 @@ async def test_collect_uses_three_real_tool_contracts_and_filters_observations(
         yield Session()
 
     monkeypatch.setattr(module, "open_stdio_session", open_session)
-    result = await api.collect({"incident_id": "IN-1", "trace_id": "TRACE-1"}, "AR-1")
+    state = {"incident_id": "IN-1", "trace_id": "TRACE-1", "fallback_count": 0}
+    run_id = await api.start_run(state, "collect")
+    result = await api.collect(state, run_id)
     assert {name for name, _ in calls} == {
         "search_security_events",
         "get_alert_context",
@@ -266,6 +317,169 @@ async def test_collect_uses_three_real_tool_contracts_and_filters_observations(
     )
     assert search["filters"]["source_ip"] == "203.0.113.42"
     assert result["knowledge"] == [knowledge]
+    assert result["collection_budget_used"] == 3
+    assert result["collection_round"] == 1
+    assert len(result["collection_ledger_ids"]) == 3
+
+    replay = await api.collect(state, run_id)
+    assert len(calls) == 3
+    assert replay["evidence"] == result["evidence"]
+    assert replay["knowledge"] == result["knowledge"]
+    assert replay["collection_budget_used"] == 3
+
+    await api.finish_run(run_id, result)
+    with database[0]() as session:
+        summary = session.get(AgentRunTable, run_id).output_summary
+    assert summary is not None
+    assert summary["collection_round"] == 1
+    assert summary["collection_budget_used"] == 3
+    assert summary["collection_round_used"] == 3
+    assert summary["collection_tool_attempts"] == 3
+    assert summary["collection_model_attempts"] == 0
+    assert summary["fallback_used"] is True
+    assert summary["collection_stop_reason"] == "budget_exhausted"
+    assert summary["collection_ledger_ids"] == result["collection_ledger_ids"]
+    assert [item["rationale"] for item in summary["collection_observations"]] == [
+        item["rationale"] for item in result["collection_observations"]
+    ]
+    assert "evidence" not in summary
+
+    second_state = {**state, "fallback_count": 1}
+    second_run = await api.start_run(second_state, "collect")
+    second = await api.collect(second_state, second_run)
+    assert len(calls) == 3
+    assert second["collection_budget_used"] == 3
+
+
+@pytest.mark.asyncio
+async def test_model_planner_denial_consumes_budget_without_cross_incident_call(
+    database: Any, monkeypatch: Any
+) -> None:
+    module = importlib.import_module("evidencesoc.agents.services")
+    api = module.PostgresWorkflowServices(
+        Settings(_env_file=None, llm_mode="deepseek"),
+        session_factory=database[0],
+    )
+    evidence = database[1].model_dump(mode="json")
+    tool_calls: list[str] = []
+
+    class Model:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def structured(
+            self, role: str, schema: Any, state: dict[str, Any]
+        ) -> Any:
+            assert role == "collect"
+            assert "labels" not in str(state)
+            self.calls += 1
+            scope = state["collection_context"]["scope"]
+            if self.calls == 1:
+                return schema(
+                    action="call",
+                    tool_name="get_alert_context",
+                    arguments={"alert_id": "AL-other"},
+                    rationale="Try a different alert.",
+                )
+            return schema(
+                action="call",
+                tool_name="search_security_events",
+                arguments={
+                    key: value for key, value in scope.items() if key != "alert_id"
+                },
+                rationale="Search the incident scope.",
+            )
+
+    class Session:
+        async def list_tools(self) -> Any:
+            return SimpleNamespace(
+                tools=[
+                    SimpleNamespace(name=name)
+                    for name in (
+                        "get_alert_context",
+                        "search_security_events",
+                        "lookup_attack_technique",
+                    )
+                ]
+            )
+
+        async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+            tool_calls.append(name)
+            return SimpleNamespace(
+                isError=False, structuredContent={"result": [evidence]}
+            )
+
+    @asynccontextmanager
+    async def open_session(*args: Any, **kwargs: Any) -> Any:
+        yield Session()
+
+    monkeypatch.setattr(module, "open_stdio_session", open_session)
+    api.planner_model = Model()
+    state = {"incident_id": "IN-1", "trace_id": "TRACE-model", "fallback_count": 0}
+    run_id = await api.start_run(state, "collect")
+    result = await api.collect(state, run_id)
+    assert tool_calls == ["get_alert_context", "search_security_events"]
+    assert result["collection_budget_used"] == 3
+    assert any(
+        item.get("error_code") == "POLICY_DENIED"
+        for item in result["collection_observations"]
+    )
+    assert result["collection_stop_reason"] == "budget_exhausted"
+
+
+@pytest.mark.asyncio
+async def test_collect_resumes_incomplete_seed_without_new_logical_charge(
+    database: Any, monkeypatch: Any
+) -> None:
+    module = importlib.import_module("evidencesoc.agents.services")
+    evidence = database[1].model_dump(mode="json")
+    calls: list[str] = []
+
+    class Session:
+        async def list_tools(self) -> Any:
+            return SimpleNamespace(
+                tools=[
+                    SimpleNamespace(name=name)
+                    for name in (
+                        "get_alert_context",
+                        "search_security_events",
+                        "lookup_attack_technique",
+                    )
+                ]
+            )
+
+        async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+            calls.append(name)
+            if len(calls) == 1:
+                raise asyncio.CancelledError()
+            return SimpleNamespace(
+                isError=False,
+                structuredContent={
+                    "result": [] if name == "lookup_attack_technique" else [evidence]
+                },
+            )
+
+    @asynccontextmanager
+    async def open_session(*args: Any, **kwargs: Any) -> Any:
+        yield Session()
+
+    monkeypatch.setattr(module, "open_stdio_session", open_session)
+    state = {
+        "incident_id": "IN-1",
+        "trace_id": "TRACE-recover-seed",
+        "fallback_count": 0,
+    }
+    first = service(database)
+    run_id = await first.start_run(state, "collect")
+    with pytest.raises(asyncio.CancelledError):
+        await first.collect(state, run_id)
+
+    recovered = service(database)
+    result = await recovered.collect(state, run_id)
+    assert calls.count("get_alert_context") == 2
+    assert result["collection_budget_used"] == 3
+    assert result["collection_tool_attempts"] == 4
+    assert len(result["collection_ledger_ids"]) == 3
 
 
 @pytest.mark.asyncio
@@ -314,7 +528,8 @@ async def test_verify_distinguishes_empty_result_from_mcp_error(
 
     monkeypatch.setattr(module, "open_stdio_session", open_session)
     state = verification_state(database, [{"filters": {"source_ip": "203.0.113.42"}}])
-    empty_result = await api.verify(state, "AR-1")
+    run_id = await api.start_run(state, "validate")
+    empty_result = await api.verify(state, run_id)
     assert empty_result["evidence"] == []
     assert empty_result["executed_checks"][0]["evidence_ids"] == []
     assert empty_result["executed_checks"][0]["condition"]["filters"] == {
@@ -322,9 +537,13 @@ async def test_verify_distinguishes_empty_result_from_mcp_error(
         "host": "shop.example.test",
         "service": "checkout-api",
     }
+    assert empty_result["verification_call_count"] == 1
+    assert empty_result["verification_attempts"] == 1
     failed = True
+    failed_state = {**state, "trace_id": "TRACE-verify-failed"}
+    failed_run = await api.start_run(failed_state, "validate")
     with pytest.raises(RuntimeError, match="DEPENDENCY_TIMEOUT"):
-        await api.verify(state, "AR-1")
+        await api.verify(failed_state, failed_run)
 
 
 def verification_state(database: Any, queries: list[dict[str, Any]]) -> dict[str, Any]:
@@ -410,7 +629,8 @@ async def test_verify_executes_distinct_plan_queries_with_original_scope(
         }
         for index, query in enumerate((first, first, second), start=1)
     ]
-    result = await api.verify(state, "AR-1")
+    run_id = await api.start_run(state, "validate")
+    result = await api.verify(state, run_id)
     assert len(calls) == 2
     assert calls[0]["limit"] == 10
     assert calls[1]["limit"] == 5
@@ -433,6 +653,8 @@ async def test_verify_executes_distinct_plan_queries_with_original_scope(
     assert result["executed_checks"][1]["evidence_ids"] == [database[1].evidence_id]
     assert result["executed_checks"][2]["condition"] == calls[1]
     assert result["executed_checks"][2]["evidence_ids"] == []
+    assert result["verification_call_count"] == 2
+    assert result["verification_attempts"] == 2
 
 
 @pytest.mark.asyncio
@@ -521,7 +743,8 @@ async def test_verify_uses_each_alert_source_for_two_cited_targets(
     state["response_plan"]["actions"][1]["evidence_ids"] = [other_evidence.evidence_id]
     state["response_plan"]["evidence_ids"].append(other_evidence.evidence_id)
 
-    result = await api.verify(state, "AR-1")
+    run_id = await api.start_run(state, "validate")
+    result = await api.verify(state, run_id)
     assert len(calls) == 2
     assert [call["filters"]["host"] for call in calls] == [
         "shop.example.test",
@@ -573,6 +796,7 @@ async def test_verify_rejects_target_absent_from_alert_source_events(
             "time_to": "2026-09-21T10:36:00Z",
         },
         {"filters": {"source_ip": "203.0.113.42"}, "limit": 101},
+        {"filters": {"source_ip": "203.0.113.42", "dataset_id": "other-scenario"}},
         {
             "filters": {"source_ip": "203.0.113.42"},
             "time_from": "2026-09-21T10:19:00",

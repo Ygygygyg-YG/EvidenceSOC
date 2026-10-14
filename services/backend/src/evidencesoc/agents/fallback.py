@@ -14,7 +14,13 @@ from evidencesoc.agents.models import (
     ResponseOutput,
     SimulatedAction,
 )
-from evidencesoc.domain.models import AttackClassification, AttackOrigin, ResponsePlan
+from evidencesoc.domain.models import (
+    AttackClassification,
+    AttackOrigin,
+    PlanRollbackStep,
+    PlanValidationCheck,
+    ResponsePlan,
+)
 
 SQL_PATTERN = re.compile(
     r"\bunion\s+(?:all\s+)?select\b|\b(?:or|and)\s+['\"]?1['\"]?\s*=\s*['\"]?1\b|\b(?:sleep|benchmark)\s*\(",
@@ -233,7 +239,7 @@ def respond(state: dict[str, Any]) -> ResponseOutput:
             response_plan_id=f"RP-{digest}",
             incident_id=state["incident_id"],
             summary="Review the SQL-pattern observation and approve a simulated response.",
-            actions=[action.model_dump(mode="json")],
+            actions=[action],
             created_at=generated_at,
             evidence_ids=ids,
             risk_level="medium",
@@ -242,23 +248,23 @@ def respond(state: dict[str, Any]) -> ResponseOutput:
             business_impact=action.impact,
             expires_at=generated_at + timedelta(minutes=30),
             rollback_steps=[
-                {
-                    "step_id": f"RB-{digest}",
-                    "description": action.rollback,
-                    "target": address,
-                    "expected_result": "The simulated block overlay is removed.",
-                    "evidence_ids": ids,
-                }
+                PlanRollbackStep(
+                    step_id=f"RB-{digest}",
+                    description=action.rollback,
+                    target=address,
+                    expected_result="The simulated block overlay is removed.",
+                    evidence_ids=ids,
+                )
             ],
             validation_checks=[
-                {
-                    "check_id": f"VC-{digest}",
-                    "description": "Requery the observed source after the simulated action.",
-                    "target": address,
-                    "expected_result": "Compare fresh query results with cited baseline evidence.",
-                    "query": action.verification_query,
-                    "evidence_ids": ids,
-                }
+                PlanValidationCheck(
+                    check_id=f"VC-{digest}",
+                    description="Requery the observed source after the simulated action.",
+                    target=address,
+                    expected_result="Compare fresh query results with cited baseline evidence.",
+                    query=action.verification_query,
+                    evidence_ids=ids,
+                )
             ],
         )
     )

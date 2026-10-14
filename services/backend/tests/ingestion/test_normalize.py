@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
 from evidencesoc.ingestion.jsonl import ParsedLogRecord
 
 INGESTED_AT = datetime(2026, 9, 21, 12, 0, tzinfo=UTC)

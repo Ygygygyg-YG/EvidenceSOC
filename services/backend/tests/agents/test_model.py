@@ -1,7 +1,6 @@
 from importlib import import_module
 
 import pytest
-
 from evidencesoc.config import Settings
 from evidencesoc.domain.models import AttackClassification
 

@@ -5,6 +5,7 @@ MAX_EVENT_RESULTS = 200
 ALLOWED_EVENT_FILTERS = frozenset(
     {
         "source",
+        "dataset_id",
         "event_type",
         "severity",
         "source_ip",

@@ -45,10 +45,14 @@ class EventSearchWork:
         query: OpenSearchEventQuery,
         evidence_factory: Callable[[], AbstractContextManager[EvidenceService]],
         clock: Callable[[], float] = monotonic,
+        max_attempts: int = 3,
     ) -> None:
+        if not 1 <= max_attempts <= 3:
+            raise ValueError("max_attempts must be between 1 and 3")
         self._query = query
         self._evidence_factory = evidence_factory
         self._clock = clock
+        self._max_attempts = max_attempts
 
     def __call__(
         self,
@@ -62,7 +66,7 @@ class EventSearchWork:
         deadline = self._clock() + 10.0
         search_filters = dict(filters)
 
-        for attempt in range(3):
+        for attempt in range(self._max_attempts):
             remaining = min(deadline - self._clock(), check_execution() or 10.0)
             if remaining <= 0:
                 raise ToolDependencyTimeout("event search deadline exceeded")
@@ -77,19 +81,22 @@ class EventSearchWork:
                 )
                 break
             except OpenSearchConnectionTimeout as exc:
-                if attempt == 2 or self._clock() >= deadline:
+                if attempt == self._max_attempts - 1 or self._clock() >= deadline:
                     raise ToolDependencyTimeout("event search timed out") from exc
             except OpenSearchConnectionError as exc:
                 if self._clock() >= deadline:
                     raise ToolDependencyTimeout("event search timed out") from exc
-                if attempt == 2:
+                if attempt == self._max_attempts - 1:
                     raise ToolDependencyError("event search unavailable") from exc
             except EventSearchResponseError as exc:
                 raise ToolDependencyError("invalid event search response") from exc
             except OpenSearchTransportError as exc:
                 if self._clock() >= deadline:
                     raise ToolDependencyTimeout("event search timed out") from exc
-                if exc.status_code not in {502, 503, 504} or attempt == 2:
+                if (
+                    exc.status_code not in {502, 503, 504}
+                    or attempt == self._max_attempts - 1
+                ):
                     raise ToolDependencyError("event search unavailable") from exc
         else:
             raise AssertionError("unreachable retry state")
@@ -134,6 +141,7 @@ def build_event_search_work(
     opensearch_url: str,
     index_name: str,
     session_factory: sessionmaker[Session],
+    max_attempts: int = 3,
 ) -> EventSearchWork:
     if not opensearch_url.strip():
         raise ValueError("OpenSearch URL must not be blank")
@@ -156,4 +164,6 @@ def build_event_search_work(
                 OpenSearchEventStore(client, index_name=index_name),
             )
 
-    return EventSearchWork(query=query, evidence_factory=evidence_factory)
+    return EventSearchWork(
+        query=query, evidence_factory=evidence_factory, max_attempts=max_attempts
+    )

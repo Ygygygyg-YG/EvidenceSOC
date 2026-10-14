@@ -42,7 +42,7 @@ async def write_audit(audit: AuditWriter, record: ToolCallRecord, deadline: floa
         CURRENT_BUDGET.reset(token)
 
 
-async def run_audited_tool(  # noqa: UP047 - the shared contract uses TypeVar
+async def run_audited_tool(
     *,
     context: ToolExecutionContext,
     audit: AuditWriter,

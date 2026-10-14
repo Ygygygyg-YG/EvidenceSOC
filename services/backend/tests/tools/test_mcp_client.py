@@ -10,7 +10,6 @@ from pathlib import Path
 
 import anyio
 import pytest
-
 from evidencesoc.config import Settings
 from evidencesoc.mcp_server.context import RunContext
 
@@ -50,6 +49,17 @@ def test_stdio_parameters_bind_context_and_local_dependencies() -> None:
         "OPENSEARCH_INDEX": settings.opensearch_index,
         "RAG_DATA_DIRECTORY": str(settings.rag_data_directory),
     }
+
+
+def test_managed_stdio_session_sets_single_worker_attempt() -> None:
+    client = importlib.import_module("evidencesoc.mcp_server.client")
+    parameters = client.build_stdio_parameters(
+        RunContext("AR-42", "IN-42", "TRACE-42"),
+        settings=_settings("sqlite+pysqlite:///example.db"),
+        backend_dir=BACKEND_DIR,
+        managed_attempts=True,
+    )
+    assert parameters.env["EVIDENCESOC_MAX_TOOL_ATTEMPTS"] == "1"
 
 
 def test_stdio_parameters_preserve_custom_knowledge_directory(tmp_path: Path) -> None:

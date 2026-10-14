@@ -3,7 +3,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-
 from evidencesoc.domain.models import EvidenceItem
 from evidencesoc.tools.alert_context import AlertContextTools
 from evidencesoc.tools.errors import ToolDependencyError

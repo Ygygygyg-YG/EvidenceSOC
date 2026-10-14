@@ -6,7 +6,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-
 from evidencesoc.domain.models import EventIndexStatus, SecurityEvent
 from evidencesoc.ingestion.normalize import NormalizationError
 from evidencesoc.ingestion.service import (

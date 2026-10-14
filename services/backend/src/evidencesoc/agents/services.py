@@ -8,11 +8,13 @@ from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
+from time import monotonic
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from evidencesoc.agents.collection import BoundedCollector
 from evidencesoc.agents.fallback import matching_target
 from evidencesoc.agents.models import SimulatedAction
 from evidencesoc.config import BACKEND_ROOT, Settings
@@ -45,6 +47,7 @@ from evidencesoc.persistence.tables import (
     ValidationResultTable,
 )
 from evidencesoc.tools.attack import validate_attack_results
+from evidencesoc.tools.ledger import AttemptLimitExceeded, Ledger
 from evidencesoc.tools.policy import ALLOWED_TOOLS, validate_event_search
 
 OBSERVATION_FIELDS = frozenset(
@@ -103,6 +106,7 @@ class PostgresWorkflowServices:
             )
             session_factory = create_session_factory(self._engine)
         self._sessions = session_factory
+        self.planner_model: Any | None = None
 
     async def aclose(self) -> None:
         await asyncio.to_thread(self.close)
@@ -211,6 +215,32 @@ class PostgresWorkflowServices:
             row.evidence_ids = evidence_ids
             row.status = status
             row.finished_at = datetime.now(UTC)
+            if row.agent_name == "collect":
+                row.output_summary = {
+                    key: deepcopy(delta[key])
+                    for key in (
+                        "collection_round",
+                        "collection_budget_used",
+                        "collection_round_used",
+                        "collection_ledger_ids",
+                        "collection_tool_attempts",
+                        "collection_model_attempts",
+                        "collection_observations",
+                        "collection_stop_reason",
+                        "fallback_used",
+                    )
+                    if key in delta
+                }
+            elif row.agent_name == "validate":
+                row.output_summary = {
+                    key: deepcopy(delta[key])
+                    for key in (
+                        "verification_call_count",
+                        "verification_attempts",
+                        "verification_duration_ms",
+                    )
+                    if key in delta
+                }
 
     def _scope(self, incident_id: str) -> dict[str, Any]:
         loaded = self._load_incident(incident_id)
@@ -218,6 +248,7 @@ class PostgresWorkflowServices:
         at = _utc(alert["created_at"])
         filters: dict[str, str] = {}
         source_scopes: list[dict[str, Any]] = []
+        dataset_ids: list[object] = []
         with self._sessions() as session:
             events = (
                 session.execute(
@@ -235,6 +266,7 @@ class PostgresWorkflowServices:
             for event in events:
                 if calculate_content_sha256(event.raw) != event.content_sha256:
                     raise ValueError("alert source event integrity check failed")
+                dataset_ids.append(event.raw.get("dataset_id"))
                 raw = _observations(event.raw)
                 source_filters = {
                     key: raw[key]
@@ -244,6 +276,19 @@ class PostgresWorkflowServices:
                 source_scopes.append({"filters": source_filters, "raw": raw})
                 if not filters and source_filters:
                     filters = source_filters
+        if any(value is not None for value in dataset_ids):
+            dataset_id = dataset_ids[0]
+            if (
+                not isinstance(dataset_id, str)
+                or not dataset_id.strip()
+                or any(value != dataset_id for value in dataset_ids)
+            ):
+                raise PermissionError("alert mixes dataset scenarios")
+            if filters:
+                filters["dataset_id"] = dataset_id
+            for source in source_scopes:
+                if source["filters"]:
+                    source["filters"]["dataset_id"] = dataset_id
         return {
             "alert_id": alert["alert_id"],
             "time_from": (at - timedelta(seconds=900)).isoformat(),
@@ -278,6 +323,69 @@ class PostgresWorkflowServices:
         ):
             raise ValueError("MCP tool returned invalid structured results")
         return values
+
+    async def _verification_call(
+        self,
+        ledger: Ledger,
+        session: Any,
+        incident_id: str,
+        run_id: str,
+        arguments: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        row = await asyncio.to_thread(
+            ledger.reserve,
+            incident_id,
+            run_id,
+            1,
+            "search_security_events",
+            arguments,
+            "Requery approved simulation target after approval.",
+            "verification",
+        )
+        if row.status == "completed":
+            if row.result is None:
+                raise ValueError("completed verification call has no recorded result")
+            return row.result["values"]
+        if row.status == "failed":
+            raise RuntimeError(f"verification tool failed: {row.error_code}")
+        while True:
+            try:
+                attempt = await asyncio.to_thread(ledger.begin_attempt, row.call_id)
+            except AttemptLimitExceeded as exc:
+                await asyncio.to_thread(ledger.fail, row.call_id, "ATTEMPTS_EXHAUSTED")
+                raise RuntimeError(
+                    "verification tool failed: ATTEMPTS_EXHAUSTED"
+                ) from exc
+            try:
+                values = await asyncio.wait_for(
+                    self._call(session, "search_security_events", arguments),
+                    timeout=10.0,
+                )
+            except TimeoutError:
+                code = "DEPENDENCY_TIMEOUT"
+            except Exception as exc:  # noqa: BLE001 - persist a bounded public error code.
+                message = str(exc)
+                code = (
+                    message.rsplit(": ", 1)[-1]
+                    if message.startswith("MCP tool failed: ")
+                    else "DEPENDENCY_UNAVAILABLE"
+                )
+                if code not in {
+                    "DEPENDENCY_TIMEOUT",
+                    "DEPENDENCY_UNAVAILABLE",
+                    "NOT_FOUND",
+                    "POLICY_DENIED",
+                    "MCP_TOOL_ERROR",
+                }:
+                    code = "DEPENDENCY_UNAVAILABLE"
+            else:
+                await asyncio.to_thread(
+                    ledger.complete, row.call_id, {"values": values}
+                )
+                return values
+            if code in {"NOT_FOUND", "POLICY_DENIED"} or attempt.attempts >= 3:
+                await asyncio.to_thread(ledger.fail, row.call_id, code)
+                raise RuntimeError(f"verification tool failed: {code}")
 
     async def hydrate_evidence(
         self,
@@ -347,50 +455,52 @@ class PostgresWorkflowServices:
         context = RunContext(
             run_id, incident_id, state.get("trace_id") or "TRACE-" + new_ulid()
         )
+        model = self.planner_model
+        if self.settings.llm_mode != "fixture" and model is None:
+            try:
+                from evidencesoc.agents.model import DeepSeekStructuredModel
+
+                model = DeepSeekStructuredModel(self.settings)
+            except Exception:  # noqa: BLE001 - model unavailability triggers bounded rules.
+                model = None
         async with open_stdio_session(
-            context, settings=self.settings, backend_dir=BACKEND_ROOT
+            context,
+            settings=self.settings,
+            backend_dir=BACKEND_ROOT,
+            managed_attempts=True,
         ) as session:
             await self._check_tools(session)
-            values = await self._call(
-                session,
-                "get_alert_context",
-                {
-                    "alert_id": scope["alert_id"],
-                    "before_seconds": 900,
-                    "after_seconds": 900,
-                },
-            )
-            if scope["filters"]:
-                arguments = {
+            collector = BoundedCollector(
+                ledger=Ledger(self._sessions),
+                invoke=lambda name, arguments: self._call(session, name, arguments),
+                scope={
                     key: scope[key]
-                    for key in ("time_from", "time_to", "filters", "limit")
-                }
-                validate_event_search(
-                    _utc(scope["time_from"]),
-                    _utc(scope["time_to"]),
-                    scope["filters"],
-                    scope["limit"],
-                )
-                values.extend(
-                    await self._call(session, "search_security_events", arguments)
-                )
-            knowledge = await self._call(
-                session,
-                "lookup_attack_technique",
-                {
-                    "query": "SQL injection against a public facing application",
-                    "limit": 8,
+                    for key in ("alert_id", "time_from", "time_to", "filters", "limit")
                 },
+                state=state,
+                run_id=run_id,
+                model=model,
+                llm_mode=self.settings.llm_mode,
             )
-            validate_attack_results(knowledge, limit=8)
+            collected = await collector.run()
+        values = collected.pop("evidence_values")
+        knowledge = collected["knowledge"]
+        validate_attack_results(knowledge, limit=10)
         evidence = await self.hydrate_evidence(incident_id, values)
-        return {"evidence": evidence, "knowledge": knowledge}
+        return {**collected, "evidence": evidence}
 
     async def verify(self, state: Mapping[str, Any], run_id: str) -> dict[str, Any]:
+        started = monotonic()
         incident_id = state["incident_id"]
         scope = await asyncio.to_thread(self._scope, incident_id)
         if not scope["filters"]:
-            return {"evidence": [], "executed_checks": []}
+            return {
+                "evidence": [],
+                "executed_checks": [],
+                "verification_call_count": 0,
+                "verification_attempts": 0,
+                "verification_duration_ms": round((monotonic() - started) * 1000),
+            }
         context = RunContext(
             run_id, incident_id, state.get("trace_id") or "TRACE-" + new_ulid()
         )
@@ -424,6 +534,10 @@ class PostgresWorkflowServices:
                 )
             filters = dict(source["filters"])
             for key, value in query["filters"].items():
+                if key == "dataset_id" and key not in scope["filters"]:
+                    raise PermissionError(
+                        "verification dataset is not anchored to the incident"
+                    )
                 if key in filters and filters[key] != value:
                     raise PermissionError(
                         "verification conflicts with the incident source filters"
@@ -468,16 +582,22 @@ class PostgresWorkflowServices:
             requested_checks.append((check_id, query_key))
         values: list[dict[str, Any]] = []
         query_values: dict[str, list[dict[str, Any]]] = {}
+        ledger = Ledger(self._sessions)
         async with open_stdio_session(
-            context, settings=self.settings, backend_dir=BACKEND_ROOT
+            context,
+            settings=self.settings,
+            backend_dir=BACKEND_ROOT,
+            managed_attempts=True,
         ) as session:
             await self._check_tools(session)
             for key, arguments in queries.items():
-                query_values[key] = await self._call(
-                    session, "search_security_events", arguments
+                query_values[key] = await self._verification_call(
+                    ledger, session, incident_id, run_id, arguments
                 )
                 values.extend(query_values[key])
         evidence = await self.hydrate_evidence(incident_id, values)
+        rows = await asyncio.to_thread(ledger.calls, incident_id, 1, "verification")
+        own = [row for row in rows if row.run_id == run_id]
         return {
             "evidence": evidence,
             "executed_checks": [
@@ -490,6 +610,9 @@ class PostgresWorkflowServices:
                 }
                 for check_id, key in requested_checks
             ],
+            "verification_call_count": len(own),
+            "verification_attempts": sum(row.attempts for row in own),
+            "verification_duration_ms": round((monotonic() - started) * 1000),
         }
 
     @staticmethod

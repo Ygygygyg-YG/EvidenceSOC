@@ -4,9 +4,8 @@ from copy import deepcopy
 from typing import Any
 
 import pytest
-from pydantic import ValidationError
-
 from evidencesoc.evidence.citations import FactualClaim, validate_citations
+from pydantic import ValidationError
 
 EVIDENCE_ID = "EV-01J8ZW4AAA0ABCDEFGHJKMNPQR"
 OTHER_EVIDENCE_ID = "EV-01J8ZW4AAA1ABCDEFGHJKMNPQR"

@@ -4,9 +4,11 @@ import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from mcp.types import CallToolResult
-
-from evidencesoc.mcp_server.context import RunContext, load_run_context
+from evidencesoc.mcp_server.context import (
+    RunContext,
+    load_run_context,
+    tool_attempt_limit,
+)
 from evidencesoc.mcp_server.main import create_server
 from evidencesoc.tools.alert_context import AlertContextTools
 from evidencesoc.tools.attack import AttackTools
@@ -17,6 +19,7 @@ from evidencesoc.tools.errors import (
 )
 from evidencesoc.tools.policy import PolicyDeniedError
 from evidencesoc.tools.security_events import SecurityEventTools
+from mcp.types import CallToolResult
 
 
 class WorkSpy:
@@ -100,6 +103,13 @@ def test_run_context_requires_all_bound_identifiers() -> None:
         incomplete[missing] = " "
         with pytest.raises(ValueError, match=missing):
             load_run_context(incomplete)
+
+
+def test_tool_attempt_limit_defaults_to_three_and_accepts_managed_one() -> None:
+    assert tool_attempt_limit({}) == 3
+    assert tool_attempt_limit({"EVIDENCESOC_MAX_TOOL_ATTEMPTS": "1"}) == 1
+    with pytest.raises(ValueError):
+        tool_attempt_limit({"EVIDENCESOC_MAX_TOOL_ATTEMPTS": "4"})
 
 
 @pytest.mark.asyncio

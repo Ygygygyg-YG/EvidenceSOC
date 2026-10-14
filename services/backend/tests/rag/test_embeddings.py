@@ -9,7 +9,6 @@ from types import SimpleNamespace
 from typing import Any, Self
 
 import pytest
-
 from evidencesoc.rag import embeddings
 
 

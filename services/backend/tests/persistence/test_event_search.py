@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import pytest
-from opensearchpy.exceptions import NotFoundError
-
 from evidencesoc.domain.models import SecurityEvent, Severity
 from evidencesoc.persistence import event_search
 from evidencesoc.persistence.event_search import (
@@ -14,6 +14,7 @@ from evidencesoc.persistence.event_search import (
     create_opensearch_client,
 )
 from evidencesoc.tools.policy import PolicyDeniedError
+from opensearchpy.exceptions import NotFoundError
 
 NOW = datetime(2026, 9, 21, 12, 0, tzinfo=UTC)
 SHA256 = "a" * 64
@@ -78,6 +79,21 @@ def test_build_event_document_serializes_search_fields_and_retains_raw_event() -
     assert document["message"] == "possible SQL injection"
     assert document["tags"] == ["web", "sqli"]
     assert document["http"] == {"method": "GET", "path": "/search"}
+
+
+def test_ait_dataset_id_is_indexed_as_an_exact_filter() -> None:
+    original = make_event()
+    event = make_event(raw={**original.raw, "dataset_id": "ait-v2.1:shaw"})
+    document = build_event_document(event)
+    template_path = (
+        Path(__file__).resolve().parents[4]
+        / "infra/opensearch/security-events-template.json"
+    )
+    properties = json.loads(template_path.read_text(encoding="utf-8"))["template"][
+        "mappings"
+    ]["properties"]
+    assert document["dataset_id"] == "ait-v2.1:shaw"
+    assert properties["dataset_id"]["type"] == "keyword"
 
 
 def test_event_store_uses_event_id_as_the_opensearch_document_id() -> None:

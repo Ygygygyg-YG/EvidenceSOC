@@ -149,14 +149,18 @@ class AttackLookupWork:
         repository_factory: Callable[
             [Session], AttackKnowledgeLookup
         ] = AttackKnowledgeRepository,
+        max_attempts: int = 3,
     ) -> None:
+        if not 1 <= max_attempts <= 3:
+            raise ValueError("max_attempts must be between 1 and 3")
         self._session_factory = session_factory
         self._clock = clock
         self._repository_factory = repository_factory
+        self._max_attempts = max_attempts
 
     def __call__(self, *, query: str, limit: int) -> list[dict[str, str]]:
         deadline = self._clock() + 10.0
-        for attempt in range(3):
+        for attempt in range(self._max_attempts):
             remaining = min(deadline - self._clock(), check_execution() or 10.0)
             if remaining <= 0:
                 raise ToolDependencyTimeout("attack lookup deadline exceeded")
@@ -170,7 +174,7 @@ class AttackLookupWork:
             except OperationalError as exc:
                 if self._clock() >= deadline:
                     raise ToolDependencyTimeout("attack lookup timed out") from exc
-                if attempt == 2:
+                if attempt == self._max_attempts - 1:
                     raise ToolDependencyError("attack lookup unavailable") from exc
         raise AssertionError("unreachable retry state")
 
@@ -179,6 +183,7 @@ def build_attack_lookup_work(
     *,
     session_factory: sessionmaker[Session],
     model_path: Path | None = None,
+    max_attempts: int = 3,
 ) -> AttackLookupWork:
     from evidencesoc.rag.embeddings import LocalEmbeddingProvider
     from evidencesoc.rag.retriever import HybridAttackKnowledgeRepository
@@ -191,6 +196,7 @@ def build_attack_lookup_work(
     )
     return AttackLookupWork(
         session_factory=session_factory,
+        max_attempts=max_attempts,
         repository_factory=lambda session: HybridAttackKnowledgeRepository(
             session, embedder
         ),

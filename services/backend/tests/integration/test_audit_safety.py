@@ -3,8 +3,6 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import delete, select
-
 from evidencesoc.config import Settings
 from evidencesoc.ids import new_ulid
 from evidencesoc.mcp_server.context import RunContext
@@ -22,6 +20,7 @@ from evidencesoc.persistence.tables import (
 )
 from evidencesoc.tools.attack import AttackTools
 from evidencesoc.tools.audit_sql import SqlAuditWriter
+from sqlalchemy import delete, select
 
 
 @pytest.mark.asyncio

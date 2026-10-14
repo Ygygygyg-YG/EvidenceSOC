@@ -122,14 +122,16 @@ class AlertContextWork:
         repository_factory: Callable[
             [], AbstractContextManager[AlertContextRepository]
         ],
-        evidence_factory: Callable[
-            [], AbstractContextManager[EvidenceService]
-        ],
+        evidence_factory: Callable[[], AbstractContextManager[EvidenceService]],
         clock: Callable[[], float] = monotonic,
+        max_attempts: int = 3,
     ) -> None:
+        if not 1 <= max_attempts <= 3:
+            raise ValueError("max_attempts must be between 1 and 3")
         self._repository_factory = repository_factory
         self._evidence_factory = evidence_factory
         self._clock = clock
+        self._max_attempts = max_attempts
 
     def __call__(
         self,
@@ -140,7 +142,7 @@ class AlertContextWork:
         incident_id: str,
     ) -> list[EvidenceItem]:
         deadline = self._clock() + 10.0
-        for attempt in range(3):
+        for attempt in range(self._max_attempts):
             remaining = min(deadline - self._clock(), check_execution() or 10.0)
             if remaining <= 0:
                 raise ToolDependencyTimeout("alert context deadline exceeded")
@@ -158,15 +160,13 @@ class AlertContextWork:
             except OperationalError as exc:
                 if self._clock() >= deadline:
                     raise ToolDependencyTimeout("alert context timed out") from exc
-                if attempt == 2:
+                if attempt == self._max_attempts - 1:
                     raise ToolDependencyError("alert context unavailable") from exc
         else:
             raise AssertionError("unreachable retry state")
 
         if self._clock() >= deadline:
-            raise ToolDependencyTimeout(
-                "deadline exceeded before evidence creation"
-            )
+            raise ToolDependencyTimeout("deadline exceeded before evidence creation")
         if not event_ids:
             return []
 
@@ -203,6 +203,7 @@ def build_alert_context_work(
     opensearch_url: str,
     index_name: str,
     session_factory: sessionmaker[Session],
+    max_attempts: int = 3,
 ) -> AlertContextWork:
     if not opensearch_url.strip():
         raise ValueError("OpenSearch URL must not be blank")
@@ -232,4 +233,5 @@ def build_alert_context_work(
     return AlertContextWork(
         repository_factory=repository_factory,
         evidence_factory=evidence_factory,
+        max_attempts=max_attempts,
     )

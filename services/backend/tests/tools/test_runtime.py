@@ -3,16 +3,14 @@ import threading
 from types import SimpleNamespace
 
 import pytest
-
 from evidencesoc.tools.errors import ToolDependencyTimeout
 from evidencesoc.tools.runtime import run_audited_tool
 
 
 def test_cancelled_budget_prevents_sql_operation() -> None:
-    from sqlalchemy import text
-
     from evidencesoc.execution import CURRENT_BUDGET, ExecutionBudget
     from evidencesoc.persistence.database import create_database_engine
+    from sqlalchemy import text
 
     budget = ExecutionBudget(float("inf"))
     budget.cancelled.set()

@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from evidencesoc.config import BACKEND_ROOT, REPOSITORY_ROOT, Settings
 
 

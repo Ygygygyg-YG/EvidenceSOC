@@ -162,8 +162,8 @@ export const responseDetailSchema = responseItemSchema.extend({
     if (new Set(checkIds).size !== checkIds.length || checkIds.some((id) => !data.validation_checks.some((check) => check.check_id === id))) {
       context.addIssue({ code: 'custom', message: '验证结果引用了未知或重复的条件。' });
     }
-    if (data.validation_result.checks?.some((check) => check.evidence_ids.some((id) => !data.evidence_ids.includes(id)))) {
-      context.addIssue({ code: 'custom', message: '验证结果引用了方案以外的证据。' });
+    if (data.validation_result.checks?.some((check) => check.evidence_ids.some((id) => !data.validation_result!.evidence_ids.includes(id)))) {
+      context.addIssue({ code: 'custom', message: '验证条件引用了验证结果以外的证据。' });
     }
   }
 });

@@ -5,7 +5,6 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
-
 from evidencesoc.tools.errors import (
     ToolDependencyError,
     ToolDependencyTimeout,

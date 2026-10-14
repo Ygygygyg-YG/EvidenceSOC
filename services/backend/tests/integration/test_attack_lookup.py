@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from sqlalchemy import delete
-
 from evidencesoc.config import Settings
 from evidencesoc.ids import new_ulid
 from evidencesoc.persistence.database import (
@@ -10,6 +8,7 @@ from evidencesoc.persistence.database import (
 )
 from evidencesoc.persistence.tables import KnowledgeChunkTable
 from evidencesoc.tools.attack_work import AttackKnowledgeRepository
+from sqlalchemy import delete
 
 
 def test_attack_lookup_runs_against_postgresql_jsonb() -> None:

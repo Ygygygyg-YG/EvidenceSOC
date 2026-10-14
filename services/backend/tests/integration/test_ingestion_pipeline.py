@@ -4,8 +4,6 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import delete
-
 from evidencesoc.config import Settings
 from evidencesoc.evidence.service import EvidenceService
 from evidencesoc.ids import new_event_id, new_ulid
@@ -28,6 +26,7 @@ from evidencesoc.persistence.tables import (
     IncidentTable,
     SecurityEventTable,
 )
+from sqlalchemy import delete
 
 
 def test_event_can_be_traced_from_both_stores_to_evidence(

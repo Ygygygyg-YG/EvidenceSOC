@@ -19,21 +19,25 @@ def build_stdio_parameters(
     settings: Settings,
     backend_dir: Path,
     python_executable: str = sys.executable,
+    managed_attempts: bool = False,
 ) -> StdioServerParameters:
     """Bind one local MCP child process to an existing AgentRun."""
+    environment = {
+        "EVIDENCESOC_RUN_ID": context.run_id,
+        "EVIDENCESOC_INCIDENT_ID": context.incident_id,
+        "EVIDENCESOC_TRACE_ID": context.trace_id,
+        "DATABASE_URL": settings.database_url,
+        "OPENSEARCH_URL": settings.opensearch_url,
+        "OPENSEARCH_INDEX": settings.opensearch_index,
+        "RAG_DATA_DIRECTORY": str(settings.rag_data_directory),
+    }
+    if managed_attempts:
+        environment["EVIDENCESOC_MAX_TOOL_ATTEMPTS"] = "1"
     return StdioServerParameters(
         command=python_executable,
         args=["-m", "evidencesoc.mcp_server.main"],
         cwd=backend_dir,
-        env={
-            "EVIDENCESOC_RUN_ID": context.run_id,
-            "EVIDENCESOC_INCIDENT_ID": context.incident_id,
-            "EVIDENCESOC_TRACE_ID": context.trace_id,
-            "DATABASE_URL": settings.database_url,
-            "OPENSEARCH_URL": settings.opensearch_url,
-            "OPENSEARCH_INDEX": settings.opensearch_index,
-            "RAG_DATA_DIRECTORY": str(settings.rag_data_directory),
-        },
+        env=environment,
     )
 
 
@@ -45,6 +49,7 @@ async def open_stdio_session(
     backend_dir: Path,
     python_executable: str = sys.executable,
     errlog: TextIO | None = None,
+    managed_attempts: bool = False,
 ) -> AsyncIterator[ClientSession]:
     """Keep one session open for the entire AgentRun; tools expire on exit."""
     parameters = build_stdio_parameters(
@@ -52,6 +57,7 @@ async def open_stdio_session(
         settings=settings,
         backend_dir=backend_dir,
         python_executable=python_executable,
+        managed_attempts=managed_attempts,
     )
     async with (
         stdio_client(parameters, errlog=errlog or sys.stderr) as (read, write),

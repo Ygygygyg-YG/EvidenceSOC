@@ -23,6 +23,17 @@ class InvestigationState(TypedDict, total=False):
     simulation_execution: dict[str, Any] | None
     fallback_count: int
     fallback_used: bool
+    collection_round: int
+    collection_budget_used: int
+    collection_round_used: int
+    collection_ledger_ids: list[str]
+    collection_tool_attempts: int
+    collection_model_attempts: int
+    collection_observations: list[dict[str, Any]]
+    collection_stop_reason: str | None
+    verification_call_count: int
+    verification_attempts: int
+    verification_duration_ms: int
     errors: list[dict[str, Any]]
     events: Annotated[list[dict[str, Any]], add]
     stop_reason: str | None

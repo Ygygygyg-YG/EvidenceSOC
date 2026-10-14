@@ -77,6 +77,22 @@ def _row(row: Any) -> dict[str, Any]:
     }
 
 
+def _step_entity(
+    evidence_ids: list[str],
+    verified_raw: dict[str, dict[str, Any]],
+    keys: tuple[str, ...],
+) -> str | None:
+    """Expose observed values only when this step's citations agree."""
+    values = {
+        value.strip()
+        for evidence_id in evidence_ids
+        for key in keys
+        if isinstance(value := verified_raw.get(evidence_id, {}).get(key), str)
+        and value.strip()
+    }
+    return next(iter(values)) if len(values) == 1 else None
+
+
 def _plan_version(plan: ResponsePlanTable) -> str:
     canonical = json.dumps(
         _row(plan), sort_keys=True, separators=(",", ":"), allow_nan=False
@@ -160,7 +176,8 @@ def _valid_review_details(plan: ResponsePlanTable) -> bool:
         for action in actions
     ):
         return False
-    for step in (*rollbacks, *checks):
+    review_steps: list[PlanRollbackStep | PlanValidationCheck] = [*rollbacks, *checks]
+    for step in review_steps:
         if (
             not step.description.strip()
             or not step.expected_result.strip()
@@ -300,7 +317,7 @@ def _response_plan_item(
     alert: AlertTable,
     investigation: ApiInvestigationTable | None,
     approval_decision: str | None,
-    latest_plan_id: str,
+    latest_plan_id: str | None,
 ) -> dict[str, Any]:
     state = restore_json(investigation.state) if investigation is not None else {}
     current_state_plan_id = _state_plan_id(state)
@@ -863,14 +880,44 @@ class ApiStore:
             # A graph edge is an asserted relationship, not a visual ordering.
             # Current storage only records steps, so no edges can be asserted here.
             evidence_ids = {item["evidence_id"] for item in evidence}
+            events_by_id = {
+                row.event_id: row
+                for row in session.scalars(
+                    select(SecurityEventTable).where(
+                        SecurityEventTable.event_id.in_(
+                            {item["event_id"] for item in evidence}
+                        )
+                    )
+                )
+            }
+            verified_raw = {}
+            for item in evidence:
+                event_row = events_by_id.get(item["event_id"])
+                if event_row is None or event_row.source != item["source"]:
+                    continue
+                raw = restore_json(event_row.raw)
+                if not isinstance(raw, dict):
+                    continue
+                try:
+                    digest = calculate_content_sha256(raw)
+                except (TypeError, ValueError):
+                    continue
+                if digest == event_row.content_sha256 == item["content_sha256"]:
+                    verified_raw[item["evidence_id"]] = raw
             graph_nodes = [
                 {
                     "step_id": step["attack_step_id"],
                     "sequence": step["sequence"],
                     "phase": step["phase"],
                     "description": step["description"],
-                    "host": None,
-                    "service": None,
+                    "host": _step_entity(
+                        step["evidence_ids"],
+                        verified_raw,
+                        ("host", "hostname", "destination_host"),
+                    ),
+                    "service": _step_entity(
+                        step["evidence_ids"], verified_raw, ("service",)
+                    ),
                     "observed_at": step["occurred_at"],
                     "technique_ids": [step["technique_id"]]
                     if step["technique_id"]
@@ -980,6 +1027,7 @@ class ApiStore:
                 "available_actions": (
                     ["approve", "reject"]
                     if can_decide
+                    and plan is not None
                     and _valid_review_details(plan)
                     and _cited_evidence_verified(session, plan)
                     else ["reject"]

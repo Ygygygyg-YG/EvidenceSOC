@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from sqlalchemy.dialects import postgresql
-
 from evidencesoc.domain.models import (
     EventIndexStatus,
     EvidenceItem,
@@ -26,6 +26,7 @@ from evidencesoc.persistence.event_repository import (
     IncidentNotFoundError,
     PersistResult,
 )
+from sqlalchemy.dialects import postgresql
 
 NOW = datetime(2026, 9, 21, 12, 0, tzinfo=UTC)
 SHA256 = "a" * 64
@@ -92,6 +93,9 @@ class RecordingSession:
     def commit(self) -> None:
         self.commits += 1
         self.operations.append(("commit", None))
+
+    def get_bind(self) -> SimpleNamespace:
+        return SimpleNamespace(dialect=postgresql.dialect())
 
 
 def as_event_row(event: SecurityEvent) -> SimpleNamespace:
@@ -242,7 +246,19 @@ def test_stale_index_failure_cannot_overwrite_an_indexed_event() -> None:
 def test_add_many_persists_evidence_for_an_incident() -> None:
     incident_id = "IN-01J8ZW4AAA0ABCDEFGHJKMNPQR"
     item = make_evidence()
-    session = RecordingSession(SimpleNamespace(incident_id=incident_id), None)
+    fingerprint = hashlib.sha256(
+        json.dumps(item.query, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    session = RecordingSession(
+        SimpleNamespace(incident_id=incident_id),
+        [
+            SimpleNamespace(
+                event_id=item.event_id,
+                query_fingerprint=fingerprint,
+                evidence_id=item.evidence_id,
+            )
+        ],
+    )
 
     added = EvidenceRepository(session).add_many(incident_id, [item])
 
@@ -263,6 +279,9 @@ def test_add_many_persists_evidence_for_an_incident() -> None:
     assert "WHERE incidents.incident_id = %(incident_id_1)s" in str(incident_query)
     assert incident_query.params == {"incident_id_1": incident_id}
     assert "INSERT INTO evidence_items" in str(evidence_insert)
+    assert "ON CONFLICT (incident_id, event_id, query_fingerprint) DO UPDATE" in str(
+        evidence_insert
+    )
     assert evidence_insert.params["incident_id_m0"] == incident_id
 
 

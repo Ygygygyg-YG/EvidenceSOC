@@ -9,8 +9,6 @@ from importlib import import_module
 from typing import Any
 
 import pytest
-from opensearchpy.exceptions import ConnectionError as OpenSearchConnectionError
-
 from evidencesoc.domain.models import EvidenceItem, SecurityEvent, Severity
 from evidencesoc.evidence.service import (
     EvidenceIntegrityError,
@@ -22,6 +20,7 @@ from evidencesoc.persistence.event_repository import (
     EventNotFoundError,
     EvidenceNotFoundError,
 )
+from opensearchpy.exceptions import ConnectionError as OpenSearchConnectionError
 
 NOW = datetime(2026, 9, 21, 12, 0, tzinfo=UTC)
 EVENT_ID = "SE-01J8ZW4AAA0ABCDEFGHJKMNPQR"
@@ -434,6 +433,33 @@ def test_event_work_exhausted_query_never_persists() -> None:
 
     assert query.calls == 3
     assert evidence_repository.add_calls == []
+
+
+def test_event_work_managed_attempt_has_no_hidden_retry() -> None:
+    module = import_module("evidencesoc.tools.event_work")
+
+    class Query:
+        calls = 0
+
+        def search_event_ids(self, **_kwargs: object) -> list[str]:
+            self.calls += 1
+            raise OpenSearchConnectionError("N/A", "offline")
+
+    query = Query()
+    work = module.EventSearchWork(
+        query=query,
+        evidence_factory=lambda: nullcontext(None),
+        max_attempts=1,
+    )
+    with pytest.raises(module.ToolDependencyError):
+        work(
+            time_from=NOW,
+            time_to=NOW + timedelta(minutes=5),
+            filters={},
+            limit=2,
+            incident_id=INCIDENT_ID,
+        )
+    assert query.calls == 1
 
 
 def test_event_work_deadline_prevents_starting_evidence_write() -> None:

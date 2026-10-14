@@ -3,8 +3,6 @@ from __future__ import annotations
 import os
 
 import pytest
-from sqlalchemy import func, select
-
 from evidencesoc.config import Settings
 from evidencesoc.evidence.citations import validate_citations
 from evidencesoc.persistence.database import (
@@ -17,6 +15,7 @@ from evidencesoc.rag.ingest_attack import PINNED_STIX_SHA256
 from evidencesoc.rag.retriever import HybridRetriever, PostgresKnowledgeRepository
 from evidencesoc.tools.attack import validate_attack_results
 from evidencesoc.tools.attack_work import build_attack_lookup_work
+from sqlalchemy import func, select
 
 # Fixed before executing the full corpus acceptance run. This is a developer
 # retrieval benchmark, never ingested into the knowledge corpus.
