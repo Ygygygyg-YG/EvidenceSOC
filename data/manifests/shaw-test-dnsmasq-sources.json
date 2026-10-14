@@ -1,0 +1,14 @@
+{
+  "schema_version": 2,
+  "dataset_id": "ait-v2.1:shaw",
+  "scenario": "shaw",
+  "split": "test",
+  "sources": [
+    {
+      "relative_log_path": "inet-firewall/logs/dnsmasq.log",
+      "events": "../ait/scenarios/shaw/processed/agent/shaw-dnsmasq-events.jsonl",
+      "scored_gold": "../ait/scenarios/shaw/processed/gold/shaw-dnsmasq-scored-gold.jsonl",
+      "proof": "../ait/scenarios/shaw/processed/reports/shaw-dnsmasq-completeness.json"
+    }
+  ]
+}

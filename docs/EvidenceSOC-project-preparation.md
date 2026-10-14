@@ -775,6 +775,10 @@ git commit -m "feat: add soc investigation user interface"
 
 ### Task 11: AIT 数据集、攻击来源和攻击类型金标
 
+**当前状态（2026-10-11）：** AIT 基础流程已跑通：固定 8 个场景的拆分，完成 Fox、Russellmitchell 及新增 6 个场景的来源处理；新增 8 个开发/内部验证包，并冻结 Shaw、Wilson 测试包 22 个（攻击 11、正常 11），消融子集 22 个。各包重建一致，测试时间窗互不重叠，Agent 输入通过金标隔离审计。48/24 的目标数量因独立攻击阶段不足按实际 `N=22`、`M=22` 报告，不重复切片补足。近期补充集仍须在正式评测前建设并单独报告。
+
+**数据时效性安排：** 继续使用 AIT 验证解析、金标隔离、事件包重建和基础评测流程。正式评测前另行补充近期采集或按近期攻击技术复现的数据，记录日志采集/复现时间、软件环境、技术范围、数据来源与标签依据；复现数据明确标注为复现，不视为近期真实事件。补充集独立划分开发/验证/测试，按完整事件或复现场景隔离，沿用金标隔离与可重建要求，并在正式运行前冻结；具体来源及规模在准备阶段确定，不提前承诺覆盖全部近期攻击。
+
 **Files:**
 - Create: `evals/datasets/ait_v2/parse.py`
 - Create: `evals/datasets/ait_v2/join_labels.py`
@@ -787,43 +791,49 @@ git commit -m "feat: add soc investigation user interface"
 - Consumes: AIT Log Data Set V2.1 的 `gather/`、`labels/`、`dataset.yml`、`servers.yml` 和 `attacks.log`。
 - Produces: Agent 可见事件包、评分程序专用金标包和统一多标签攻击分类。
 
-- [ ] **Step 1: 固定数据拆分**
+- [x] **Step 1: 按完整场景固定调优、内部验证与测试拆分**
 
 ```json
 {
-  "development": ["fox", "harrison"],
-  "validation": ["russellmitchell", "santos"],
-  "test": ["shaw", "wardbeck", "wheeler", "wilson"]
+  "development": ["fox", "harrison", "russellmitchell", "santos", "wheeler"],
+  "validation": ["wardbeck"],
+  "test": ["shaw", "wilson"]
 }
 ```
 
-测试必须断言三个集合没有交集。
+5 个场景用于提示词、检索、规则和工具策略调优，1 个场景用于内部验证，2 个场景用于冻结测试。开发与内部验证合计 6/8，即 75%；测试为 2/8，即 25%。比例按场景数计算，不代表日志行或事件包严格符合 80/20，也不进行模型权重训练。
 
-- [ ] **Step 2: 解析原始日志并保留行号**
+测试必须断言三个集合没有交集，案件、日志查询和事件包不能跨场景。最终测试标签仅供评分，提示词、配置、工具策略、知识库版本、事件包选择规则与评分规则在正式测试前冻结；不得依据最终测试结果重新调优。
+
+- [x] **Step 2: 解析原始日志并保留行号**
 
 每个事件必须保存 `dataset_id`、`relative_log_path`、`line_number`、`host`、`timestamp` 和规范化字段。
 
-- [ ] **Step 3: 用联合键连接标签**
+- [x] **Step 3: 用联合键连接标签**
 
-联合键固定为 `(dataset_id, relative_log_path, line_number)`；没有对应标签的日志记为正常。评分程序保存原始标签，Agent 输入中删除标签字段。
+联合键固定为 `(dataset_id, relative_log_path, line_number)`；确认标签文件完整且匹配成功后，无攻击标签的日志才记为正常，标签缺失、连接失败或解析异常须记录并排除，不能当作正常样本。评分程序保存原始标签，Agent 输入中删除标签字段。
 
-- [ ] **Step 4: 构建攻击来源金标**
+- [x] **Step 4: 构建攻击来源金标**
 
-评分字段为观察到的源 IP、入口主机、入口服务、首次攻击时间和后续跳转主机。`attacks.log` 与含攻击者标识的配置只进入评分侧。
+评分字段为观察到的源 IP、入口主机、入口服务、首次攻击时间和后续跳转主机。`attacks.log` 与含攻击者标识的配置只进入评分侧；原始日志无法观察的攻击步骤须标记可观察性，不要求系统凭空重构。
 
-- [ ] **Step 5: 构建攻击类型字典**
+- [x] **Step 5: 构建攻击类型字典**
 
 固定标准类型为 `reconnaissance`、`credential_attack`、`webshell_upload`、`remote_command_execution`、`privilege_escalation`、`data_exfiltration`。一个事件包允许多个类型，不能压缩成单分类。
 
-- [ ] **Step 6: 构建 48 个测试事件包**
+- [x] **Step 6: 核验并构建目标 48 个测试事件包及消融子集**
 
-测试集包含 24 个攻击包和 24 个正常包；每个包保存重建所需 ID、时间范围和哈希，不提交大型原始数据。
+仅从 `shaw`、`wilson` 构建冻结测试包，目标为 24 个攻击包和 24 个正常包，并从中固定 24 个消融包（攻击、正常各 12 个）。每个包保存重建所需 ID、时间范围、场景、选择规则和哈希，不提交大型原始数据。
 
-- [ ] **Step 7: 执行防泄漏测试**
+先核验两个测试场景中合格案例的数量；不足时如实记录主测试包数量 `N` 和消融子集数量 `M`（`M <= N`），不重复填充或把高度重叠窗口当成新增独立案例。各基线使用同一批冻结包，各消融使用同一子集；记录包间关联并分别报告两个场景结果，不把同场景多个窗口视为独立场景。
+
+近期补充集使用独立 manifest 和案例 ID，不计入上述 AIT 的 48/24 个目标包。正式评测前完成其来源、时间、标签质量、合格案例数量和防泄漏核验；未完成时如实列为尚未开展的补充评测，不宣称已验证当前攻击能力。
+
+- [x] **Step 7: 执行防泄漏测试**
 
 测试 Agent 输入中不存在 `labels`、`rules`、`attacks.log` 内容、`attacker_0` 真值或测试答案。
 
-- [ ] **Step 8: 提交**
+- [x] **Step 8: 提交**
 
 ```powershell
 uv run --project services/backend pytest evals/tests/test_ait_ground_truth.py -v

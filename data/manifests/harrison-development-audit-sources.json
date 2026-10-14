@@ -1,0 +1,14 @@
+{
+  "schema_version": 2,
+  "dataset_id": "ait-v2.1:harrison",
+  "scenario": "harrison",
+  "split": "development",
+  "sources": [
+    {
+      "relative_log_path": "intranet_server/logs/audit/audit.log",
+      "events": "../ait/scenarios/harrison/processed/agent/harrison-intranet-audit-events.jsonl",
+      "scored_gold": "../ait/scenarios/harrison/processed/gold/harrison-intranet-audit-scored-gold.jsonl",
+      "proof": "../ait/scenarios/harrison/processed/reports/harrison-intranet-audit-completeness.json"
+    }
+  ]
+}

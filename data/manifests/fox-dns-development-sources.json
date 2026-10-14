@@ -1,0 +1,14 @@
+{
+  "schema_version": 2,
+  "dataset_id": "ait-v2.1:fox",
+  "scenario": "fox",
+  "split": "development",
+  "sources": [
+    {
+      "relative_log_path": "inet-firewall/logs/dnsmasq.log",
+      "events": "../ait/processed/agent/fox-dnsmasq-events.jsonl",
+      "scored_gold": "../ait/processed/gold/fox-dnsmasq-scored-gold.jsonl",
+      "proof": "../ait/processed/reports/fox-dnsmasq-completeness.json"
+    }
+  ]
+}

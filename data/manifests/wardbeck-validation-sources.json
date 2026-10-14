@@ -1,0 +1,26 @@
+{
+  "schema_version": 2,
+  "dataset_id": "ait-v2.1:wardbeck",
+  "scenario": "wardbeck",
+  "split": "validation",
+  "sources": [
+    {
+      "relative_log_path": "intranet_server/logs/apache2/intranet.hurstwong.wardbeck.info-access.log.1",
+      "events": "../ait/scenarios/wardbeck/processed/agent/wardbeck-apache-events.jsonl",
+      "scored_gold": "../ait/scenarios/wardbeck/processed/gold/wardbeck-apache-scored-gold.jsonl",
+      "proof": "../ait/scenarios/wardbeck/processed/reports/wardbeck-apache-completeness.json"
+    },
+    {
+      "relative_log_path": "intranet_server/logs/audit/audit.log",
+      "events": "../ait/scenarios/wardbeck/processed/agent/wardbeck-intranet-audit-events.jsonl",
+      "scored_gold": "../ait/scenarios/wardbeck/processed/gold/wardbeck-intranet-audit-scored-gold.jsonl",
+      "proof": "../ait/scenarios/wardbeck/processed/reports/wardbeck-intranet-audit-completeness.json"
+    },
+    {
+      "relative_log_path": "inet-firewall/logs/dnsmasq.log",
+      "events": "../ait/scenarios/wardbeck/processed/agent/wardbeck-dnsmasq-events.jsonl",
+      "scored_gold": "../ait/scenarios/wardbeck/processed/gold/wardbeck-dnsmasq-scored-gold.jsonl",
+      "proof": "../ait/scenarios/wardbeck/processed/reports/wardbeck-dnsmasq-completeness.json"
+    }
+  ]
+}

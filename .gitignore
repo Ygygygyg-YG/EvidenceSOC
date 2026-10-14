@@ -42,3 +42,6 @@ Thumbs.db
 # Verified RAG corpus and local model assets (recreated by the preparation CLI)
 data/knowledge/
 pytest-cache-files-*/
+
+# AIT 原始数据和生成结果
+/data/ait/

@@ -1,0 +1,26 @@
+{
+  "schema_version": 2,
+  "dataset_id": "ait-v2.1:shaw",
+  "scenario": "shaw",
+  "split": "test",
+  "sources": [
+    {
+      "relative_log_path": "intranet_server/logs/apache2/intranet.thomasmurray.shaw.info-access.log.2",
+      "events": "../ait/scenarios/shaw/processed/agent/shaw-apache-events.jsonl",
+      "scored_gold": "../ait/scenarios/shaw/processed/gold/shaw-apache-scored-gold.jsonl",
+      "proof": "../ait/scenarios/shaw/processed/reports/shaw-apache-completeness.json"
+    },
+    {
+      "relative_log_path": "intranet_server/logs/audit/audit.log",
+      "events": "../ait/scenarios/shaw/processed/agent/shaw-intranet-audit-events.jsonl",
+      "scored_gold": "../ait/scenarios/shaw/processed/gold/shaw-intranet-audit-scored-gold.jsonl",
+      "proof": "../ait/scenarios/shaw/processed/reports/shaw-intranet-audit-completeness.json"
+    },
+    {
+      "relative_log_path": "inet-firewall/logs/dnsmasq.log",
+      "events": "../ait/scenarios/shaw/processed/agent/shaw-dnsmasq-events.jsonl",
+      "scored_gold": "../ait/scenarios/shaw/processed/gold/shaw-dnsmasq-scored-gold.jsonl",
+      "proof": "../ait/scenarios/shaw/processed/reports/shaw-dnsmasq-completeness.json"
+    }
+  ]
+}

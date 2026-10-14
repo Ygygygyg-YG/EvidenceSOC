@@ -1,0 +1,14 @@
+{
+  "schema_version": 2,
+  "dataset_id": "ait-v2.1:wilson",
+  "scenario": "wilson",
+  "split": "test",
+  "sources": [
+    {
+      "relative_log_path": "inet-firewall/logs/dnsmasq.log",
+      "events": "../ait/scenarios/wilson/processed/agent/wilson-dnsmasq-events.jsonl",
+      "scored_gold": "../ait/scenarios/wilson/processed/gold/wilson-dnsmasq-scored-gold.jsonl",
+      "proof": "../ait/scenarios/wilson/processed/reports/wilson-dnsmasq-completeness.json"
+    }
+  ]
+}
