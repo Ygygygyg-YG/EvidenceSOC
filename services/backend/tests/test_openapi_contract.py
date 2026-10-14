@@ -45,3 +45,40 @@ def test_task9_routes_have_typed_results_errors_and_sse_content():
         "responses"
     ]
     assert "text/event-stream" in responses["200"]["content"]
+
+
+def test_response_plan_read_routes_have_typed_openapi_results():
+    schema = app.openapi()
+    for path in ("/api/v1/response-plans", "/api/v1/response-plans/{plan_id}"):
+        responses = schema["paths"][path]["get"]["responses"]
+        assert responses["200"]["content"]["application/json"]["schema"][
+            "$ref"
+        ].startswith("#/components/schemas/ResponsePlan")
+        assert responses["404"]["content"]["application/json"]["schema"][
+            "$ref"
+        ].endswith("ErrorEnvelope")
+
+
+def test_response_plan_actions_have_a_typed_openapi_schema():
+    schemas = app.openapi()["components"]["schemas"]
+    action = schemas["ResponsePlan"]["properties"]["actions"]["items"]
+
+    assert action["$ref"] == "#/components/schemas/SimulatedAction"
+    assert schemas["SimulatedAction"]["additionalProperties"] is False
+    assert schemas["SimulatedAction"]["properties"]["action"]["enum"] == [
+        "block_ip_simulated",
+        "isolate_host_simulated",
+        "disable_account_simulated",
+    ]
+
+
+def test_evidence_detail_route_has_typed_openapi_result():
+    responses = app.openapi()["paths"][
+        "/api/v1/incidents/{incident_id}/evidence/{evidence_id}"
+    ]["get"]["responses"]
+    assert responses["200"]["content"]["application/json"]["schema"]["$ref"].endswith(
+        "EvidenceDetail"
+    )
+    assert responses["404"]["content"]["application/json"]["schema"]["$ref"].endswith(
+        "ErrorEnvelope"
+    )

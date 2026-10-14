@@ -1,6 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -33,6 +34,32 @@ class Settings(BaseSettings):
     deepseek_api_key: SecretStr | None = None
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-flash"
+    demo_session_enabled: bool = False
+    frontend_origin: str = "http://127.0.0.1:3000"
+
+    @field_validator("frontend_origin")
+    @classmethod
+    def local_frontend_origin(cls, value: str) -> str:
+        origin = urlsplit(value)
+        try:
+            port = origin.port
+        except ValueError:
+            port = None
+        if (
+            origin.scheme not in {"http", "https"}
+            or origin.hostname not in {"127.0.0.1", "localhost", "::1"}
+            or port is None
+            or origin.username is not None
+            or origin.password is not None
+            or origin.path
+            or origin.query
+            or origin.fragment
+            or value != f"{origin.scheme}://{origin.netloc}"
+        ):
+            raise ValueError(
+                "frontend_origin must be a loopback HTTP(S) origin with a port"
+            )
+        return value
 
 
 @lru_cache

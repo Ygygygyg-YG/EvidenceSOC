@@ -6,6 +6,8 @@ from typing import Any, Literal, Self
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from evidencesoc.domain.response_action import SimulatedAction
+
 
 class Severity(StrEnum):
     INFO = "info"
@@ -145,20 +147,62 @@ class Alert(BaseModel):
     event_ids: list[str] = Field(min_length=1)
 
 
+class PlanRollbackStep(BaseModel):
+    step_id: str = Field(min_length=1, max_length=64)
+    description: str = Field(min_length=1)
+    target: str = Field(min_length=1)
+    expected_result: str = Field(min_length=1)
+    evidence_ids: list[str] = Field(min_length=1)
+
+
+class PlanValidationCheck(BaseModel):
+    check_id: str = Field(min_length=1, max_length=64)
+    description: str = Field(min_length=1)
+    target: str = Field(min_length=1)
+    expected_result: str = Field(min_length=1)
+    query: dict[str, Any]
+    evidence_ids: list[str] = Field(min_length=1)
+
+
 class ResponsePlan(BaseModel):
     response_plan_id: str = Field(min_length=1, max_length=64)
     incident_id: str = Field(min_length=1, max_length=64)
     summary: str
-    actions: list[dict[str, Any]] = Field(min_length=1)
+    actions: list[SimulatedAction] = Field(min_length=1)
     created_at: datetime
     requires_approval: Literal[True] = True
     evidence_ids: list[str] = Field(min_length=1)
+    execution_mode: Literal["simulation"] = "simulation"
+    risk_level: Literal["low", "medium", "high", "critical"] | None = None
+    risk_reason: str | None = None
+    affected_assets: list[str] = Field(default_factory=list)
+    business_impact: str | None = None
+    expires_at: datetime | None = None
+    rollback_steps: list[PlanRollbackStep] = Field(default_factory=list)
+    validation_checks: list[PlanValidationCheck] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def valid_expiry(self) -> Self:
+        if self.expires_at is not None:
+            if self.created_at.tzinfo is None or self.expires_at.tzinfo is None:
+                raise ValueError("response plan timestamps require timezones")
+            if self.expires_at <= self.created_at:
+                raise ValueError("response plan must expire after creation")
+        return self
 
 
 class ValidationOutcome(StrEnum):
     SUCCESS = "success"
     FAILURE = "failure"
     INSUFFICIENT_EVIDENCE = "insufficient_evidence"
+
+
+class ValidationCheckResult(BaseModel):
+    check_id: str = Field(min_length=1, max_length=64)
+    condition: dict[str, Any]
+    outcome: ValidationOutcome
+    evidence_ids: list[str]
+    explanation: str = Field(min_length=1)
 
 
 class ValidationResult(BaseModel):
@@ -168,3 +212,23 @@ class ValidationResult(BaseModel):
     summary: str
     checked_at: datetime
     evidence_ids: list[str] = Field(min_length=1)
+    time_from: datetime | None = None
+    time_to: datetime | None = None
+    checks: list[ValidationCheckResult] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def valid_query_window(self) -> Self:
+        if (self.time_from is None) != (self.time_to is None):
+            raise ValueError("validation query window requires both boundaries")
+        if (
+            self.time_from is not None
+            and self.time_to is not None
+            and self.time_from >= self.time_to
+        ):
+            raise ValueError("validation query window must have a positive duration")
+        if any(
+            not set(check.evidence_ids) <= set(self.evidence_ids)
+            for check in self.checks
+        ):
+            raise ValueError("validation check cites evidence outside the result")
+        return self

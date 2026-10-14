@@ -42,6 +42,17 @@ class ApiIdempotencyKeyTable(ApiBase):
     payload_sha256: Mapped[str] = mapped_column(String(64))
 
 
+class ApiDecisionReceiptTable(ApiBase):
+    __tablename__ = "api_decision_receipts"
+
+    key: Mapped[str] = mapped_column(String(255), primary_key=True)
+    plan_id: Mapped[str] = mapped_column(String(64))
+    payload_sha256: Mapped[str] = mapped_column(String(64))
+    accepted_response: Mapped[dict[str, Any]] = mapped_column(
+        JSON().with_variant(JSONB(), "postgresql")
+    )
+
+
 class ApiInvestigationTable(ApiBase):
     __tablename__ = "api_investigations"
     __table_args__ = (

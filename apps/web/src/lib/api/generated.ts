@@ -22,6 +22,91 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/alerts/{alert_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Alert */
+        get: operations["get_alert_api_v1_alerts__alert_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dashboard/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Summary */
+        get: operations["summary_api_v1_dashboard_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/data-sources/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Source Health */
+        get: operations["source_health_api_v1_data_sources_health_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/session/demo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Demo Session */
+        post: operations["create_demo_session_api_v1_session_demo_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Demo Session */
+        get: operations["get_demo_session_api_v1_session_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/investigations": {
         parameters: {
             query?: never;
@@ -33,6 +118,40 @@ export interface paths {
         put?: never;
         /** Create Investigation */
         post: operations["create_investigation_api_v1_investigations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/investigations/{investigation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Investigation Snapshot */
+        get: operations["get_investigation_snapshot_api_v1_investigations__investigation_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/incidents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Incidents */
+        get: operations["list_incidents_api_v1_incidents_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -56,6 +175,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/incidents/{incident_id}/evidence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Incident Evidence */
+        get: operations["list_incident_evidence_api_v1_incidents__incident_id__evidence_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/incidents/{incident_id}/evidence/{evidence_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Evidence Detail */
+        get: operations["get_evidence_detail_api_v1_incidents__incident_id__evidence__evidence_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/evaluations/{evaluation_id}": {
         parameters: {
             query?: never;
@@ -65,6 +218,40 @@ export interface paths {
         };
         /** Get Evaluation */
         get: operations["get_evaluation_api_v1_evaluations__evaluation_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/response-plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Response Plans */
+        get: operations["list_response_plans_api_v1_response_plans_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/response-plans/{plan_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Response Plan */
+        get: operations["get_response_plan_api_v1_response_plans__plan_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -101,6 +288,23 @@ export interface paths {
         put?: never;
         /** Reject */
         post: operations["reject_api_v1_response_plans__plan_id__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/response-plans/{plan_id}/renew": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Renew Expired Plan */
+        post: operations["renew_expired_plan_api_v1_response_plans__plan_id__renew_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -204,6 +408,48 @@ export interface components {
             /** Event Ids */
             event_ids: string[];
         };
+        /** AlertDetail */
+        AlertDetail: {
+            /** Alert Id */
+            alert_id: string;
+            /** Title */
+            title: string;
+            severity: components["schemas"]["Severity"];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Event Ids */
+            event_ids: string[];
+            status: components["schemas"]["IncidentStatus"];
+            /**
+             * Execution Mode
+             * @enum {string}
+             */
+            execution_mode: "rules" | "model";
+            /** Incident Id */
+            incident_id: string | null;
+            /** Investigation Id */
+            investigation_id: string | null;
+            /** Events */
+            events: components["schemas"]["AlertEventSummary"][];
+        };
+        /** AlertEventSummary */
+        AlertEventSummary: {
+            /** Event Id */
+            event_id: string;
+            /** Source */
+            source: string;
+            /**
+             * Observed At
+             * Format: date-time
+             */
+            observed_at: string;
+            severity: components["schemas"]["Severity"];
+            /** Event Type */
+            event_type: string;
+        };
         /** AlertListItem */
         AlertListItem: {
             /** Alert Id */
@@ -242,6 +488,23 @@ export interface components {
             event_ids: string[];
             /** Created At */
             created_at?: string | null;
+        };
+        /** AlertTrendBucket */
+        AlertTrendBucket: {
+            /**
+             * Bucket Start
+             * Format: date-time
+             */
+            bucket_start: string;
+            /**
+             * Bucket End
+             * Format: date-time
+             */
+            bucket_end: string;
+            /** Total */
+            total: number;
+            /** High Risk */
+            high_risk: number;
         };
         /**
          * ApprovalDecision
@@ -282,6 +545,70 @@ export interface components {
             /** Evidence Ids */
             evidence_ids: string[];
         };
+        /** AttackGraph */
+        AttackGraph: {
+            /** Revision */
+            revision: string;
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /** Nodes */
+            nodes: components["schemas"]["AttackGraphNode"][];
+            /** Edges */
+            edges: components["schemas"]["AttackGraphEdge"][];
+        };
+        /** AttackGraphEdge */
+        AttackGraphEdge: {
+            /** Edge Id */
+            edge_id: string;
+            /** Source Step Id */
+            source_step_id: string;
+            /** Target Step Id */
+            target_step_id: string;
+            /** Relation */
+            relation: string;
+            /** Description */
+            description: string | null;
+            /** Confidence */
+            confidence: number | null;
+            /** Evidence Ids */
+            evidence_ids: string[];
+            /**
+             * Support Status
+             * @enum {string}
+             */
+            support_status: "supported" | "candidate" | "insufficient";
+        };
+        /** AttackGraphNode */
+        AttackGraphNode: {
+            /** Step Id */
+            step_id: string;
+            /** Sequence */
+            sequence: number;
+            /** Phase */
+            phase: string | null;
+            /** Description */
+            description: string;
+            /** Host */
+            host: string | null;
+            /** Service */
+            service: string | null;
+            /** Observed At */
+            observed_at: string | null;
+            /** Technique Ids */
+            technique_ids: string[];
+            /** Confidence */
+            confidence: number | null;
+            /** Evidence Ids */
+            evidence_ids: string[];
+            /**
+             * Support Status
+             * @enum {string}
+             */
+            support_status: "supported" | "candidate" | "insufficient";
+        };
         /** AttackOrigin */
         AttackOrigin: {
             /** Observed Source Ip */
@@ -321,6 +648,55 @@ export interface components {
             /** Incident Id */
             incident_id: string;
         };
+        /** DashboardMetrics */
+        DashboardMetrics: {
+            /** Alerts In Window */
+            alerts_in_window: number;
+            /** High Risk Incidents */
+            high_risk_incidents: number;
+            /** Running Investigations */
+            running_investigations: number;
+            /** Pending Response Plans */
+            pending_response_plans: number;
+        };
+        /** DashboardSummary */
+        DashboardSummary: {
+            /**
+             * Window
+             * @enum {string}
+             */
+            window: "1h" | "24h" | "7d";
+            /**
+             * Execution Mode
+             * @enum {string}
+             */
+            execution_mode: "rules" | "model";
+            /**
+             * Time From
+             * Format: date-time
+             */
+            time_from: string;
+            /**
+             * Time To
+             * Format: date-time
+             */
+            time_to: string;
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            metrics: components["schemas"]["DashboardMetrics"];
+            /** Alert Trend */
+            alert_trend: components["schemas"]["AlertTrendBucket"][];
+            /** Incident Status Distribution */
+            incident_status_distribution: components["schemas"]["IncidentStatusCount"][];
+            /** Recent Alerts */
+            recent_alerts: components["schemas"]["AlertListItem"][];
+            /** Recent Activity */
+            recent_activity: components["schemas"]["RecentActivity"][];
+            source_health: components["schemas"]["SourceHealthSummary"];
+        };
         /** DecisionAccepted */
         DecisionAccepted: {
             /** Response Plan Id */
@@ -344,10 +720,33 @@ export interface components {
         };
         /** DecisionRequest */
         DecisionRequest: {
+            /** Plan Version */
+            plan_version: string;
             /** Reason */
             reason: string;
-            /** Decided By */
-            decided_by: string;
+        };
+        /** DemoSessionView */
+        DemoSessionView: {
+            /**
+             * Actor Id
+             * @constant
+             */
+            actor_id: "demo-reviewer";
+            /**
+             * Role
+             * @constant
+             */
+            role: "reviewer";
+            /** Allowed Actions */
+            allowed_actions: [
+                "approve" | "reject",
+                "approve" | "reject"
+            ];
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
         };
         /** ErrorDetail */
         ErrorDetail: {
@@ -389,6 +788,51 @@ export interface components {
             /** Finished At */
             finished_at: string | null;
         };
+        /** EvidenceDetail */
+        EvidenceDetail: {
+            evidence: components["schemas"]["EvidenceItemView"];
+            raw_event: components["schemas"]["EvidenceRawEvent"];
+            /**
+             * Raw Access
+             * @constant
+             */
+            raw_access: "full";
+            integrity: components["schemas"]["EvidenceIntegrity"];
+        };
+        /** EvidenceIntegrity */
+        EvidenceIntegrity: {
+            /**
+             * Algorithm
+             * @constant
+             */
+            algorithm: "sha256";
+            /**
+             * Canonicalization
+             * @constant
+             */
+            canonicalization: "evidencesoc-json-v1";
+            /**
+             * Scope
+             * @constant
+             */
+            scope: "postgresql";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "verified" | "mismatch" | "unavailable";
+            /**
+             * Checked At
+             * Format: date-time
+             */
+            checked_at: string;
+            /** Calculated Sha256 */
+            calculated_sha256: string | null;
+            /** Stored Event Sha256 */
+            stored_event_sha256: string;
+            /** Stored Evidence Sha256 */
+            stored_evidence_sha256: string;
+        };
         /** EvidenceItem */
         EvidenceItem: {
             /** Evidence Id */
@@ -410,6 +854,76 @@ export interface components {
             summary: string;
             /** Content Sha256 */
             content_sha256: string;
+        };
+        /** EvidenceItemView */
+        EvidenceItemView: {
+            /** Evidence Id */
+            evidence_id: string;
+            /** Event Id */
+            event_id: string;
+            /** Source */
+            source: string;
+            /**
+             * Observed At
+             * Format: date-time
+             */
+            observed_at: string;
+            /** Query */
+            query: {
+                [key: string]: unknown;
+            };
+            /** Summary */
+            summary: string;
+            /** Content Sha256 */
+            content_sha256: string;
+            /** Incident Id */
+            incident_id: string;
+        };
+        /** EvidencePage */
+        EvidencePage: {
+            /** Items */
+            items: components["schemas"]["EvidenceItemView"][];
+            /** Total */
+            total: number;
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+        };
+        /** EvidenceRawEvent */
+        EvidenceRawEvent: {
+            /** Event Id */
+            event_id: string;
+            /** Source */
+            source: string;
+            /**
+             * Observed At
+             * Format: date-time
+             */
+            observed_at: string;
+            severity: components["schemas"]["Severity"];
+            /** Event Type */
+            event_type: string;
+            /** Raw */
+            raw: {
+                [key: string]: unknown;
+            };
+            /** Content Sha256 */
+            content_sha256: string;
+        };
+        /** Incident */
+        Incident: {
+            /** Incident Id */
+            incident_id: string;
+            /** Alert Id */
+            alert_id: string;
+            /** @default received */
+            status: components["schemas"]["IncidentStatus"];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /** IncidentDetail */
         IncidentDetail: {
@@ -447,6 +961,7 @@ export interface components {
             validation_result: components["schemas"]["ValidationResult"] | null;
             /** Simulation */
             simulation: components["schemas"]["SimulationResult"][];
+            simulation_execution?: components["schemas"]["SimulationExecution"] | null;
             /** Fallback Used */
             fallback_used: boolean;
             /** Errors */
@@ -456,11 +971,51 @@ export interface components {
             /** Stop Reason */
             stop_reason: string | null;
         };
+        /** IncidentListItem */
+        IncidentListItem: {
+            /** Incident Id */
+            incident_id: string;
+            /** Alert Id */
+            alert_id: string;
+            /** @default received */
+            status: components["schemas"]["IncidentStatus"];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Investigation Id */
+            investigation_id: string | null;
+            /** Alert Title */
+            alert_title: string;
+            severity: components["schemas"]["Severity"];
+            /** Evidence Count */
+            evidence_count: number;
+            /** Validation Outcome */
+            validation_outcome: ("success" | "failure" | "insufficient_evidence") | null;
+        };
+        /** IncidentPage */
+        IncidentPage: {
+            /** Items */
+            items: components["schemas"]["IncidentListItem"][];
+            /** Total */
+            total: number;
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+        };
         /**
          * IncidentStatus
          * @enum {string}
          */
         IncidentStatus: "received" | "triaged" | "collecting" | "analyzing" | "reconstructing" | "awaiting_approval" | "simulating" | "validating" | "completed" | "failed" | "manual_review" | "rejected";
+        /** IncidentStatusCount */
+        IncidentStatusCount: {
+            status: components["schemas"]["IncidentStatus"];
+            /** Count */
+            count: number;
+        };
         /** InvestigationAccepted */
         InvestigationAccepted: {
             /** Investigation Id */
@@ -473,12 +1028,224 @@ export interface components {
             /** Stream Url */
             stream_url: string;
         };
+        /** InvestigationAgentRun */
+        InvestigationAgentRun: {
+            /** Run Id */
+            run_id: string;
+            /** Incident Id */
+            incident_id: string;
+            /** Agent Name */
+            agent_name: string;
+            status: components["schemas"]["AgentRunStatus"];
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Finished At */
+            finished_at?: string | null;
+            /** Evidence Ids */
+            evidence_ids?: string[];
+            /** Role Key */
+            role_key: string | null;
+            /** Attempt */
+            attempt: number | null;
+            /** Output Summary */
+            output_summary: string | null;
+            /** Error */
+            error: string | null;
+        };
+        /** InvestigationEvidenceSummary */
+        InvestigationEvidenceSummary: {
+            /** Total */
+            total: number;
+            /** Items */
+            items: components["schemas"]["EvidenceItem"][];
+        };
+        /** InvestigationFailure */
+        InvestigationFailure: {
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Trace Id */
+            trace_id: string;
+        };
+        /** InvestigationKnowledgeRef */
+        InvestigationKnowledgeRef: {
+            /** Knowledge Chunk Id */
+            knowledge_chunk_id: string;
+            /** Technique Id */
+            technique_id: string | null;
+            /** Title */
+            title: string | null;
+            /** Version */
+            version: string | null;
+            /** Source Uri */
+            source_uri: string;
+            /** Retrieved At */
+            retrieved_at: string | null;
+        };
         /** InvestigationRequest */
         InvestigationRequest: {
             /** Alert Id */
             alert_id?: string | null;
             /** Incident Id */
             incident_id?: string | null;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "rules" | "model";
+        };
+        /** InvestigationReview */
+        InvestigationReview: {
+            /** Required */
+            required: boolean;
+            /** Reason */
+            reason: string | null;
+            /** Fallback Count */
+            fallback_count: number;
+        };
+        /** InvestigationSnapshot */
+        InvestigationSnapshot: {
+            /** Incident Id */
+            incident_id: string;
+            /** Alert Id */
+            alert_id: string;
+            /** @default received */
+            status: components["schemas"]["IncidentStatus"];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Investigation Id */
+            investigation_id: string | null;
+            /** Trace Id */
+            trace_id: string | null;
+            /** Alerts */
+            alerts: components["schemas"]["Alert"][];
+            /** Evidence */
+            evidence: components["schemas"]["EvidenceItem"][];
+            /** Knowledge */
+            knowledge: {
+                [key: string]: unknown;
+            }[];
+            /** Attack Steps */
+            attack_steps: components["schemas"]["AttackStepView"][];
+            /** Runs */
+            runs: components["schemas"]["AgentRun"][];
+            origin: components["schemas"]["AttackOrigin"] | null;
+            classification: components["schemas"]["AttackClassification"] | null;
+            response_plan: components["schemas"]["ResponsePlan"] | null;
+            approval: components["schemas"]["ApprovalRecord"] | null;
+            validation_result: components["schemas"]["ValidationResult"] | null;
+            /** Simulation */
+            simulation: components["schemas"]["SimulationResult"][];
+            simulation_execution?: components["schemas"]["SimulationExecution"] | null;
+            /** Fallback Used */
+            fallback_used: boolean;
+            /** Errors */
+            errors: {
+                [key: string]: unknown;
+            }[];
+            /** Stop Reason */
+            stop_reason: string | null;
+            /** Revision */
+            revision: string;
+            /** Stream Cursor */
+            stream_cursor: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "rules" | "model";
+            /** Available Actions */
+            available_actions: ("approve" | "reject")[];
+            incident: components["schemas"]["Incident"];
+            alert: components["schemas"]["Alert"];
+            /** Agent Runs */
+            agent_runs: components["schemas"]["InvestigationAgentRun"][];
+            /** Knowledge Refs */
+            knowledge_refs: components["schemas"]["InvestigationKnowledgeRef"][];
+            attack_graph: components["schemas"]["AttackGraph"];
+            evidence_summary: components["schemas"]["InvestigationEvidenceSummary"];
+            validation: components["schemas"]["ValidationResult"] | null;
+            review: components["schemas"]["InvestigationReview"];
+            error: components["schemas"]["InvestigationFailure"] | null;
+        };
+        /** PlanRenewalAccepted */
+        PlanRenewalAccepted: {
+            /** Response Plan Id */
+            response_plan_id: string;
+            /** Investigation Id */
+            investigation_id: string;
+            /** Incident Id */
+            incident_id: string;
+            /** Trace Id */
+            trace_id: string;
+            /**
+             * Status
+             * @constant
+             */
+            status: "accepted";
+            /** Stream Url */
+            stream_url: string;
+        };
+        /** PlanRenewalRequest */
+        PlanRenewalRequest: {
+            /** Plan Version */
+            plan_version: string;
+        };
+        /** PlanRollbackStep */
+        PlanRollbackStep: {
+            /** Step Id */
+            step_id: string;
+            /** Description */
+            description: string;
+            /** Target */
+            target: string;
+            /** Expected Result */
+            expected_result: string;
+            /** Evidence Ids */
+            evidence_ids: string[];
+        };
+        /** PlanValidationCheck */
+        PlanValidationCheck: {
+            /** Check Id */
+            check_id: string;
+            /** Description */
+            description: string;
+            /** Target */
+            target: string;
+            /** Expected Result */
+            expected_result: string;
+            /** Query */
+            query: {
+                [key: string]: unknown;
+            };
+            /** Evidence Ids */
+            evidence_ids: string[];
+        };
+        /** RecentActivity */
+        RecentActivity: {
+            /** Event */
+            event: string;
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+            /** Incident Id */
+            incident_id: string;
+            /** Investigation Id */
+            investigation_id: string;
         };
         /** ResponsePlan */
         ResponsePlan: {
@@ -489,9 +1256,7 @@ export interface components {
             /** Summary */
             summary: string;
             /** Actions */
-            actions: {
-                [key: string]: unknown;
-            }[];
+            actions: components["schemas"]["SimulatedAction"][];
             /**
              * Created At
              * Format: date-time
@@ -505,12 +1270,288 @@ export interface components {
             requires_approval: true;
             /** Evidence Ids */
             evidence_ids: string[];
+            /**
+             * Execution Mode
+             * @default simulation
+             * @constant
+             */
+            execution_mode: "simulation";
+            /**
+             * Risk Level
+             * @default null
+             */
+            risk_level: ("low" | "medium" | "high" | "critical") | null;
+            /**
+             * Risk Reason
+             * @default null
+             */
+            risk_reason: string | null;
+            /** Affected Assets */
+            affected_assets?: string[];
+            /**
+             * Business Impact
+             * @default null
+             */
+            business_impact: string | null;
+            /**
+             * Expires At
+             * @default null
+             */
+            expires_at: string | null;
+            /** Rollback Steps */
+            rollback_steps?: components["schemas"]["PlanRollbackStep"][];
+            /** Validation Checks */
+            validation_checks?: components["schemas"]["PlanValidationCheck"][];
+        };
+        /** ResponsePlanDetail */
+        ResponsePlanDetail: {
+            /** Response Plan Id */
+            response_plan_id: string;
+            /** Incident Id */
+            incident_id: string;
+            /** Summary */
+            summary: string;
+            /** Actions */
+            actions: components["schemas"]["SimulatedAction"][];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Requires Approval
+             * @default true
+             * @constant
+             */
+            requires_approval: true;
+            /** Evidence Ids */
+            evidence_ids: string[];
+            /**
+             * Execution Mode
+             * @default simulation
+             * @constant
+             */
+            execution_mode: "simulation";
+            /** Risk Level */
+            risk_level?: ("low" | "medium" | "high" | "critical") | null;
+            /** Risk Reason */
+            risk_reason?: string | null;
+            /** Affected Assets */
+            affected_assets?: string[];
+            /** Business Impact */
+            business_impact?: string | null;
+            /** Expires At */
+            expires_at?: string | null;
+            /** Rollback Steps */
+            rollback_steps?: components["schemas"]["PlanRollbackStep"][];
+            /** Validation Checks */
+            validation_checks?: components["schemas"]["PlanValidationCheck"][];
+            /** Plan Version */
+            plan_version: string;
+            /** Is Expired */
+            is_expired: boolean;
+            /** Investigation Id */
+            investigation_id: string | null;
+            /** Alert Id */
+            alert_id: string;
+            /** Alert Title */
+            alert_title: string;
+            severity: components["schemas"]["Severity"];
+            incident_status: components["schemas"]["IncidentStatus"];
+            /**
+             * Decision State
+             * @enum {string}
+             */
+            decision_state: "pending" | "submitting" | "approved" | "rejected";
+            /** Is Current */
+            is_current: boolean;
+            approval: components["schemas"]["ApprovalRecord"] | null;
+            validation_result: components["schemas"]["ValidationResult"] | null;
+            /** Simulation */
+            simulation: components["schemas"]["SimulationResult"][];
+            simulation_execution?: components["schemas"]["SimulationExecution"] | null;
+            /** Pending Decision */
+            pending_decision: ("approved" | "rejected") | null;
+            /** Available Actions */
+            available_actions: ("approve" | "reject")[];
+        };
+        /** ResponsePlanListItem */
+        ResponsePlanListItem: {
+            /** Response Plan Id */
+            response_plan_id: string;
+            /** Incident Id */
+            incident_id: string;
+            /** Summary */
+            summary: string;
+            /** Actions */
+            actions: components["schemas"]["SimulatedAction"][];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Requires Approval
+             * @default true
+             * @constant
+             */
+            requires_approval: true;
+            /** Evidence Ids */
+            evidence_ids: string[];
+            /**
+             * Execution Mode
+             * @default simulation
+             * @constant
+             */
+            execution_mode: "simulation";
+            /** Risk Level */
+            risk_level?: ("low" | "medium" | "high" | "critical") | null;
+            /** Risk Reason */
+            risk_reason?: string | null;
+            /** Affected Assets */
+            affected_assets?: string[];
+            /** Business Impact */
+            business_impact?: string | null;
+            /** Expires At */
+            expires_at?: string | null;
+            /** Rollback Steps */
+            rollback_steps?: components["schemas"]["PlanRollbackStep"][];
+            /** Validation Checks */
+            validation_checks?: components["schemas"]["PlanValidationCheck"][];
+            /** Plan Version */
+            plan_version: string;
+            /** Is Expired */
+            is_expired: boolean;
+            /** Investigation Id */
+            investigation_id: string | null;
+            /** Alert Id */
+            alert_id: string;
+            /** Alert Title */
+            alert_title: string;
+            severity: components["schemas"]["Severity"];
+            incident_status: components["schemas"]["IncidentStatus"];
+            /**
+             * Decision State
+             * @enum {string}
+             */
+            decision_state: "pending" | "submitting" | "approved" | "rejected";
+            /** Is Current */
+            is_current: boolean;
+        };
+        /** ResponsePlanPage */
+        ResponsePlanPage: {
+            /** Items */
+            items: components["schemas"]["ResponsePlanListItem"][];
+            /** Total */
+            total: number;
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
         };
         /**
          * Severity
          * @enum {string}
          */
         Severity: "info" | "low" | "medium" | "high" | "critical";
+        /** SimulatedAction */
+        SimulatedAction: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "block_ip_simulated" | "isolate_host_simulated" | "disable_account_simulated";
+            /** Target */
+            target: string;
+            /** Risk */
+            risk: string;
+            /** Impact */
+            impact: string;
+            /** Preview */
+            preview: string;
+            /** Rollback */
+            rollback: string;
+            /** Verification Query */
+            verification_query: {
+                [key: string]: unknown;
+            };
+            /**
+             * Action Id
+             * @default null
+             */
+            action_id: string | null;
+            /**
+             * Type
+             * @default null
+             */
+            type: ("block_ip_simulated" | "isolate_host_simulated" | "disable_account_simulated") | null;
+            /**
+             * Parameters
+             * @default null
+             */
+            parameters: {
+                [key: string]: string;
+            } | null;
+            /**
+             * Expected Effect
+             * @default null
+             */
+            expected_effect: string | null;
+            /**
+             * Rollback Ref
+             * @default null
+             */
+            rollback_ref: string | null;
+            /**
+             * Evidence Ids
+             * @default null
+             */
+            evidence_ids: string[] | null;
+        };
+        /** SimulationActionResult */
+        SimulationActionResult: {
+            /** Action Id */
+            action_id: string;
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "success" | "failure" | "skipped";
+            /** Description */
+            description: string;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /**
+             * Finished At
+             * Format: date-time
+             */
+            finished_at: string;
+        };
+        /** SimulationExecution */
+        SimulationExecution: {
+            /** Simulation Id */
+            simulation_id: string;
+            /** Response Plan Id */
+            response_plan_id: string;
+            /** Plan Version */
+            plan_version: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "running" | "completed" | "failed";
+            /** Started At */
+            started_at: string | null;
+            /** Finished At */
+            finished_at: string | null;
+            /** Action Results */
+            action_results: components["schemas"]["SimulationActionResult"][];
+            /** Error */
+            error: string | null;
+        };
         /** SimulationResult */
         SimulationResult: {
             /**
@@ -532,6 +1573,20 @@ export interface components {
             verification_query: {
                 [key: string]: unknown;
             };
+            /** Action Id */
+            action_id?: string | null;
+            /** Type */
+            type?: ("block_ip_simulated" | "isolate_host_simulated" | "disable_account_simulated") | null;
+            /** Parameters */
+            parameters?: {
+                [key: string]: string;
+            } | null;
+            /** Expected Effect */
+            expected_effect?: string | null;
+            /** Rollback Ref */
+            rollback_ref?: string | null;
+            /** Evidence Ids */
+            evidence_ids?: string[] | null;
             /** Execution Id */
             execution_id: string;
             /**
@@ -543,6 +1598,52 @@ export interface components {
             status: string;
             /** Outcome */
             outcome: string;
+        };
+        /** SourceHealthItem */
+        SourceHealthItem: {
+            /** Source */
+            source: string;
+            /**
+             * Last Ingested At
+             * Format: date-time
+             */
+            last_ingested_at: string;
+            /** Ingestion Lag Seconds */
+            ingestion_lag_seconds: number | null;
+            /** Status */
+            status: ("ok" | "degraded" | "failed") | null;
+            /** Is Stale */
+            is_stale: boolean | null;
+        };
+        /** SourceHealthSummary */
+        SourceHealthSummary: {
+            /**
+             * Checked At
+             * Format: date-time
+             */
+            checked_at: string;
+            /** Postgresql Status */
+            postgresql_status: ("ok" | "degraded" | "failed") | null;
+            /** Opensearch Status */
+            opensearch_status: ("ok" | "degraded" | "failed") | null;
+            /** Is Stale */
+            is_stale: boolean | null;
+            /** Sources */
+            sources: components["schemas"]["SourceHealthItem"][];
+        };
+        /** ValidationCheckResult */
+        ValidationCheckResult: {
+            /** Check Id */
+            check_id: string;
+            /** Condition */
+            condition: {
+                [key: string]: unknown;
+            };
+            outcome: components["schemas"]["ValidationOutcome"];
+            /** Evidence Ids */
+            evidence_ids: string[];
+            /** Explanation */
+            explanation: string;
         };
         /**
          * ValidationOutcome
@@ -565,26 +1666,24 @@ export interface components {
             checked_at: string;
             /** Evidence Ids */
             evidence_ids: string[];
+            /**
+             * Time From
+             * @default null
+             */
+            time_from: string | null;
+            /**
+             * Time To
+             * @default null
+             */
+            time_to: string | null;
+            /** Checks */
+            checks?: components["schemas"]["ValidationCheckResult"][];
         };
         /**
          * EventIndexStatus
          * @enum {string}
          */
         EventIndexStatus: "pending" | "indexed" | "failed";
-        /** Incident */
-        Incident: {
-            /** Incident Id */
-            incident_id: string;
-            /** Alert Id */
-            alert_id: string;
-            /** @default received */
-            status: components["schemas"]["IncidentStatus"];
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-        };
         /** SecurityEvent */
         SecurityEvent: {
             /** Event Id */
@@ -646,6 +1745,9 @@ export interface operations {
                 page_size?: number;
                 severity?: components["schemas"]["Severity"] | null;
                 status?: components["schemas"]["IncidentStatus"] | null;
+                time_from?: string | null;
+                time_to?: string | null;
+                query?: string | null;
             };
             header?: never;
             path?: never;
@@ -762,10 +1864,332 @@ export interface operations {
             };
         };
     };
-    create_investigation_api_v1_investigations_post: {
+    get_alert_api_v1_alerts__alert_id__get: {
         parameters: {
             query?: never;
             header?: never;
+            path: {
+                alert_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlertDetail"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    summary_api_v1_dashboard_summary_get: {
+        parameters: {
+            query?: {
+                window?: "1h" | "24h" | "7d";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardSummary"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    source_health_api_v1_data_sources_health_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourceHealthSummary"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    create_demo_session_api_v1_session_demo_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DemoSessionView"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    get_demo_session_api_v1_session_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DemoSessionView"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    create_investigation_api_v1_investigations_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "idempotency-key": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -782,6 +2206,127 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InvestigationAccepted"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    get_investigation_snapshot_api_v1_investigations__investigation_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                investigation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvestigationSnapshot"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    list_incidents_api_v1_incidents_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+                status?: components["schemas"]["IncidentStatus"] | null;
+                risk?: "high" | null;
+                time_from?: string | null;
+                time_to?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IncidentPage"];
                 };
             };
             /** @description Not Found */
@@ -880,6 +2425,126 @@ export interface operations {
             };
         };
     };
+    list_incident_evidence_api_v1_incidents__incident_id__evidence_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path: {
+                incident_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidencePage"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    get_evidence_detail_api_v1_incidents__incident_id__evidence__evidence_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                incident_id: string;
+                evidence_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceDetail"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
     get_evaluation_api_v1_evaluations__evaluation_id__get: {
         parameters: {
             query?: never;
@@ -938,10 +2603,130 @@ export interface operations {
             };
         };
     };
-    approve_api_v1_response_plans__plan_id__approve_post: {
+    list_response_plans_api_v1_response_plans_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+                decision_state?: ("pending" | "approved" | "rejected") | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResponsePlanPage"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    get_response_plan_api_v1_response_plans__plan_id__get: {
         parameters: {
             query?: never;
             header?: never;
+            path: {
+                plan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResponsePlanDetail"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    approve_api_v1_response_plans__plan_id__approve_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "idempotency-key": string;
+            };
             path: {
                 plan_id: string;
             };
@@ -1003,7 +2788,9 @@ export interface operations {
     reject_api_v1_response_plans__plan_id__reject_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "idempotency-key": string;
+            };
             path: {
                 plan_id: string;
             };
@@ -1022,6 +2809,70 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DecisionAccepted"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    renew_expired_plan_api_v1_response_plans__plan_id__renew_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "idempotency-key": string;
+            };
+            path: {
+                plan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlanRenewalRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanRenewalAccepted"];
                 };
             };
             /** @description Not Found */

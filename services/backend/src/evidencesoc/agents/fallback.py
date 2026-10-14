@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from ipaddress import ip_address, ip_network
 from typing import Any, Literal
@@ -208,6 +208,10 @@ def respond(state: dict[str, Any]) -> ResponseOutput:
     address = origin.get("observed_source_ip")
     if not address:
         return ResponseOutput(response_plan=None)
+    ids = list(classification["evidence_ids"])
+    digest = sha256((state["incident_id"] + "|" + "|".join(ids)).encode()).hexdigest()[
+        :24
+    ]
     action = SimulatedAction(
         action="block_ip_simulated",
         target=address,
@@ -216,19 +220,46 @@ def respond(state: dict[str, Any]) -> ResponseOutput:
         preview=f"Preview a simulated block for observed source {address}.",
         rollback=f"Remove the simulated block overlay for {address}.",
         verification_query={"filters": {"source_ip": address}, "limit": 100},
+        action_id=f"ACT-{digest}-1",
+        type="block_ip_simulated",
+        parameters={"source_ip": address},
+        expected_effect="Record a simulated block for this source IP without changing traffic.",
+        rollback_ref=f"RB-{digest}",
+        evidence_ids=ids,
     )
-    ids = list(classification["evidence_ids"])
-    digest = sha256((state["incident_id"] + "|" + "|".join(ids)).encode()).hexdigest()[
-        :24
-    ]
+    generated_at = datetime.now(UTC)
     return ResponseOutput(
         response_plan=ResponsePlan(
             response_plan_id=f"RP-{digest}",
             incident_id=state["incident_id"],
             summary="Review the SQL-pattern observation and approve a simulated response.",
             actions=[action.model_dump(mode="json")],
-            created_at=datetime.fromisoformat(state["evidence"][0]["observed_at"]),
+            created_at=generated_at,
             evidence_ids=ids,
+            risk_level="medium",
+            risk_reason=action.risk,
+            affected_assets=[address],
+            business_impact=action.impact,
+            expires_at=generated_at + timedelta(minutes=30),
+            rollback_steps=[
+                {
+                    "step_id": f"RB-{digest}",
+                    "description": action.rollback,
+                    "target": address,
+                    "expected_result": "The simulated block overlay is removed.",
+                    "evidence_ids": ids,
+                }
+            ],
+            validation_checks=[
+                {
+                    "check_id": f"VC-{digest}",
+                    "description": "Requery the observed source after the simulated action.",
+                    "target": address,
+                    "expected_result": "Compare fresh query results with cited baseline evidence.",
+                    "query": action.verification_query,
+                    "evidence_ids": ids,
+                }
+            ],
         )
     )
 

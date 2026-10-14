@@ -277,6 +277,16 @@ class ResponsePlanTable(Base):
         default=True,
     )
     evidence_ids: Mapped[list[str]] = mapped_column(JSONB)
+    execution_mode: Mapped[str] = mapped_column(String(16), default="simulation")
+    risk_level: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    risk_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    affected_assets: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    business_impact: Mapped[str | None] = mapped_column(Text, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    rollback_steps: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
+    validation_checks: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
 
 
 class ApprovalTable(Base):
@@ -329,6 +339,9 @@ class ValidationResultTable(Base):
     summary: Mapped[str] = mapped_column(Text)
     checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     evidence_ids: Mapped[list[str]] = mapped_column(JSONB)
+    time_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    time_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    checks: Mapped[list[dict]] = mapped_column(JSONB, default=list)
 
 
 class KnowledgeChunkTable(Base):

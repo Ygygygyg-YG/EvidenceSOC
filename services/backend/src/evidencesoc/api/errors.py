@@ -31,7 +31,7 @@ def error_response(
 
 
 def install_error_handlers(app: Any) -> None:
-    from evidencesoc.api.storage import StorageConflict
+    from evidencesoc.api.storage import PlanExpired, StorageConflict
 
     @app.exception_handler(ApiError)
     async def api_error(request: Request, error: ApiError):
@@ -48,6 +48,12 @@ def install_error_handlers(app: Any) -> None:
     async def conflict(request: Request, _error: StorageConflict):
         return error_response(
             request, 409, "CONFLICT", "Request conflicts with existing state."
+        )
+
+    @app.exception_handler(PlanExpired)
+    async def plan_expired(request: Request, _error: PlanExpired):
+        return error_response(
+            request, 410, "PLAN_EXPIRED", "Response plan has expired."
         )
 
     @app.exception_handler(LookupError)

@@ -7,10 +7,6 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from sqlalchemy import JSON, CheckConstraint, MetaData, create_engine, func, select
-from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import sessionmaker
-
 from evidencesoc.config import Settings
 from evidencesoc.domain.models import EvidenceItem
 from evidencesoc.ids import new_evidence_id
@@ -26,6 +22,9 @@ from evidencesoc.persistence.tables import (
     SecurityEventTable,
     ValidationResultTable,
 )
+from sqlalchemy import JSON, CheckConstraint, MetaData, create_engine, func, select
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import sessionmaker
 
 NOW = datetime(2026, 9, 21, 10, 20, tzinfo=UTC)
 
@@ -182,6 +181,31 @@ async def test_role_run_is_reused_after_restart_and_distinct_for_fallback_attemp
 
 
 @pytest.mark.asyncio
+async def test_renewed_response_preserves_both_agent_run_records(database: Any) -> None:
+    api = service(database)
+    state = {"incident_id": "IN-1", "trace_id": "TRACE-renew", "fallback_count": 0}
+    original = await api.start_run(state, "respond")
+    await api.finish_run(
+        original, {"response_plan": {"evidence_ids": [database[1].evidence_id]}}
+    )
+    renewed = await api.start_run({**state, "plan_generation": 1}, "respond")
+    await api.finish_run(renewed, {})
+
+    with database[0]() as session:
+        rows = session.scalars(
+            select(AgentRunTable).where(
+                AgentRunTable.incident_id == "IN-1",
+                AgentRunTable.agent_name == "respond",
+            )
+        ).all()
+        assert renewed != original
+        assert len(rows) == 2
+        first = session.get(AgentRunTable, original)
+        assert first.status == "completed"
+        assert first.evidence_ids == [database[1].evidence_id]
+
+
+@pytest.mark.asyncio
 async def test_collect_uses_three_real_tool_contracts_and_filters_observations(
     database: Any, monkeypatch: Any
 ) -> None:
@@ -290,7 +314,14 @@ async def test_verify_distinguishes_empty_result_from_mcp_error(
 
     monkeypatch.setattr(module, "open_stdio_session", open_session)
     state = verification_state(database, [{"filters": {"source_ip": "203.0.113.42"}}])
-    assert await api.verify(state, "AR-1") == {"evidence": []}
+    empty_result = await api.verify(state, "AR-1")
+    assert empty_result["evidence"] == []
+    assert empty_result["executed_checks"][0]["evidence_ids"] == []
+    assert empty_result["executed_checks"][0]["condition"]["filters"] == {
+        "source_ip": "203.0.113.42",
+        "host": "shop.example.test",
+        "service": "checkout-api",
+    }
     failed = True
     with pytest.raises(RuntimeError, match="DEPENDENCY_TIMEOUT"):
         await api.verify(state, "AR-1")
@@ -348,7 +379,11 @@ async def test_verify_executes_distinct_plan_queries_with_original_scope(
             calls.append(arguments)
             return SimpleNamespace(
                 isError=False,
-                structuredContent={"result": [database[1].model_dump(mode="json")]},
+                structuredContent={
+                    "result": [database[1].model_dump(mode="json")]
+                    if len(calls) == 1
+                    else []
+                },
             )
 
     @asynccontextmanager
@@ -363,9 +398,19 @@ async def test_verify_executes_distinct_plan_queries_with_original_scope(
         "time_to": "2026-09-21T10:21:00Z",
         "limit": 5,
     }
-    result = await api.verify(
-        verification_state(database, [first, first, second]), "AR-1"
-    )
+    state = verification_state(database, [first, first, second])
+    state["response_plan"]["validation_checks"] = [
+        {
+            "check_id": f"VC-{index}",
+            "description": "Requery the observed source.",
+            "target": "203.0.113.42",
+            "expected_result": "Compare fresh evidence.",
+            "query": query,
+            "evidence_ids": [database[1].evidence_id],
+        }
+        for index, query in enumerate((first, first, second), start=1)
+    ]
+    result = await api.verify(state, "AR-1")
     assert len(calls) == 2
     assert calls[0]["limit"] == 10
     assert calls[1]["limit"] == 5
@@ -379,6 +424,136 @@ async def test_verify_executes_distinct_plan_queries_with_original_scope(
     assert len(result["evidence"]) == 1
     assert result["evidence"][0]["raw"]["username"] == "alice"
     assert "labels" not in result["evidence"][0]["raw"]
+    assert [check["check_id"] for check in result["executed_checks"]] == [
+        "VC-1",
+        "VC-2",
+        "VC-3",
+    ]
+    assert result["executed_checks"][0]["condition"] == calls[0]
+    assert result["executed_checks"][1]["evidence_ids"] == [database[1].evidence_id]
+    assert result["executed_checks"][2]["condition"] == calls[1]
+    assert result["executed_checks"][2]["evidence_ids"] == []
+
+
+@pytest.mark.asyncio
+async def test_verify_uses_each_alert_source_for_two_cited_targets(
+    database: Any, monkeypatch: Any
+) -> None:
+    api = service(database)
+    module = importlib.import_module("evidencesoc.agents.services")
+    other_raw = {
+        "source_ip": "203.0.113.43",
+        "host": "other.example.test",
+        "service": "checkout-api",
+    }
+    other_evidence = EvidenceItem(
+        evidence_id=new_evidence_id(),
+        event_id="SE-2",
+        source="nginx",
+        observed_at=NOW,
+        query={"matched_event_id": "SE-2"},
+        summary="Verified second source",
+        content_sha256=calculate_content_sha256(other_raw),
+    )
+    with database[0].begin() as session:
+        alert = session.get(AlertTable, "AL-1")
+        alert.event_ids = [*alert.event_ids, "SE-2"]
+        session.add(
+            SecurityEventTable(
+                event_id="SE-2",
+                source="nginx",
+                external_id="request-2",
+                deduplication_key="id:request-2",
+                observed_at=NOW,
+                ingested_at=NOW,
+                severity="high",
+                event_type="web.request",
+                raw=other_raw,
+                content_sha256=calculate_content_sha256(other_raw),
+                index_status="indexed",
+            )
+        )
+        session.add(
+            EvidenceItemTable(**other_evidence.model_dump(), incident_id="IN-1")
+        )
+
+    calls: list[dict[str, Any]] = []
+
+    class Session:
+        async def list_tools(self) -> Any:
+            return SimpleNamespace(
+                tools=[
+                    SimpleNamespace(name=name)
+                    for name in (
+                        "search_security_events",
+                        "get_alert_context",
+                        "lookup_attack_technique",
+                    )
+                ]
+            )
+
+        async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+            assert name == "search_security_events"
+            calls.append(arguments)
+            evidence = (
+                database[1]
+                if arguments["filters"]["source_ip"] == "203.0.113.42"
+                else other_evidence
+            )
+            return SimpleNamespace(
+                isError=False,
+                structuredContent={"result": [evidence.model_dump(mode="json")]},
+            )
+
+    @asynccontextmanager
+    async def open_session(*args: Any, **kwargs: Any) -> Any:
+        yield Session()
+
+    monkeypatch.setattr(module, "open_stdio_session", open_session)
+    state = verification_state(
+        database,
+        [
+            {"filters": {"source_ip": "203.0.113.42"}, "limit": 10},
+            {"filters": {"source_ip": "203.0.113.43"}, "limit": 10},
+        ],
+    )
+    state["response_plan"]["actions"][1]["target"] = "203.0.113.43"
+    state["response_plan"]["actions"][1]["evidence_ids"] = [other_evidence.evidence_id]
+    state["response_plan"]["evidence_ids"].append(other_evidence.evidence_id)
+
+    result = await api.verify(state, "AR-1")
+    assert len(calls) == 2
+    assert [call["filters"]["host"] for call in calls] == [
+        "shop.example.test",
+        "other.example.test",
+    ]
+    assert all(call["limit"] <= 100 for call in calls)
+    assert all(
+        call["time_from"] == "2026-09-21T10:05:00+00:00"
+        and call["time_to"] == "2026-09-21T10:35:00+00:00"
+        for call in calls
+    )
+    assert [check["evidence_ids"] for check in result["executed_checks"]] == [
+        [database[1].evidence_id],
+        [other_evidence.evidence_id],
+    ]
+
+
+@pytest.mark.asyncio
+async def test_verify_rejects_target_absent_from_alert_source_events(
+    database: Any, monkeypatch: Any
+) -> None:
+    api = service(database)
+    module = importlib.import_module("evidencesoc.agents.services")
+
+    def forbidden_session(*args: Any, **kwargs: Any) -> Any:
+        pytest.fail("unobserved target must be rejected before opening MCP")
+
+    monkeypatch.setattr(module, "open_stdio_session", forbidden_session)
+    state = verification_state(database, [{"filters": {"source_ip": "198.51.100.99"}}])
+    state["response_plan"]["actions"][0]["target"] = "198.51.100.99"
+    with pytest.raises(PermissionError, match="not observed"):
+        await api.verify(state, "AR-1")
 
 
 @pytest.mark.asyncio
@@ -433,7 +608,17 @@ async def test_save_result_is_idempotent_and_preserves_approval_scope(
             "response_plan_id": "RP-1",
             "incident_id": "IN-1",
             "summary": "Simulate blocking",
-            "actions": [{"action": "block_ip_simulated", "target": "203.0.113.42"}],
+            "actions": [
+                {
+                    "action": "block_ip_simulated",
+                    "target": "203.0.113.42",
+                    "risk": "Source IP may be shared",
+                    "impact": "Simulation only",
+                    "preview": "Simulate blocking the observed source",
+                    "rollback": "Remove the simulated block",
+                    "verification_query": {"filters": {"source_ip": "203.0.113.42"}},
+                }
+            ],
             "created_at": NOW.isoformat(),
             "requires_approval": True,
             "evidence_ids": [evidence_id],
@@ -453,6 +638,22 @@ async def test_save_result_is_idempotent_and_preserves_approval_scope(
             "summary": "Simulation verified",
             "checked_at": NOW.isoformat(),
             "evidence_ids": [evidence_id],
+            "time_from": (NOW.replace(minute=19)).isoformat(),
+            "time_to": NOW.isoformat(),
+            "checks": [
+                {
+                    "check_id": "VC-1",
+                    "condition": {
+                        "time_from": (NOW.replace(minute=19)).isoformat(),
+                        "time_to": NOW.isoformat(),
+                        "filters": {"source_ip": "203.0.113.42"},
+                        "limit": 10,
+                    },
+                    "outcome": "success",
+                    "evidence_ids": [evidence_id],
+                    "explanation": "Fresh target evidence matched.",
+                }
+            ],
         },
         "attack_steps": [
             {
@@ -477,6 +678,9 @@ async def test_save_result_is_idempotent_and_preserves_approval_scope(
             AttackStepTable,
         ):
             assert session.scalar(select(func.count()).select_from(table)) == 1
+        validation = session.get(ValidationResultTable, "VR-1")
+        assert validation.time_from.replace(tzinfo=UTC) == NOW.replace(minute=19)
+        assert validation.checks[0]["check_id"] == "VC-1"
     state["response_plan"]["incident_id"] = "IN-2"
     with pytest.raises(PermissionError):
         await api.save_result(state)

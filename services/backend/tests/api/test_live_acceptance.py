@@ -20,8 +20,6 @@ from typing import Any
 
 import httpx
 import pytest
-from sqlalchemy import delete, select
-
 from evidencesoc.agents.checkpoint import open_checkpointer
 from evidencesoc.agents.graph import ROLE_NAMES, TERMINAL_STATES
 from evidencesoc.api.tables import ApiInvestigationEventTable, ApiInvestigationTable
@@ -45,9 +43,11 @@ from evidencesoc.persistence.tables import (
     SecurityEventTable,
     ValidationResultTable,
 )
+from sqlalchemy import delete, select
 
 ROOT = Path(__file__).resolve().parents[4]
 API = "/api/v1"
+FRONTEND_ORIGIN = "http://127.0.0.1:3000"
 CHILD_CODE = """
 import asyncio, sys
 import uvicorn
@@ -61,7 +61,9 @@ if delay:
         await asyncio.sleep(delay)
         return await original_collect(self, state, run_id)
     PostgresWorkflowServices.collect = delayed_collect
-settings = Settings(llm_mode='fixture', opensearch_index=sys.argv[1])
+settings = Settings(llm_mode='fixture', opensearch_index=sys.argv[1],
+                    demo_session_enabled=True,
+                    frontend_origin='http://127.0.0.1:3000')
 uvicorn.run(create_app(settings=settings), host='127.0.0.1', port=int(sys.argv[2]),
             log_config=None, access_log=False, loop='asyncio')
 """
@@ -85,6 +87,41 @@ class LiveApi:
 
     def client(self) -> httpx.Client:
         return httpx.Client(base_url=self.url, timeout=15, trust_env=False)
+
+    def create_review_session(self, client: httpx.Client) -> None:
+        response = client.post(
+            f"{API}/session/demo", headers={"Origin": FRONTEND_ORIGIN}
+        )
+        assert response.status_code == 200
+        assert response.json()["actor_id"] == "demo-reviewer"
+        assert client.cookies.get("evidencesoc_demo_session")
+
+    def plan_version(self, client: httpx.Client, plan_id: str) -> str:
+        response = client.get(f"{API}/response-plans/{plan_id}")
+        assert response.status_code == 200
+        detail = response.json()
+        assert detail["response_plan_id"] == plan_id
+        version = detail["plan_version"]
+        assert len(version) == 64 and all(
+            char in "0123456789abcdef" for char in version
+        )
+        return version
+
+    def decide(
+        self,
+        client: httpx.Client,
+        plan_id: str,
+        action: str,
+        *,
+        version: str,
+        reason: str,
+        key: str,
+    ) -> httpx.Response:
+        return client.post(
+            f"{API}/response-plans/{plan_id}/{action}",
+            headers={"Origin": FRONTEND_ORIGIN, "Idempotency-Key": key},
+            json={"plan_version": version, "reason": reason},
+        )
 
     def start(self) -> None:
         self.log_handle = self.log_path.open("ab")
@@ -161,7 +198,15 @@ class LiveApi:
         return alert_id
 
     def investigate(self, client: httpx.Client, alert_id: str) -> dict[str, Any]:
-        response = client.post(f"{API}/investigations", json={"alert_id": alert_id})
+        self.create_review_session(client)
+        response = client.post(
+            f"{API}/investigations",
+            headers={
+                "Origin": FRONTEND_ORIGIN,
+                "Idempotency-Key": "task9-investigation-" + new_ulid(),
+            },
+            json={"alert_id": alert_id, "mode": "rules"},
+        )
         assert response.status_code == 202
         metadata = response.json()
         self.incident_ids.add(metadata["incident_id"])
@@ -173,7 +218,12 @@ class LiveApi:
 def live_api(tmp_path) -> Iterator[tuple[LiveApi, Any]]:
     suffix = new_ulid()
     index = f"security-events-task9-{suffix.lower()}"
-    settings = Settings(llm_mode="fixture", opensearch_index=index)
+    settings = Settings(
+        llm_mode="fixture",
+        opensearch_index=index,
+        demo_session_enabled=True,
+        frontend_origin=FRONTEND_ORIGIN,
+    )
     engine = create_database_engine(settings.database_url)
     sessions = create_session_factory(engine)
     search = create_opensearch_client(settings.opensearch_url)
@@ -335,6 +385,7 @@ def assert_completed(result: dict[str, Any], metadata: dict[str, Any]) -> None:
     assert {run["agent_name"] for run in result["runs"]} == set(ROLE_NAMES)
     assert all(run["status"] == "completed" for run in result["runs"])
     assert result["approval"]["decision"] == "approved"
+    assert result["approval"]["decided_by"] == "demo-reviewer"
     assert result["validation_result"]["outcome"] == "success"
     assert "simulation only" in result["validation_result"]["summary"]
     assert "forbidden-truth" not in json.dumps(result)
@@ -359,17 +410,20 @@ def test_live_tcp_approval_stream_performance_and_secret_redaction(live_api):
         before = wait_status(client, metadata, "awaiting_approval")
         assert before["approval"] is None and before["validation_result"] is None
         plan_id = before["response_plan"]["response_plan_id"]
+        version = server.plan_version(client, plan_id)
         barrier = threading.Barrier(2)
 
         def concurrent_approve():
             with server.client() as decision_client:
+                server.create_review_session(decision_client)
                 barrier.wait(timeout=5)
-                return decision_client.post(
-                    f"{API}/response-plans/{plan_id}/approve",
-                    json={
-                        "reason": "Task9 reviewed simulation",
-                        "decided_by": "acceptance-reviewer",
-                    },
+                return server.decide(
+                    decision_client,
+                    plan_id,
+                    "approve",
+                    version=version,
+                    reason="Task9 reviewed simulation",
+                    key="task9-concurrent-" + new_ulid(),
                 )
 
         with ThreadPoolExecutor(max_workers=2) as pool:
@@ -474,6 +528,7 @@ def test_live_tcp_restart_replays_cursor_and_rejection_without_subscription(live
         before = wait_status(client, metadata, "awaiting_approval")
         initial = read_sse(client, metadata, until="approval.required")
         plan_id = before["response_plan"]["response_plan_id"]
+        version = server.plan_version(client, plan_id)
     server.stop()
     server.start()
     with server.client() as client:
@@ -484,12 +539,15 @@ def test_live_tcp_restart_replays_cursor_and_rejection_without_subscription(live
             client, metadata, until="approval.required", cursor=int(initial[0]["id"])
         )
         assert replay == initial[1:]
-        decision = client.post(
-            f"{API}/response-plans/{plan_id}/approve",
-            json={
-                "reason": "reviewed after process restart",
-                "decided_by": "restart-reviewer",
-            },
+        assert server.plan_version(client, plan_id) == version
+        server.create_review_session(client)
+        decision = server.decide(
+            client,
+            plan_id,
+            "approve",
+            version=version,
+            reason="reviewed after process restart",
+            key="task9-restart-" + new_ulid(),
         )
         assert decision.status_code == 202
         tail = read_sse(
@@ -504,15 +562,44 @@ def test_live_tcp_restart_replays_cursor_and_rejection_without_subscription(live
         rejected_metadata = server.investigate(client, server.create_alert(client))
         pending = wait_status(client, rejected_metadata, "awaiting_approval")
         rejected_plan = pending["response_plan"]["response_plan_id"]
-        reject_path = f"{API}/response-plans/{rejected_plan}/reject"
-        body = {
-            "reason": "reject the simulated response",
-            "decided_by": "rejection-reviewer",
-        }
-        assert client.post(reject_path, json=body).status_code == 202
-        assert client.post(reject_path, json=body).status_code == 409
+        rejected_version = server.plan_version(client, rejected_plan)
+        rejection_key = "task9-reject-" + new_ulid()
+        assert (
+            server.decide(
+                client,
+                rejected_plan,
+                "reject",
+                version=rejected_version,
+                reason="reject the simulated response",
+                key=rejection_key,
+            ).status_code
+            == 202
+        )
+        assert (
+            server.decide(
+                client,
+                rejected_plan,
+                "reject",
+                version=rejected_version,
+                reason="reject the simulated response",
+                key=rejection_key,
+            ).status_code
+            == 202
+        )
+        assert (
+            server.decide(
+                client,
+                rejected_plan,
+                "reject",
+                version=rejected_version,
+                reason="reject the simulated response",
+                key="task9-conflict-" + new_ulid(),
+            ).status_code
+            == 409
+        )
         rejected = wait_status(client, rejected_metadata, "rejected")
         assert rejected["approval"]["decision"] == "rejected"
+        assert rejected["approval"]["decided_by"] == "demo-reviewer"
         assert rejected["validation_result"] is None
         assert {run["agent_name"] for run in rejected["runs"]} == set(ROLE_NAMES) - {
             "validate"
@@ -543,17 +630,20 @@ def test_live_tcp_two_processes_accept_only_one_approval(live_api, tmp_path):
             metadata = server.investigate(client, server.create_alert(client))
             before = wait_status(client, metadata, "awaiting_approval")
             plan_id = before["response_plan"]["response_plan_id"]
+            version = server.plan_version(client, plan_id)
             barrier = threading.Barrier(2)
 
             def approve_from(worker):
                 with worker.client() as decision_client:
+                    worker.create_review_session(decision_client)
                     barrier.wait(timeout=5)
-                    return decision_client.post(
-                        f"{API}/response-plans/{plan_id}/approve",
-                        json={
-                            "reason": "concurrent independent API workers",
-                            "decided_by": "cross-worker-reviewer",
-                        },
+                    return worker.decide(
+                        decision_client,
+                        plan_id,
+                        "approve",
+                        version=version,
+                        reason="concurrent independent API workers",
+                        key="task9-cross-worker-" + new_ulid(),
                     )
 
             with ThreadPoolExecutor(max_workers=2) as pool:
@@ -649,12 +739,15 @@ def test_live_tcp_collect_interruption_resumes_without_event_loss(live_api):
             )
         before = wait_status(client, metadata, "awaiting_approval")
         plan_id = before["response_plan"]["response_plan_id"]
-        response = client.post(
-            f"{API}/response-plans/{plan_id}/approve",
-            json={
-                "reason": "reviewed after interrupted collection",
-                "decided_by": "recovery-reviewer",
-            },
+        version = server.plan_version(client, plan_id)
+        server.create_review_session(client)
+        response = server.decide(
+            client,
+            plan_id,
+            "approve",
+            version=version,
+            reason="reviewed after interrupted collection",
+            key="task9-recovery-" + new_ulid(),
         )
         assert response.status_code == 202
         tail = read_sse(

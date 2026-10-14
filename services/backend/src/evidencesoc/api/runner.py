@@ -104,6 +104,7 @@ class InvestigationRunner:
                 metadata["status"] == "awaiting_approval"
                 and metadata["state"].get("response_plan")
                 and not metadata["state"].get("pending_decision")
+                and not metadata["state"].get("pending_renewal")
             ):
                 continue
             await self.start(metadata)
@@ -162,6 +163,13 @@ class InvestigationRunner:
                 self.decision_data(output),
                 "decision:" + output["response_plan_id"],
             )
+        elif kind == "approval.renewed":
+            await self.publish(
+                metadata,
+                "plan.renewed",
+                output,
+                "plan-renewed:" + output["response_plan_id"],
+            )
 
     async def finish(self, metadata, state):
         for event in state.get("events", []):
@@ -207,10 +215,21 @@ class InvestigationRunner:
         metadata = await self.call("get_investigation", identifier)
         try:
             command = metadata["state"].get("pending_decision")
+            renewal = metadata["state"].get("pending_renewal")
             state = await self.workflow.get_state(metadata["incident_id"])
             if command:
                 await self.record_decision(metadata)
-            if (
+            if renewal and (
+                state.get("status") == "awaiting_approval"
+                and (state.get("response_plan") or {}).get("response_plan_id")
+                == renewal["response_plan_id"]
+            ):
+                iterator = self.workflow.stream_renewal(
+                    metadata["incident_id"],
+                    response_plan_id=renewal["response_plan_id"],
+                    requested_by=renewal["requested_by"],
+                )
+            elif (
                 command
                 and state.get("status") == "awaiting_approval"
                 and not state.get("approval")
@@ -218,6 +237,7 @@ class InvestigationRunner:
                 iterator = self.workflow.stream_approval(
                     metadata["incident_id"],
                     response_plan_id=command["response_plan_id"],
+                    plan_version=command["plan_version"],
                     decision=command["decision"],
                     reason=command["reason"],
                     decided_by=command["decided_by"],

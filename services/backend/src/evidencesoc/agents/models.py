@@ -1,79 +1,12 @@
 from __future__ import annotations
 
-import re
-from datetime import datetime
-from ipaddress import ip_address
-from typing import Any, Literal, Self
+from datetime import UTC, datetime, timedelta
+from typing import Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from evidencesoc.domain.event_search_policy import (
-    ALLOWED_EVENT_FILTERS,
-    MAX_EVENT_RESULTS,
-    validate_event_search,
-)
 from evidencesoc.domain.models import AttackClassification, AttackOrigin, ResponsePlan
-
-SIMULATED_ACTIONS = frozenset(
-    {"block_ip_simulated", "isolate_host_simulated", "disable_account_simulated"}
-)
-
-
-class SimulatedAction(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    action: Literal[
-        "block_ip_simulated", "isolate_host_simulated", "disable_account_simulated"
-    ]
-    target: str = Field(min_length=1, max_length=255)
-    risk: str = Field(min_length=1)
-    impact: str = Field(min_length=1)
-    preview: str = Field(min_length=1)
-    rollback: str = Field(min_length=1)
-    verification_query: dict[str, Any]
-
-    @field_validator("target", "risk", "impact", "preview", "rollback")
-    @classmethod
-    def nonblank(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("action details must not be blank")
-        return value.strip()
-
-    @model_validator(mode="after")
-    def bounded_action(self) -> Self:
-        if self.action == "block_ip_simulated":
-            ip_address(self.target)
-        elif re.fullmatch(r"[A-Za-z0-9_.@:-]+", self.target) is None:
-            raise ValueError("target must be a host or account identifier")
-        query = self.verification_query
-        if set(query) - {"filters", "time_from", "time_to", "limit"}:
-            raise ValueError("verification must use bounded read-only event search")
-        filters = query.get("filters")
-        if not isinstance(filters, dict) or not filters:
-            raise ValueError("verification filters are required")
-        if any(
-            key not in ALLOWED_EVENT_FILTERS
-            or not isinstance(value, str)
-            or not value.strip()
-            for key, value in filters.items()
-        ):
-            raise ValueError("verification filter is not allowed")
-        target_filter = {
-            "block_ip_simulated": "source_ip",
-            "isolate_host_simulated": "host",
-        }.get(self.action)
-        if target_filter is not None and filters.get(target_filter) != self.target:
-            raise ValueError("verification query must refer to the simulated target")
-        limit = query.get("limit", 100)
-        if type(limit) is not int or not 1 <= limit <= MAX_EVENT_RESULTS:
-            raise ValueError("verification result limit is invalid")
-        if ("time_from" in query) != ("time_to" in query):
-            raise ValueError("verification requires both time boundaries")
-        if "time_from" in query:
-            start = datetime.fromisoformat(query["time_from"])
-            end = datetime.fromisoformat(query["time_to"])
-            validate_event_search(start, end, filters, limit)
-        return self
+from evidencesoc.domain.response_action import SimulatedAction
 
 
 class AttackStep(BaseModel):
@@ -123,6 +56,55 @@ class ResponseOutput(BaseModel):
     @model_validator(mode="after")
     def simulated_actions_only(self) -> Self:
         if self.response_plan is not None:
-            for action in self.response_plan.actions:
-                SimulatedAction.model_validate(action)
+            plan = self.response_plan
+            actions = [SimulatedAction.model_validate(item) for item in plan.actions]
+            now = datetime.now(UTC)
+            targets = {action.target for action in actions}
+            if (
+                plan.risk_level is None
+                or not plan.risk_reason
+                or not plan.risk_reason.strip()
+                or not plan.business_impact
+                or not plan.business_impact.strip()
+                or plan.expires_at is None
+                or plan.expires_at <= now
+                or plan.created_at < now - timedelta(minutes=5)
+                or plan.created_at > now + timedelta(minutes=1)
+                or plan.expires_at > plan.created_at + timedelta(minutes=30)
+                or not plan.rollback_steps
+                or not plan.validation_checks
+                or set(plan.affected_assets) != targets
+                or {step.target for step in plan.rollback_steps} != targets
+                or {check.target for check in plan.validation_checks} != targets
+            ):
+                raise ValueError("response plan review details must be complete")
+            citations = set(plan.evidence_ids)
+            action_ids = [action.action_id for action in actions]
+            if any(not action.traceable for action in actions) or len(
+                set(action_ids)
+            ) != len(action_ids):
+                raise ValueError(
+                    "response actions require unique traceable identifiers"
+                )
+            rollbacks = {step.step_id: step for step in plan.rollback_steps}
+            for action in actions:
+                if (
+                    not set(action.evidence_ids or []) <= citations
+                    or action.rollback_ref not in rollbacks
+                    or rollbacks[action.rollback_ref].target != action.target
+                ):
+                    raise ValueError("response action must cite its plan and rollback")
+            for step in (*plan.rollback_steps, *plan.validation_checks):
+                if (
+                    step.target not in targets
+                    or not set(step.evidence_ids) <= citations
+                ):
+                    raise ValueError("response plan step must cite a planned target")
+            for check in plan.validation_checks:
+                if not any(
+                    check.target == action.target
+                    and check.query == action.verification_query
+                    for action in actions
+                ):
+                    raise ValueError("validation check must use the approved query")
         return self

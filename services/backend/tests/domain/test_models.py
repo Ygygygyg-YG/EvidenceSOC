@@ -287,8 +287,13 @@ def test_response_plan_requires_approval_by_default() -> None:
         summary="阻断恶意来源并验证服务可用性",
         actions=[
             {
-                "type": "block_ip",
+                "action": "block_ip_simulated",
                 "target": "203.0.113.10",
+                "risk": "Shared source address",
+                "impact": "Simulation only",
+                "preview": "Simulate a block",
+                "rollback": "Remove the simulated block",
+                "verification_query": {"filters": {"source_ip": "203.0.113.10"}},
             }
         ],
         created_at=NOW,
@@ -296,7 +301,42 @@ def test_response_plan_requires_approval_by_default() -> None:
     )
 
     assert plan.requires_approval is True
-    assert plan.actions[0]["type"] == "block_ip"
+    assert plan.actions[0].action == "block_ip_simulated"
+    assert plan.model_dump(mode="json")["actions"][0]["target"] == "203.0.113.10"
+
+
+@pytest.mark.parametrize(
+    "action",
+    [
+        {"action": "block_ip", "target": "203.0.113.10"},
+        {"action": "block_ip_simulated", "target": "203.0.113.10"},
+        {
+            "action": "block_ip_simulated",
+            "target": "203.0.113.10",
+            "risk": "Shared source address",
+            "impact": "Simulation only",
+            "preview": "Simulate a block",
+            "rollback": "Remove the simulated block",
+            "verification_query": {"filters": {"source_ip": "203.0.113.11"}},
+        },
+    ],
+)
+def test_response_plan_rejects_invalid_simulated_actions(
+    action: dict[str, Any],
+) -> None:
+    ResponsePlan = model_class("ResponsePlan")
+
+    with pytest.raises(ValidationError) as exc_info:
+        ResponsePlan(
+            response_plan_id="PLAN-001",
+            incident_id="INC-001",
+            summary="Simulation only",
+            actions=[action],
+            created_at=NOW,
+            evidence_ids=[EVIDENCE_ID],
+        )
+
+    assert any(error["loc"][:2] == ("actions", 0) for error in exc_info.value.errors())
 
 
 def test_response_plan_rejects_empty_actions() -> None:
@@ -385,6 +425,75 @@ def test_validation_result_accepts_success() -> None:
 
     assert result.outcome is ValidationOutcome.SUCCESS
     assert result.evidence_ids == [EVIDENCE_ID]
+    assert result.time_from is None and result.time_to is None
+    assert result.checks == []
+
+
+def test_validation_result_records_actual_query_window_and_check_outcome() -> None:
+    ValidationResult = model_class("ValidationResult")
+    result = ValidationResult(
+        validation_id="VALIDATION-002",
+        response_plan_id="PLAN-001",
+        outcome="insufficient_evidence",
+        summary="No matching event returned.",
+        checked_at=NOW,
+        evidence_ids=[EVIDENCE_ID],
+        time_from=NOW - timedelta(minutes=5),
+        time_to=NOW,
+        checks=[
+            {
+                "check_id": "VC-1",
+                "condition": {
+                    "time_from": (NOW - timedelta(minutes=5)).isoformat(),
+                    "time_to": NOW.isoformat(),
+                    "filters": {"source_ip": "203.0.113.42"},
+                    "limit": 10,
+                },
+                "outcome": "insufficient_evidence",
+                "evidence_ids": [],
+                "explanation": "The executed query returned no matching evidence.",
+            }
+        ],
+    )
+
+    assert result.checks[0].evidence_ids == []
+    assert result.checks[0].condition["limit"] == 10
+
+
+def test_validation_result_requires_a_complete_query_window() -> None:
+    ValidationResult = model_class("ValidationResult")
+    with pytest.raises(ValidationError):
+        ValidationResult(
+            validation_id="VALIDATION-003",
+            response_plan_id="PLAN-001",
+            outcome="success",
+            summary="Query completed.",
+            checked_at=NOW,
+            evidence_ids=[EVIDENCE_ID],
+            time_from=NOW - timedelta(minutes=5),
+        )
+
+
+def test_validation_check_cannot_cite_evidence_outside_result() -> None:
+    ValidationResult = model_class("ValidationResult")
+    with pytest.raises(ValidationError):
+        ValidationResult(
+            validation_id="VALIDATION-004",
+            response_plan_id="PLAN-001",
+            outcome="success",
+            summary="Query completed.",
+            checked_at=NOW,
+            evidence_ids=[EVIDENCE_ID],
+            checks=[
+                {
+                    "check_id": "VC-1",
+                    "condition": {"filters": {"source_ip": "203.0.113.42"}},
+                    "outcome": "success",
+                    "evidence_ids": ["EV-01ARZ3NDEKTSV4RRFFQ69G5FAA"],
+                    "explanation": "Other event.",
+                }
+            ],
+        )
 
 
 def test_validation_result_rejects_invalid_outcome() -> None:

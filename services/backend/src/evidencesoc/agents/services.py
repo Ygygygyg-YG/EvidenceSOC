@@ -13,6 +13,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from evidencesoc.agents.fallback import matching_target
 from evidencesoc.agents.models import SimulatedAction
 from evidencesoc.config import BACKEND_ROOT, Settings
 from evidencesoc.domain.models import (
@@ -62,13 +63,6 @@ OBSERVATION_FIELDS = frozenset(
         "user",
         "username",
         "account",
-    }
-)
-SIMULATED_ACTIONS = frozenset(
-    {
-        "block_ip_simulated",
-        "isolate_host_simulated",
-        "disable_account_simulated",
     }
 )
 
@@ -147,14 +141,15 @@ class PostgresWorkflowServices:
 
     def _start_run(self, state: dict[str, Any], role: str) -> str:
         if state.get("trace_id"):
-            identity = json.dumps(
-                [
-                    state["incident_id"],
-                    state["trace_id"],
-                    role,
-                    state.get("fallback_count", 0),
-                ]
-            )
+            identity_parts = [
+                state["incident_id"],
+                state["trace_id"],
+                role,
+                state.get("fallback_count", 0),
+            ]
+            if state.get("plan_generation", 0):
+                identity_parts.append(state["plan_generation"])
+            identity = json.dumps(identity_parts)
             run_id = "AR-" + sha256(identity.encode()).hexdigest()[:32]
         else:
             run_id = "AR-" + new_ulid()
@@ -222,6 +217,7 @@ class PostgresWorkflowServices:
         alert = loaded["alerts"][0]
         at = _utc(alert["created_at"])
         filters: dict[str, str] = {}
+        source_scopes: list[dict[str, Any]] = []
         with self._sessions() as session:
             events = (
                 session.execute(
@@ -240,18 +236,20 @@ class PostgresWorkflowServices:
                 if calculate_content_sha256(event.raw) != event.content_sha256:
                     raise ValueError("alert source event integrity check failed")
                 raw = _observations(event.raw)
-                filters = {
+                source_filters = {
                     key: raw[key]
                     for key in ("source_ip", "host", "service")
                     if isinstance(raw.get(key), str) and raw[key].strip()
                 }
-                if filters:
-                    break
+                source_scopes.append({"filters": source_filters, "raw": raw})
+                if not filters and source_filters:
+                    filters = source_filters
         return {
             "alert_id": alert["alert_id"],
             "time_from": (at - timedelta(seconds=900)).isoformat(),
             "time_to": (at + timedelta(seconds=900)).isoformat(),
             "filters": filters,
+            "source_scopes": source_scopes,
             "limit": 100,
         }
 
@@ -364,7 +362,8 @@ class PostgresWorkflowServices:
             )
             if scope["filters"]:
                 arguments = {
-                    key: value for key, value in scope.items() if key != "alert_id"
+                    key: scope[key]
+                    for key in ("time_from", "time_to", "filters", "limit")
                 }
                 validate_event_search(
                     _utc(scope["time_from"]),
@@ -391,7 +390,7 @@ class PostgresWorkflowServices:
         incident_id = state["incident_id"]
         scope = await asyncio.to_thread(self._scope, incident_id)
         if not scope["filters"]:
-            return {"evidence": []}
+            return {"evidence": [], "executed_checks": []}
         context = RunContext(
             run_id, incident_id, state.get("trace_id") or "TRACE-" + new_ulid()
         )
@@ -399,11 +398,31 @@ class PostgresWorkflowServices:
         if plan.incident_id != incident_id:
             raise PermissionError("verification plan belongs to a different incident")
         queries: dict[str, dict[str, Any]] = {}
+        requested_checks: list[tuple[str, str]] = []
+        used_check_ids: set[str] = set()
         lower, upper = _utc(scope["time_from"]), _utc(scope["time_to"])
-        for raw_action in plan.actions:
+        for index, raw_action in enumerate(plan.actions, start=1):
             action = SimulatedAction.model_validate(raw_action)
             query = action.verification_query
-            filters = dict(scope["filters"])
+            source = next(
+                (
+                    item
+                    for item in scope["source_scopes"]
+                    if item["filters"]
+                    and matching_target({"raw": item["raw"]}, action)
+                    and all(
+                        item["filters"][key] == value
+                        for key, value in query["filters"].items()
+                        if key in item["filters"]
+                    )
+                ),
+                None,
+            )
+            if source is None:
+                raise PermissionError(
+                    "verification target is not observed in the alert source events"
+                )
+            filters = dict(source["filters"])
             for key, value in query["filters"].items():
                 if key in filters and filters[key] != value:
                     raise PermissionError(
@@ -428,17 +447,50 @@ class PostgresWorkflowServices:
                 "filters": filters,
                 "limit": limit,
             }
-            queries[json.dumps(arguments, sort_keys=True)] = arguments
+            query_key = json.dumps(arguments, sort_keys=True)
+            queries[query_key] = arguments
+            configured_check = next(
+                (
+                    check
+                    for check in plan.validation_checks
+                    if check.check_id not in used_check_ids
+                    and check.target == action.target
+                    and check.query == query
+                ),
+                None,
+            )
+            check_id = (
+                configured_check.check_id
+                if configured_check is not None
+                else f"VC-legacy-{index}"
+            )
+            used_check_ids.add(check_id)
+            requested_checks.append((check_id, query_key))
         values: list[dict[str, Any]] = []
+        query_values: dict[str, list[dict[str, Any]]] = {}
         async with open_stdio_session(
             context, settings=self.settings, backend_dir=BACKEND_ROOT
         ) as session:
             await self._check_tools(session)
-            for arguments in queries.values():
-                values.extend(
-                    await self._call(session, "search_security_events", arguments)
+            for key, arguments in queries.items():
+                query_values[key] = await self._call(
+                    session, "search_security_events", arguments
                 )
-        return {"evidence": await self.hydrate_evidence(incident_id, values)}
+                values.extend(query_values[key])
+        evidence = await self.hydrate_evidence(incident_id, values)
+        return {
+            "evidence": evidence,
+            "executed_checks": [
+                {
+                    "check_id": check_id,
+                    "condition": queries[key],
+                    "evidence_ids": list(
+                        dict.fromkeys(item["evidence_id"] for item in query_values[key])
+                    ),
+                }
+                for check_id, key in requested_checks
+            ],
+        }
 
     @staticmethod
     def _check_evidence_scope(
@@ -485,12 +537,6 @@ class PostgresWorkflowServices:
                 plan is None or result.response_plan_id != plan.response_plan_id
             ):
                 raise PermissionError("result belongs to a different response plan")
-        if plan is not None and any(
-            action.get("action") not in SIMULATED_ACTIONS for action in plan.actions
-        ):
-            raise PermissionError(
-                "only approved simulation action types can be persisted"
-            )
         with self._sessions() as session, session.begin():
             incident = session.get(IncidentTable, incident_id)
             if incident is None:
@@ -528,7 +574,11 @@ class PostgresWorkflowServices:
                     raise PermissionError(
                         "validation identifier belongs to another plan"
                     )
-                session.merge(ValidationResultTable(**validation.model_dump()))
+                values = validation.model_dump()
+                values["checks"] = [
+                    check.model_dump(mode="json") for check in validation.checks
+                ]
+                session.merge(ValidationResultTable(**values))
             for step in state.get("attack_steps", []):
                 values = dict(step)
                 self._check_evidence_scope(session, incident_id, values["evidence_ids"])
