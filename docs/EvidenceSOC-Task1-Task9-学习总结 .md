@@ -1,8 +1,8 @@
 # EvidenceSOC：Task 1–Task 9 结构化学习总结
 
-> 读者：已经完成 Task 1–9 实操、需要理解代码逻辑与工程价值的软件工程初学者。  
-> 初稿日期：2026-09-22；补充核对日期：2026-09-27。  
-> 内容依据：`docs/EvidenceSOC-project-preparation.md`、`docs/environment-verification.md`，以及当前仓库的配置、实现、测试和 Git 历史。  
+> 读者：已经完成 Task 1–9 实操、需要理解代码逻辑与工程价值的软件工程初学者。<br>
+> 初稿日期：2026-09-22；补充核对日期：2026-09-27。<br>
+> 内容依据：`docs/EvidenceSOC-project-preparation.md`、`docs/environment-verification.md`，以及当前仓库的配置、实现、测试和 Git 历史。<br>
 > 本文是学习复盘；安装、初始化、迁移和提交命令用于解释原计划中的步骤，按历史示例保留。本次只更新学习文档，不执行 Git 暂存或提交。
 
 ## 阅读说明：如何理解这九个任务
