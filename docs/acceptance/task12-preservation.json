@@ -1,0 +1,551 @@
+{
+  "head": "f21dda13b7997fc040b29bf3d3c3704a9db98fb2",
+  "branch": "task11-ait",
+  "modified_count": 29,
+  "untracked_count": 31,
+  "archive_sha256": "72df080c42b8629a4196c626f94316fc3fce5ec95f5e4da75c5b168e7cd7436a",
+  "entries": [
+    {
+      "status": " M",
+      "path": ".gitignore",
+      "category": "infra-script-config",
+      "size": 585,
+      "sha256": "4a7eb82995ce4068521072c7604f91b210f62cb487f57f201093e130c0968ce9",
+      "task_group": "文档与保全配置",
+      "integration": "included, merge shared paths"
+    },
+    {
+      "status": " M",
+      "path": "docs/EvidenceSOC-project-preparation.md",
+      "category": "docs",
+      "size": 94034,
+      "sha256": "e7a3eca513142418d427c8219ec01afefefebddb88a566fcd722717e0b9616b4",
+      "task_group": "文档与保全配置",
+      "integration": "included, merge shared paths"
+    },
+    {
+      "status": " M",
+      "path": "infra/opensearch/security-events-template.json",
+      "category": "infra-script-config",
+      "size": 2089,
+      "sha256": "21df6e9e2ef51ec2ab4b19ec20703a03e8a82264fa5de6d9d5de8f0265de51b8",
+      "task_group": "Task6/8增强及集成迁移",
+      "integration": "included, merge shared paths"
+    },
+    {
+      "status": " M",
+      "path": "services/backend/src/evidencesoc/agents/graph.py",
+      "category": "backend-runtime",
+      "size": 20165,
+      "sha256": "02076172d24f39257351da0f1504646e42b1aadacce02d7219e2caf0d2dfc366",
+      "task_group": "Task6/8增强及集成迁移",
+      "integration": "included, merge shared paths"
+    },
+    {
+      "status": " M",
+      "path": "services/backend/src/evidencesoc/agents/model.py",
+      "category": "backend-runtime",
+      "size": 2730,
+      "sha256": "fcf5b5932032d3683edaf87cdc40b8abbacd00069889a6d0abeaacda1d6274b9",
+      "task_group": "Task6/8增强及集成迁移",
+      "integration": "included, merge shared paths"
+    },
+    {
+      "status": " M",
+      "path": "services/backend/src/evidencesoc/agents/nodes/__init__.py",
+      "category": "backend-runtime",
+      "size": 15973,
+      "sha256": "7ca09420e28198132048a8dbcb24ac6e9a34d2be6bb55b475ad3ba67092b65a6",
+      "task_group": "Task6/8增强及集成迁移",
+      "integration": "included, merge shared paths"
+    },
+    {
+      "status": " M",
+      "path": "services/backend/src/evidencesoc/agents/services.py",
+      "category": "backend-runtime",
+      "size": 26779,
+      "sha256": "6d9fe8b22677795feab00826dcb139d6772b39b480c240823811bc37a96c891e",
+      "task_group": "Task6/8增强及集成迁移",
+      "integration": "included, merge shared paths"
+    },
+    {
+      "status": " M",
+      "path": "services/backend/src/evidencesoc/agents/state.py",
+      "category": "backend-runtime",
+      "size": 1293,
+      "sha256": "5ae4a3fdb8a51c5934a3239831f20b8aad99e25dae55f6eb7070ba0ac183fd86",
+      "task_group": "Task6/8增强及集成迁移",
+      "integration": "included, merge shared paths"
+    },
+    {
+      "status": " M",
+      "path": "services/backend/src/evidencesoc/api/tables.py",
+      "category": "backend-runtime",
+      "size": 3318,
+      "sha256": "4f390a9039138e11501fdb5f0557b91055723108a31c5e3c65a5cb722da369c8",
+      "task_group": "Task6/8增强及集成迁移",
+      "integration": "included, merge shared paths"
+    },
+    {
+      "status": " M",
+      "path": "services/backend/src/evidencesoc/domain/event_search_policy.py",
+      "category": "backend-runtime",
+      "size": 1163,
+      "sha256": "eb3b1a630edf3b5332c5d2182559455547ee55f84c52b25460bb9a9ae6458ace",
+      "task_group": "Task6/8增强及集成迁移",
+      "integration": "included, merge shared paths"
+    },
+    {
+      "status": " M",
+      "path": "services/backend/src/evidencesoc/mcp_server/client.py",
+      "category": "backend-runtime",
+      "size": 2097,
+      "sha256": "671d52bcfa78a66f8203dfd1e0f462100785ca9f73ef2fafae15bd732138b631",
+      "task_group": "Task6/8增强及集成迁移",
+      "integration": "included, merge shared paths"
+    },
+    {
+      "status": " M",
+      "path": "services/backend/src/evidencesoc/mcp_server/context.py",
+      "category": "backend-runtime",
+      "size": 1288,
+      "sha256": "77d7b3b8e00022c3e3439b9dde82d1a39c12884b5a7324589d8e9f94cf2e7e89",
+      "task_group": "Task6/8增强及集成迁移",
+      "integration": "included, merge shared paths"
+    },
+    {
+      "status": " M",
+      "path": "services/backend/src/evidencesoc/mcp_server/main.py",
+      "category": "backend-runtime",
+      "size": 5181,
+      "sha256": "757667201c4b9f4d1f5d9c575c948794f4b4ca4b3ec79c6429e1bf11fe975350",
+      "task_group": "Task6/8增强及集成迁移",
+      "integration": "included, merge shared paths"
+    },
+    {
+      "status": " M",
+      "path": "services/backend/src/evidencesoc/persistence/event_repository.py",
+      "category": "backend-runtime",
+      "size": 11241,
+      "sha256": "3810e9ea29ca7f7713ba174b6e1d55d0f3243df26e13294dd401d54c1901d8a9",
+      "task_group": "Task6/8增强及集成迁移",
+      "integration": "included, merge shared paths"
+    },
+    {
+      "status": " M",
+      "path": "services/backend/src/evidencesoc/persistence/event_search.py",
+      "category": "backend-runtime",
+      "size": 5323,
+      "sha256": "ab840e47c0ac723c978585a368d14177da035d199dbacb9017c9bf97622bfd5c",
+      "task_group": "Task6/8增强及集成迁移",
+      "integration": "included, merge shared paths"
+    },
+    {
+      "status": " M",
+      "path": "services/backend/src/evidencesoc/persistence/tables.py",
+      "category": "backend-runtime",
+      "size": 15432,
+      "sha256": "3e3d21df3ae2e6334e2c7d092ccec002a56f6f08726e55d85bfb0744f1d30592",
+      "task_group": "Task6/8增强及集成迁移",
+      "integration": "included, merge shared paths"
+    },
+    {
+      "status": " M",
+      "path": "services/backend/src/evidencesoc/tools/alert_work.py",
+      "category": "backend-runtime",
+      "size": 8250,
+      "sha256": "78b62b71e1ad80cc4b3feccc5ca1480a791c7faee4a29dcc92e215b9efa245cd",
+      "task_group": "Task6/8增强及集成迁移",
+      "integration": "included, merge shared paths"
+    },
+    {
+      "status": " M",
+      "path": "services/backend/src/evidencesoc/tools/attack_work.py",
+      "category": "backend-runtime",
+      "size": 7248,
+      "sha256": "b93bff0f8220fc59cfd5a791a531b207d7d35fe75388a078d54a8543202bb32b",
+      "task_group": "Task6/8增强及集成迁移",
+      "integration": "included, merge shared paths"
+    },
+    {
+      "status": " M",
+      "path": "services/backend/src/evidencesoc/tools/event_work.py",
+      "category": "backend-runtime",
+      "size": 6119,
+      "sha256": "cd9a6559548757c49bef190ad21051c7081d27978af86d950538bb8ec8a28dad",
+      "task_group": "Task6/8增强及集成迁移",
+      "integration": "included, merge shared paths"
+    },
+    {
+      "status": " M",
+      "path": "services/backend/tests/agents/test_services.py",
+      "category": "backend-tests",
+      "size": 25317,
+      "sha256": "c073b0de1d8cd3b18ed00444d33ebd78de65957ddc756327f6a4de4099ca9085",
+      "task_group": "Task6/8增强及集成迁移",
+      "integration": "included, merge shared paths"
+    },
+    {
+      "status": " M",
+      "path": "services/backend/tests/api/test_live_acceptance.py",
+      "category": "backend-tests",
+      "size": 34316,
+      "sha256": "5dac2290f66b4c802af610c9a8503f0b0b018536076c436210db5ea59c9cdfd7",
+      "task_group": "Task6/8增强及集成迁移",
+      "integration": "included, merge shared paths"
+    },
+    {
+      "status": " M",
+      "path": "services/backend/tests/evidence/test_service.py",
+      "category": "backend-tests",
+      "size": 15978,
+      "sha256": "db2f944b2f199e8190580a32743dc61cf149943a07389c0436f3ba1326962ebb",
+      "task_group": "Task6/8增强及集成迁移",
+      "integration": "included, merge shared paths"
+    },
+    {
+      "status": " M",
+      "path": "services/backend/tests/persistence/test_event_repository.py",
+      "category": "backend-tests",
+      "size": 10791,
+      "sha256": "47720bb96e5dd67546fc0c376efaefc7c27470adc72080ae8d2f4cea6fad8ba5",
+      "task_group": "Task6/8增强及集成迁移",
+      "integration": "included, merge shared paths"
+    },
+    {
+      "status": " M",
+      "path": "services/backend/tests/persistence/test_event_search.py",
+      "category": "backend-tests",
+      "size": 10142,
+      "sha256": "dd587a1cbb78016c240ff80506a85051147304593cf50713c4b30af557975214",
+      "task_group": "Task6/8增强及集成迁移",
+      "integration": "included, merge shared paths"
+    },
+    {
+      "status": " M",
+      "path": "services/backend/tests/persistence/test_tables.py",
+      "category": "backend-tests",
+      "size": 8514,
+      "sha256": "3870753fbb8d52b16f8adecea3c1c112636db4973b83b63e37c803bd2b287799",
+      "task_group": "Task6/8增强及集成迁移",
+      "integration": "included, merge shared paths"
+    },
+    {
+      "status": " M",
+      "path": "services/backend/tests/tools/test_alert_work.py",
+      "category": "backend-tests",
+      "size": 6109,
+      "sha256": "a198dc18b234b18bda81fd949dfb47baae895a34bc1fef45437ce0f2e4d5d993",
+      "task_group": "Task6/8增强及集成迁移",
+      "integration": "included, merge shared paths"
+    },
+    {
+      "status": " M",
+      "path": "services/backend/tests/tools/test_attack_work.py",
+      "category": "backend-tests",
+      "size": 4538,
+      "sha256": "6d788f7708edf1b8f990f694a37c8b6b44920ff5534730a815b128ca87cd8291",
+      "task_group": "Task6/8增强及集成迁移",
+      "integration": "included, merge shared paths"
+    },
+    {
+      "status": " M",
+      "path": "services/backend/tests/tools/test_mcp_client.py",
+      "category": "backend-tests",
+      "size": 6502,
+      "sha256": "c886c149da5c67641385012c8e3a08c5bdee8305fb24308101463fe92f7e1b92",
+      "task_group": "Task6/8增强及集成迁移",
+      "integration": "included, merge shared paths"
+    },
+    {
+      "status": " M",
+      "path": "services/backend/tests/tools/test_mcp_server.py",
+      "category": "backend-tests",
+      "size": 7108,
+      "sha256": "2adfc1632e3c51260bbbe0d80a4a6e7b35e288314170f2e44ff9f2c38a190a01",
+      "task_group": "Task6/8增强及集成迁移",
+      "integration": "included, merge shared paths"
+    },
+    {
+      "status": "??",
+      "path": "docs/EvidenceSOC-Task1-Task9-学习总结 .md",
+      "category": "docs",
+      "size": 236760,
+      "sha256": "cf4ce08f08687cf4d4075d65ddc1eeaf9af30cee86713ce3e3c197990ff32a0e",
+      "task_group": "文档与保全配置",
+      "integration": "included, merge shared paths"
+    },
+    {
+      "status": "??",
+      "path": "docs/EvidenceSOC-前端完整设计与实施方案.md",
+      "category": "docs",
+      "size": 88063,
+      "sha256": "a2aa5c97a202bc93f971e2ee54c234422a8c889a4e18c427fa4752ad9e031d36",
+      "task_group": "文档与保全配置",
+      "integration": "included, merge shared paths"
+    },
+    {
+      "status": "??",
+      "path": "docs/superpowers/plans/2026-09-27-task10-operation-guide.md",
+      "category": "docs",
+      "size": 30252,
+      "sha256": "e16598d5f336d50ad1aca332a1cb0b233d0eeb1db27107b1989c4b3f7cefe338",
+      "task_group": "文档与保全配置",
+      "integration": "included, merge shared paths"
+    },
+    {
+      "status": "??",
+      "path": "evals/README.md",
+      "category": "evals",
+      "size": 7800,
+      "sha256": "daa9cf02eccf7e7476cf332fcdc097a7ad0f29f7a3141825375d5e4b1ddc9841",
+      "task_group": "来源待核实的评测文件（仅保全）",
+      "integration": "excluded, preserved unchanged"
+    },
+    {
+      "status": "??",
+      "path": "evals/metrics/__init__.py",
+      "category": "evals",
+      "size": 43,
+      "sha256": "69e889859e429f950b6e83064beacd016a8018ef6dab0c15e9f417c80e0007e2",
+      "task_group": "来源待核实的评测文件（仅保全）",
+      "integration": "excluded, preserved unchanged"
+    },
+    {
+      "status": "??",
+      "path": "evals/metrics/attack_chain.py",
+      "category": "evals",
+      "size": 1126,
+      "sha256": "aadb0c45d75d35b2983c547e9ff2246bd1eeff50b68f91ca60327b9cb36df781",
+      "task_group": "来源待核实的评测文件（仅保全）",
+      "integration": "excluded, preserved unchanged"
+    },
+    {
+      "status": "??",
+      "path": "evals/metrics/classification.py",
+      "category": "evals",
+      "size": 2629,
+      "sha256": "cb1f09ba0a462ce8e22e20ec71185b57a1b77191e253404180643a21cccc7e4f",
+      "task_group": "来源待核实的评测文件（仅保全）",
+      "integration": "excluded, preserved unchanged"
+    },
+    {
+      "status": "??",
+      "path": "evals/metrics/evidence.py",
+      "category": "evals",
+      "size": 1407,
+      "sha256": "6ddec01374ff65df304024442a1b1a908a79ca31de18f0c680b4fff7ef8227ba",
+      "task_group": "来源待核实的评测文件（仅保全）",
+      "integration": "excluded, preserved unchanged"
+    },
+    {
+      "status": "??",
+      "path": "evals/run_manifest.schema.json",
+      "category": "evals",
+      "size": 3119,
+      "sha256": "0b5b44bfd57196aac1aa282f61d1336a3ea6698358a64f996869fa2a95400e19",
+      "task_group": "来源待核实的评测文件（仅保全）",
+      "integration": "excluded, preserved unchanged"
+    },
+    {
+      "status": "??",
+      "path": "evals/runners/__init__.py",
+      "category": "evals",
+      "size": 68,
+      "sha256": "f643e51eb7fb130638d2f3b3eedef1a94245bf71093f25c28070cb4ede8567f4",
+      "task_group": "来源待核实的评测文件（仅保全）",
+      "integration": "excluded, preserved unchanged"
+    },
+    {
+      "status": "??",
+      "path": "evals/runners/cli.py",
+      "category": "evals",
+      "size": 7526,
+      "sha256": "57517b9a6f08e8bc86d3c7117e1c44ce1a2c4244478da5bc3eb49eb07190c5f4",
+      "task_group": "来源待核实的评测文件（仅保全）",
+      "integration": "excluded, preserved unchanged"
+    },
+    {
+      "status": "??",
+      "path": "evals/runners/execute.py",
+      "category": "evals",
+      "size": 2963,
+      "sha256": "88a472456625c769be39f4a01c49adad6cea78b6fa6caea270f56dfc907d349f",
+      "task_group": "来源待核实的评测文件（仅保全）",
+      "integration": "excluded, preserved unchanged"
+    },
+    {
+      "status": "??",
+      "path": "evals/runners/manifest.py",
+      "category": "evals",
+      "size": 8575,
+      "sha256": "45771b83b80c750baac2aa3e605939e47125791db6a08d6a670018d3b720c8ce",
+      "task_group": "来源待核实的评测文件（仅保全）",
+      "integration": "excluded, preserved unchanged"
+    },
+    {
+      "status": "??",
+      "path": "evals/runners/score.py",
+      "category": "evals",
+      "size": 27251,
+      "sha256": "7ae80935e5b5e0b3a2cab04533b34d11ca1d8c54ea69b8c842c7bba9d9bb221d",
+      "task_group": "来源待核实的评测文件（仅保全）",
+      "integration": "excluded, preserved unchanged"
+    },
+    {
+      "status": "??",
+      "path": "evals/tests/test_metrics.py",
+      "category": "evals",
+      "size": 3826,
+      "sha256": "9747199344d600652039d89032b36e7bf74b5339ba1b7ab4700707ace09640de",
+      "task_group": "来源待核实的评测文件（仅保全）",
+      "integration": "excluded, preserved unchanged"
+    },
+    {
+      "status": "??",
+      "path": "evals/tests/test_task13_runner.py",
+      "category": "evals",
+      "size": 28407,
+      "sha256": "7a4d2918efe68495c0ed23c836d199b4a56e39be16cfab3702c26c38af839f84",
+      "task_group": "来源待核实的评测文件（仅保全）",
+      "integration": "excluded, preserved unchanged"
+    },
+    {
+      "status": "??",
+      "path": "scripts/seed-task10.py",
+      "category": "infra-script-config",
+      "size": 8159,
+      "sha256": "2d0db9c437fff22d019a4e0ec24dd0df19f39854c877e26c95aacdeaa7e86870",
+      "task_group": "Task10迁移与样例导入",
+      "integration": "included, merge shared paths"
+    },
+    {
+      "status": "??",
+      "path": "services/backend/migrations/versions/c0e8c2a18a7d_add_decision_receipts.py",
+      "category": "migration",
+      "size": 666,
+      "sha256": "635248deded77337d3cd71ead92191fd539a3f2da3e12952306b051cd7607937",
+      "task_group": "Task10迁移与样例导入",
+      "integration": "already merged identical migration"
+    },
+    {
+      "status": "??",
+      "path": "services/backend/migrations/versions/c74a62f911ab_add_investigation_call_ledger.py",
+      "category": "migration",
+      "size": 4611,
+      "sha256": "09c0092bee62956b2898d87d38a2ddf2c7f488cf8ffb89d8193e7a7a6cddcabf",
+      "task_group": "Task6/8增强及集成迁移",
+      "integration": "included, merge shared paths"
+    },
+    {
+      "status": "??",
+      "path": "services/backend/migrations/versions/d7b7d8cb8b42_add_response_plan_review_fields.py",
+      "category": "migration",
+      "size": 1728,
+      "sha256": "6f59893be78caf6002ed85d26099a75da693719e24548d4aa2bcad26658b9e32",
+      "task_group": "Task10迁移与样例导入",
+      "integration": "already merged identical migration"
+    },
+    {
+      "status": "??",
+      "path": "services/backend/migrations/versions/e902c4b7a1d6_merge_task10_and_investigation_ledger.py",
+      "category": "migration",
+      "size": 258,
+      "sha256": "cbcef1a4fd10412ec245d600c5496c6d8533fdfef07e871344166c6951df340a",
+      "task_group": "Task6/8增强及集成迁移",
+      "integration": "included, merge shared paths"
+    },
+    {
+      "status": "??",
+      "path": "services/backend/migrations/versions/f3f8c2a59010_add_validation_query_results.py",
+      "category": "migration",
+      "size": 899,
+      "sha256": "04f964f4d761bb94a28e6d77f271cf1533f79f8b17bc6a74afc8e91b07ef9728",
+      "task_group": "Task10迁移与样例导入",
+      "integration": "already merged identical migration"
+    },
+    {
+      "status": "??",
+      "path": "services/backend/src/evidencesoc/agents/collect_policy.py",
+      "category": "backend-runtime",
+      "size": 4945,
+      "sha256": "481d4e87841156160369441c9615358ff4e26eaab006d6dfa9afb2b4897d18eb",
+      "task_group": "Task6/8增强及集成迁移",
+      "integration": "included, merge shared paths"
+    },
+    {
+      "status": "??",
+      "path": "services/backend/src/evidencesoc/agents/collection.py",
+      "category": "backend-runtime",
+      "size": 14706,
+      "sha256": "966325dd8483aab636f912f4b0be50bb5354d4b3755766a6a7099c277f556011",
+      "task_group": "Task6/8增强及集成迁移",
+      "integration": "included, merge shared paths"
+    },
+    {
+      "status": "??",
+      "path": "services/backend/src/evidencesoc/tools/ledger.py",
+      "category": "backend-runtime",
+      "size": 14168,
+      "sha256": "6795131f653c17286587a1f784ba57b24f04d60e659ce8fa07b5d4da33a4b1dd",
+      "task_group": "Task6/8增强及集成迁移",
+      "integration": "included, merge shared paths"
+    },
+    {
+      "status": "??",
+      "path": "services/backend/tests/agents/test_collect_policy.py",
+      "category": "backend-tests",
+      "size": 4628,
+      "sha256": "c148971571dc4f05852119c33489d6a1ad0fa2b48e5a9ecc4fbb11eab1e6ec88",
+      "task_group": "Task6/8增强及集成迁移",
+      "integration": "included, merge shared paths"
+    },
+    {
+      "status": "??",
+      "path": "services/backend/tests/agents/test_collection_planner.py",
+      "category": "backend-tests",
+      "size": 18765,
+      "sha256": "5924aa112093ef2f4a754c2e786121da6f90089e29d767c9321de1a6e01832e0",
+      "task_group": "Task6/8增强及集成迁移",
+      "integration": "included, merge shared paths"
+    },
+    {
+      "status": "??",
+      "path": "services/backend/tests/persistence/test_event_search_acceptance.py",
+      "category": "backend-tests",
+      "size": 2761,
+      "sha256": "26333a6ab0f2fafb30217b8c063f8296e9f301b2664cafb2b98693abc3918068",
+      "task_group": "Task6/8增强及集成迁移",
+      "integration": "included, merge shared paths"
+    },
+    {
+      "status": "??",
+      "path": "services/backend/tests/persistence/test_evidence_idempotency.py",
+      "category": "backend-tests",
+      "size": 4417,
+      "sha256": "2819fa4c0c33dedec6a6c696a8baa34e81a1891077a2caba6005330e0c6375ab",
+      "task_group": "Task6/8增强及集成迁移",
+      "integration": "included, merge shared paths"
+    },
+    {
+      "status": "??",
+      "path": "services/backend/tests/persistence/test_migration_merge.py",
+      "category": "backend-tests",
+      "size": 2897,
+      "sha256": "db3a5db9085056c9a7397acc7490d5f55e0e01346ec7fc78bd5ec4cdef9d85c8",
+      "task_group": "Task6/8增强及集成迁移",
+      "integration": "included, merge shared paths"
+    },
+    {
+      "status": "??",
+      "path": "services/backend/tests/tools/test_ledger.py",
+      "category": "backend-tests",
+      "size": 5049,
+      "sha256": "047ef3b34504479c31eaabed13cdd1855a8ea20bdbef6d99d93b909b854b6810",
+      "task_group": "Task6/8增强及集成迁移",
+      "integration": "included, merge shared paths"
+    }
+  ],
+  "original_files_unchanged": true,
+  "original_status_unchanged": true
+}
