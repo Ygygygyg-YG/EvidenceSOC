@@ -1,6 +1,6 @@
 # Task 12 Step 4：集成服务验收
 
-检查日期：2026-10-14～15，Asia/Shanghai。集成工作树为 `D:\传智杯\.backups\task12-readiness`，分支 `codex/task12-readiness`。本记录只覆盖 Step 4；完整 Task 12 仍受 Step 6 约束。
+检查日期：2026-10-14～15，Asia/Shanghai。集成工作树为 `D:\传智杯\.backups\task12-readiness`，当前分支 `task12-readiness`（2026-10-15 按用户要求从 `codex/task12-readiness` 更名）。本记录只覆盖 Step 4；完整 Task 12 仍受 Step 6 约束。
 
 证据根目录：`C:\Users\31209\.codex\visualizations\2026\10\14\01a1382b-4bcc-7043-8631-40087915f690`。含密码的连接配置只在被忽略的 `D:\传智杯\.backups\task12-runtime` 中保存。
 

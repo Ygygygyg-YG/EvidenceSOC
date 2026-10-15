@@ -2,7 +2,7 @@
 
 日期：2026-10-14～15（Asia/Shanghai）。下文保留 Step 1～3 的原始结果，并追加用户选定的 Step 4～5 验收。本记录不代表完整 Task 12 通过，也不授权开始 Task 13。
 
-Step 1～3：已验收。原工作区的 60 个文件及 Git 状态复核保持不变。
+Step 1～5：已验收；完整 Task 12 尚需 Step 6。原工作区的 60 个文件及 Git 状态复核保持不变。
 
 Step 1～3 的历史受测源码提交为 `1e857709d2c02d4e0643e6f5dbefe913e60b4cd9`，随后 `23b49c9` / `2105c86` 补充记录及文档格式。
 
@@ -27,7 +27,7 @@ Step 4～5 的实现代码提交为 `9cc4d51066ca9a22c5befd52beb3286624495038`�
 
 ## 2. 提交与迁移整合
 
-使用已被 `.gitignore` 忽略的独立工作树 `D:\传智杯\.backups\task12-readiness`，分支 `codex/task12-readiness`。从 `main` 的 `1f1dbfa` 开始，分别以保留历史的合并提交纳入 Task 10 `3d8880f` 与 Task 11 `f21dda1`。
+使用已被 `.gitignore` 忽略的独立工作树 `D:\传智杯\.backups\task12-readiness`，当前分支为 `task12-readiness`。建立时名称为 `codex/task12-readiness`；2026-10-15 按用户要求去掉此前四个本地分支的 `codex/` 前缀，提交 ID 及工作区路径不变，记录见 `branch-prefix-renames.json`。从 `main` 的 `1f1dbfa` 开始，分别以保留历史的合并提交纳入 Task 10 `3d8880f` 与 Task 11 `f21dda1`。
 
 核对全部九个重叠路径，解决 `agents/model.py`、`agents/services.py`、`persistence/tables.py`、`tests/agents/test_services.py` 四处三方合并冲突。保留 Task 10 的审批身份、方案版本、幂等回执、响应复核字段、逐动作验证；同时纳入 Task 6/8 的有限取证、恢复台账、证据幂等、预算及数据集边界。
 
@@ -103,6 +103,14 @@ pnpm --dir apps/web build
 
 详见 [Step 4 记录](task12-services.md)。首轮完整测试因新隔离 OpenSearch 缺少仓库模板失败，保留 693 passed / 1 failed 记录；安装模板后重跑全套获得上述结果。
 
-## 6. 后续关口
+## 6. Step 5 AIT 异路径重建
 
-依原计划，完整 Task 12 仍需 Step 5 AIT 异路径重建、Step 6 DEDALE 数据准入和冻结；全部通过后才推进本地 `main`。Step 4 通过不代表整个 Task 12 完成。
+冻结选择版本为 `69c0d1e1d578ab1907a14c1fdb056e19151c41f9`；当前工作树及全新 `D:\传智杯\.backups\ait-portable-checkout` 使用同一实现和选择清单。两处各核验 149 个输入文件、13,873,020,979 字节，各实际重建全部 22 个测试包并通过完整包审计。每包四项必需产物的 88 对 SHA256 全部相同，额外 22 对 source-gold 与重新生成的选择清单也相同；已独立重新计算实际文件哈希复核。
+
+5/1/2 场景划分无交集；测试仍为 11 攻击、11 正常、22 消融，窗口不重叠。中性案例 ID 只取证据身份，不包含类别或阶段答案。22 测试包及 8 开发/验证包的原事件、gold、source-gold 字节保持不变，逐条连接完整；评分包 unknown=0，原始 join 的未标注值按原样保留。Agent 包不含金标字段或旧答案 ID。完整 AIT 测试 538 passed、0 skipped；最终 clean alternate checkout 在同一 `69c0d1e` 再次实际通过 538 项。
+
+实际获取、冻结、重建、审计命令与原始→LF→新冻结哈希见 [Step 5 记录](task12-ait-portability.md)，全部案例完整哈希见 [机器证据](task12-ait-hashes.json)。保全的旧数据和来源待核实的 Task 13 文件未改动；176 次正式模型运行属于 Task 13，本轮实际为 0 次。
+
+## 7. 后续关口
+
+依原计划，完整 Task 12 仍需 Step 6 DEDALE 数据准入和冻结；全部通过后才推进本地 `main`。Step 1～5 通过不代表整个 Task 12 完成。当前集成分支为 `task12-readiness`，Task 13 未启动。

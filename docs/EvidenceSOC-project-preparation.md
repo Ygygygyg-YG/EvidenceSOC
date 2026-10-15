@@ -898,7 +898,7 @@ git commit -m "eval: add isolated ait ground truth pipeline"
 
 ### Task 12: 集成收口与近期补充集准入（Task 13 前置验收）
 
-**本轮执行（2026-10-14）：** Step 1～3 已在 `codex/task12-readiness` 独立集成工作树完成，详见 `docs/acceptance/task12-readiness.md`。原工作区 29 个修改和 31 个未跟踪文件保持不变；来源待核实的评测文件仅保全。Task 10/11 的祖先、唯一迁移 head、真实批准/拒绝两支路及完整 61 项浏览器回归已核对。Step 4～6 仍待验收，本地 `main` 的推进按 Step 6 执行；Task 13 未启动。
+**本轮执行（2026-10-15）：** Step 1～5 已在 `task12-readiness` 独立集成工作树完成，详见 `docs/acceptance/task12-readiness.md`。本分支及此前三个本地 `codex/` 分支已按用户要求去掉前缀，提交和工作区路径不变。原工作区 29 个修改和 31 个未跟踪文件保持不变；来源待核实的评测文件仅保全。Task 10/11 的祖先、唯一迁移 head、真实批准/拒绝两支路及完整 61 项浏览器回归已核对。补充服务回归 694 项、AIT 测试 538 项通过且均无跳过；两个绝对目录各实际重建全部 22 个测试包，产物与选择清单哈希一致。Step 6 仍待验收，本地 `main` 的推进按 Step 6 执行；Task 13 未启动。
 
 **当前状态（2026-10-13）：** 尚未验收。本地 `main` 停在 `1f1dbfa`；Task 10 的 `3d8880f` 与 Task 11 的 `f21dda1` 位于不同分支，Task 6/8 增强及合并迁移仍有未提交文件。AIT 的 22 个测试包在当前路径审计通过，但评分 manifest 含本机绝对路径。DEDALE 已选定并完成公开元数据核验，尚未下载数据归档、实现适配或冻结案例；本次计划修订不代表上述工作已经完成。
 
@@ -936,11 +936,11 @@ Expected：所有当前改动均可追回；验收记录列明来源、去向和
 
 - [x] **Step 2: 整合 Task 10、Task 11 与 Task 6/8 到同一版本**
 
-在保全后的干净工作树建立 `codex/task12-readiness` 集成分支，以 `main` 为基点纳入 `codex/task10-frontend`、`task11-ait` 的已提交成果，再分批纳入 Task 6/8 的代码、测试与迁移。逐个核对 9 个同路径改动和 3 个重复迁移文件，合并数据表、审批字段、调用台账和 OpenSearch `dataset_id: keyword` 映射；不得以一侧文件整体覆盖另一侧。以唯一 Alembic head、既有数据行数及跨场景查询结果确认迁移与索引兼容。各批次验证后提交真实 Git 记录，验收通过时将集成结果纳入本地 `main`。
+在保全后的干净工作树建立 `task12-readiness` 集成分支，以 `main` 为基点纳入 `task10-frontend`、`task11-ait` 的已提交成果，再分批纳入 Task 6/8 的代码、测试与迁移。以上分支最初使用 `codex/` 前缀，2026-10-15 按用户要求去掉前缀，提交与工作区路径不变。逐个核对 9 个同路径改动和 3 个重复迁移文件，合并数据表、审批字段、调用台账和 OpenSearch `dataset_id: keyword` 映射；不得以一侧文件整体覆盖另一侧。以唯一 Alembic head、既有数据行数及跨场景查询结果确认迁移与索引兼容。各批次验证后提交真实 Git 记录，验收通过时将集成结果纳入本地 `main`。
 
 ```powershell
-git switch -c codex/task12-readiness main
-git merge --no-ff codex/task10-frontend
+git switch -c task12-readiness main
+git merge --no-ff task10-frontend
 git merge --no-ff task11-ait
 git merge-base --is-ancestor 3d8880f HEAD
 git merge-base --is-ancestor f21dda1 HEAD
@@ -992,7 +992,7 @@ Expected：环境、持久化、迁移、安全边界、恢复与性能均有同
 
 2026-10-15 补验：完整后端 694 passed、0 failed、0 skipped；独立 PostgreSQL/OpenSearch 重启读回及 24 张表迁移前后行数/内容摘要通过。详见 [Step 4 验收记录](acceptance/task12-services.md) 与 [总记录](acceptance/task12-readiness.md)。
 
-- [ ] **Step 5: 修复 Task 11 AIT 清单的异路径重建**
+- [x] **Step 5: 修复 Task 11 AIT 清单的异路径重建**
 
 将评分 manifest 中的 `build.source_config`、`build.splits` 和 `input_sha256` 文件键改为相对明确数据根的稳定引用；重建时由传入的数据根解析，哈希不包含本机绝对路径。对旧 `D:\传智杯` 清单保留变更原因及旧哈希，重新生成受影响的选择清单。在本步实现可执行的异路径重建入口并记录完整命令：于另一个绝对路径建立干净工作区，按来源清单重新获取或复制同一归档及六类输入并逐一核验原始哈希，使用新入口从该路径重建全部 22 个冻结测试包和选择清单，逐项比较新冻结清单要求的 Agent/评分产物哈希；只在原路径跑审计不足以验收。再次断言 5/1/2 场景无交集、测试 22 包（攻击 11、正常 11）、消融 22 包、时间窗不重叠、标签连接完整及 Agent 无金标。AIT 实际计划为 `4N + 4M = 176` 次，不能为凑原 288 次目标重复切片；这 176 次正式模型运行属于 Task 13。
 
@@ -1002,6 +1002,8 @@ uv run --project services/backend python -B scripts/ait_task11_audit.py
 ```
 
 上述现有命令只核验当前包，不能代替异路径重建。验收记录还须附另一目录的实际重建命令、工作区绝对路径、来源获取/校验日志，以及按案例列出的当前路径与异路径 `agent/manifest.json`、`agent/events.jsonl`、`scoring/manifest.json`、`scoring/gold.jsonl` 的 SHA256 对照。Expected：当前目录和另一绝对路径的全包重建均通过，哈希一致；来源归档哈希、旧/新冻结清单哈希及路径迁移原因写入 Task 12 验收记录。AIT 原始数据不进入 Git，重建所需获取与核验步骤必须可供干净环境执行。
+
+2026-10-15 补验：同一冻结版本 `69c0d1e` 在当前工作树与 `D:\传智杯\.backups\ait-portable-checkout` 各完成全部 22 包真实重建和独立审计；22×4 项必需产物及额外 source-gold、重新生成的选择清单哈希均一致。两个目录各 149 个输入文件已核验。完整命令、旧/新哈希与逐案例对照见 [Step 5 记录](acceptance/task12-ait-portability.md) 和 [SHA256 证据](acceptance/task12-ait-hashes.json)。
 
 - [ ] **Step 6: 接入、冻结 DEDALE 并签署 Task 12 关口**
 
@@ -1080,7 +1082,7 @@ Expected：数据审计、关键真实接入用例实际通过且关键项无跳
 
 ```powershell
 git switch main
-git merge --ff-only codex/task12-readiness
+git merge --ff-only task12-readiness
 git merge-base --is-ancestor 3d8880f main
 git merge-base --is-ancestor f21dda1 main
 git status --porcelain=v1 -uall
