@@ -1,6 +1,6 @@
-# Task 12 前三项集成记录
+# Task 12 集成与补充验收记录
 
-日期：2026-10-14（Asia/Shanghai）。本轮范围对应用户选定的 Task 12 Step 1～3。其余关口继续待验收，本记录不代表完整 Task 12 通过，也不授权开始 Task 13。
+日期：2026-10-14～15（Asia/Shanghai）。下文保留 Step 1～3 的原始结果，并追加用户选定的 Step 4～5 验收。本记录不代表完整 Task 12 通过，也不授权开始 Task 13。
 
 Step 1～3：已验收。原工作区的 60 个文件及 Git 状态复核保持不变。
 
@@ -93,6 +93,14 @@ pnpm --dir apps/web build
 
 真实后端测试显式设置 `EVIDENCESOC_TEST_POSTGRES=1`、`EVIDENCESOC_TEST_OPENSEARCH=1`，使用可丢弃测试库。浏览器设置 `TASK10_LIVE_ISOLATED_BACKEND`、`TASK10_LIVE_SEED_ALERT_ID`、相同的 `BACKEND_URL`、`PLAYWRIGHT_BASE_URL` 及 `CI=1`；演示账户后端的 `FRONTEND_ORIGIN` 匹配 Web 来源。样例导入使用 `scripts/seed-task10.py --api-url http://127.0.0.1:8012`。当前本机受控启动入口保存在被忽略的 `.backups/task12-runtime/run_browser.py`。凭据配置不进入报告或 Git。
 
-## 5. 后续关口
+## 5. Step 4 补充服务验收
 
-本轮结束后保留集成分支与干净工作树。依原计划，完整 Task 12 仍需 Step 4 遗留服务与环境验收、Step 5 AIT 异路径重建、Step 6 DEDALE 数据准入和冻结；全部通过后才推进本地 `main`。本轮不把前三项通过写成整个 Task 12 完成。
+2026-10-15 完整后端为 **694 passed，0 failed，0 skipped**（236.46 秒），含 23 个关键真实服务用例；完整 RAG 的三个 opt-in 用例已开启并实际通过。普通告警列表、案件详情各取 100 个真实 TCP 样本，P95 分别为 9.1274 / 21.6829 ms；首个 SSE 事件 65.0084 ms（1 个样本）。固定知识库 997 个合格 chunk、12 条查询的 Recall@8 为 1.000，引用校验通过。Ruff 通过，Mypy 74 个源文件通过。
+
+独立 PostgreSQL / OpenSearch 实际重启并读回同一标记及重新计算的 SHA256；原开发库先备份，迁移只在可丢弃副本执行，24 张表的行数和内容摘要与原库一致，`alembic check` 及唯一 head 通过。双父 merge head 的 `downgrade -1` 歧义已留证，改用显式父版本完成同一 merge revision 往返；没有修改迁移历史。
+
+详见 [Step 4 记录](task12-services.md)。首轮完整测试因新隔离 OpenSearch 缺少仓库模板失败，保留 693 passed / 1 failed 记录；安装模板后重跑全套获得上述结果。
+
+## 6. 后续关口
+
+依原计划，完整 Task 12 仍需 Step 5 AIT 异路径重建、Step 6 DEDALE 数据准入和冻结；全部通过后才推进本地 `main`。Step 4 通过不代表整个 Task 12 完成。

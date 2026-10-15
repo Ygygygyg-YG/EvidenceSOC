@@ -968,9 +968,9 @@ pnpm --dir apps/web build
 
 Expected：质量命令全部退出码为 0；批准与拒绝两条真实闭环用例实际通过且关键用例 `skipped=0`，拒绝案件没有后续模拟处置。保存 Playwright 报告、隔离后端及 Web 进程地址、案件/证据/审批 ID 与两个分辨率的核查结果。
 
-- [ ] **Step 4: 在集成版本上补齐 Task 1～9 的遗留验收**
+- [x] **Step 4: 在集成版本上补齐 Task 1～9 的遗留验收**
 
-更新环境记录中的当前路径、宿主机 CPU/内存、Docker 资源、工具实际版本与检查日期；在隔离环境验证 PostgreSQL 和 OpenSearch 的健康、版本以及写入标记后重启读回同一值/哈希。迁移的 `upgrade head → downgrade -1 → upgrade head` 仅在可丢弃数据库上运行；已有开发库先备份，再核对升级前后表、行数与 `alembic check`，不在保存业务数据的库中直接降级。重新验证接入幂等、Evidence 原文/哈希、三工具白名单与边界、完整知识库 Recall@8 和引用校验。
+更新环境记录中的当前路径、宿主机 CPU/内存、Docker 资源、工具实际版本与检查日期；在隔离环境验证 PostgreSQL 和 OpenSearch 的健康、版本以及写入标记后重启读回同一值/哈希。迁移的 `upgrade head → downgrade -1 → upgrade head` 仅在可丢弃数据库上运行；如 head 为双父合并点，保存 `-1` 的歧义错误，再显式指定父版本完成单个 merge revision 的降级与重新升级。已有开发库先备份，再核对升级前后表、行数与 `alembic check`，不在保存业务数据的库中直接降级。重新验证接入幂等、Evidence 原文/哈希、三工具白名单与边界、完整知识库 Recall@8 和引用校验。
 
 真实 PostgreSQL、OpenSearch 与 MCP 环境中，复核每轮 3 次、调查累计 6 次逻辑取证调用，失败、空结果、重复指纹、物理重试、并发预占、跨案件/场景拒绝、规则降级及 `collect` 内三个中断点恢复；重启不得重置额度或重复模拟处置，审批后验证查询单独计数。API 验证 `Last-Event-ID` 恢复、首个 SSE 事件小于 2 秒、普通非模型 API 本机 P95 小于 500 ms 和秘密脱敏；记录测量样本数。运行整合后的后端测试与关键真实服务用例，关键项 `skipped=0`。当前运行环境若阻止 Docker、子进程或临时目录访问，改在可执行的隔离验收环境重跑并留证，不将权限错误写为通过。
 
@@ -989,6 +989,8 @@ uv run --project services/backend pytest services/backend/tests/api/test_live_ac
 ```
 
 Expected：环境、持久化、迁移、安全边界、恢复与性能均有同一 Git 版本的可核对结果；已知缺口逐项关闭。三个显式开启的真实服务测试组必须报告实际通过数，不能只看 pytest 退出码或默认 skip。完整 Task 14 安全总验收继续留在 Task 14。
+
+2026-10-15 补验：完整后端 694 passed、0 failed、0 skipped；独立 PostgreSQL/OpenSearch 重启读回及 24 张表迁移前后行数/内容摘要通过。详见 [Step 4 验收记录](acceptance/task12-services.md) 与 [总记录](acceptance/task12-readiness.md)。
 
 - [ ] **Step 5: 修复 Task 11 AIT 清单的异路径重建**
 

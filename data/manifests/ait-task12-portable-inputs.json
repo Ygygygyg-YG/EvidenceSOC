@@ -1,0 +1,918 @@
+{
+  "schema_version": 1,
+  "path_base": "data_root",
+  "scenarios": {
+    "harrison": "development",
+    "santos": "development",
+    "wheeler": "development",
+    "wardbeck": "validation",
+    "shaw": "test",
+    "wilson": "test"
+  },
+  "files": {
+    "ait/downloads/harrison_no-pcaps.zip": {
+      "sha256": "03aeaf16acc79c8e89bb4ac147d3273bfcef4134d301aa62cb6cdd79e77084f1",
+      "bytes": 667985140
+    },
+    "ait/downloads/santos_no-pcaps.zip": {
+      "sha256": "af69973fbf4edeb6a26f1e4ebeae97b577f0263cec15bda0d987cc470425be5d",
+      "bytes": 576734274
+    },
+    "ait/downloads/shaw_no-pcaps.zip": {
+      "sha256": "825ef8ac66cffeb9f799df18621ce7f35a4b3225350d10768ae80305310b8e0b",
+      "bytes": 1319137852
+    },
+    "ait/downloads/wardbeck_no-pcaps.zip": {
+      "sha256": "07fe8955e39d2c3531b31903cab3200d19db5d291159ba1485ac30a0a937cb58",
+      "bytes": 818462147
+    },
+    "ait/downloads/wheeler_no-pcaps.zip": {
+      "sha256": "01f49e8c66b453fca8d3ebb3e4b35788acef150c8bbfc412085f53e0308aea0d",
+      "bytes": 767673839
+    },
+    "ait/downloads/wilson_no-pcaps.zip": {
+      "sha256": "e7a6e0d3d7ac3cde9354ada2e593dd0e3d9c50007adae426f9f5979e2d697c20",
+      "bytes": 1083526183
+    },
+    "ait/scenarios/harrison/processed/agent/harrison-apache-events.jsonl": {
+      "sha256": "fffcb5c434370418f12663ab7e46228a75d0b8f8770c7bfafd9c3838619d9a1a",
+      "bytes": 488165512
+    },
+    "ait/scenarios/harrison/processed/agent/harrison-dnsmasq-events.jsonl": {
+      "sha256": "c3a12c8f7fd2ece0880252bca8571e5ddc19fd6e17251ed24b405d9d0ad18443",
+      "bytes": 385503360
+    },
+    "ait/scenarios/harrison/processed/agent/harrison-intranet-audit-events.jsonl": {
+      "sha256": "c9fb1d524dfc59e871ee5e1a127bad968d95aec8004d0fbdfb49ca2a12f86b82",
+      "bytes": 3307245
+    },
+    "ait/scenarios/harrison/processed/gold/harrison-apache-gold.jsonl": {
+      "sha256": "54741096ff1cc3bc57efa959d1150df6b50c164ccabda3399bf70a4838e57f40",
+      "bytes": 233987703
+    },
+    "ait/scenarios/harrison/processed/gold/harrison-apache-scored-gold.jsonl": {
+      "sha256": "76cbc798c84d688365edc7f17969bc656c446ee482331842ede04034d41f24e5",
+      "bytes": 352202082
+    },
+    "ait/scenarios/harrison/processed/gold/harrison-dnsmasq-gold.jsonl": {
+      "sha256": "35feb7eb155932af0037fded7aac4c8346f9f69f7ebede96325cf0d68ebeed0b",
+      "bytes": 129088988
+    },
+    "ait/scenarios/harrison/processed/gold/harrison-dnsmasq-scored-gold.jsonl": {
+      "sha256": "5db3a4345affaea76d3c03815f1f0eff6e6c26dcf5fde0abc183d489b15c1868",
+      "bytes": 206782619
+    },
+    "ait/scenarios/harrison/processed/gold/harrison-intranet-audit-gold.jsonl": {
+      "sha256": "af25c544d905c1c0bf81cf1f777884398660b13421df489f4ddcab5e925b3a46",
+      "bytes": 1026064
+    },
+    "ait/scenarios/harrison/processed/gold/harrison-intranet-audit-scored-gold.jsonl": {
+      "sha256": "59db1f1695659591263a3a0db355023d38bc4543516c24b112d6769e1601864f",
+      "bytes": 1600766
+    },
+    "ait/scenarios/harrison/processed/reports/harrison-apache-completeness.json": {
+      "sha256": "68d771c5bdb49f0b4315dda9d78f600fbcb9af72ab73bef99381d715bb1653c7",
+      "bytes": 2107
+    },
+    "ait/scenarios/harrison/processed/reports/harrison-apache-join.json": {
+      "sha256": "4b0bd8fdda636cf60f61ce622ca4e2feea939e5d529cd4f67fd44cf6e56238c7",
+      "bytes": 574
+    },
+    "ait/scenarios/harrison/processed/reports/harrison-dnsmasq-completeness.json": {
+      "sha256": "4210aea9937149d4eb79fc1b0c92545ec3d2d386719c0c9025b14d4dbaf31bbb",
+      "bytes": 2104
+    },
+    "ait/scenarios/harrison/processed/reports/harrison-dnsmasq-join.json": {
+      "sha256": "04c5ae84ae013f8bd03495039b4dcb1b3f8dacb815115c700bd2e70ba83336e7",
+      "bytes": 530
+    },
+    "ait/scenarios/harrison/processed/reports/harrison-intranet-audit-completeness.json": {
+      "sha256": "c44633770ca042ad3fa545535a32fd3930930ffdc6e697144cca90e6b9d51717",
+      "bytes": 2026
+    },
+    "ait/scenarios/harrison/processed/reports/harrison-intranet-audit-join.json": {
+      "sha256": "4cedab8087906d0240dd2fc7abf26bb03ef207fdc617a4046962404101a5417c",
+      "bytes": 521
+    },
+    "ait/scenarios/harrison/raw/gather/inet-firewall/logs/dnsmasq.log": {
+      "sha256": "2ff01c0d4689eb4fcdf6c19186bd73bea7398688237bacb5cfc188c68f55492c",
+      "bytes": 38244083
+    },
+    "ait/scenarios/harrison/raw/gather/intranet_server/logs/apache2/intranet.mannsmith.harrison.com-access.log.1": {
+      "sha256": "d011ae04101ae9dd684ea05af992a3439cb669d98485e4bee083e1fce2b5f262",
+      "bytes": 68215445
+    },
+    "ait/scenarios/harrison/raw/gather/intranet_server/logs/audit/audit.log": {
+      "sha256": "de4cba5a916434b74e0a86e122e5f4a830f56cc126a4af72c7b87acc2a49199e",
+      "bytes": 512998
+    },
+    "ait/scenarios/harrison/raw/labels/inet-firewall/logs/dnsmasq.log": {
+      "sha256": "8e28da97cb9fdac6cd118a01a71130e39b8478193a33381049c91bb33199cd01",
+      "bytes": 14733299
+    },
+    "ait/scenarios/harrison/raw/labels/intranet_server/logs/apache2/intranet.mannsmith.harrison.com-access.log.1": {
+      "sha256": "52a741661d8df3eb1dc0606ecc06c86faee7bcc20878516d73cb0a2f9bed7501",
+      "bytes": 88086138
+    },
+    "ait/scenarios/harrison/raw/labels/intranet_server/logs/audit/audit.log": {
+      "sha256": "bb5bb8ed21799d4a6c03055fd967da403f36e7459c436e72fc4afdcac847f769",
+      "bytes": 6789
+    },
+    "ait/scenarios/santos/processed/agent/santos-apache-events.jsonl": {
+      "sha256": "0bee2a9955a10e41a6f18b6ebeb5b09bc77efc2191813280c2e955aa5517ce2b",
+      "bytes": 11593240
+    },
+    "ait/scenarios/santos/processed/agent/santos-dnsmasq-events.jsonl": {
+      "sha256": "b9b87d5bd62e5d0d00b9cdfed20350e57b3d48103120461dea5177e5cd7a2d89",
+      "bytes": 318967250
+    },
+    "ait/scenarios/santos/processed/agent/santos-intranet-audit-events.jsonl": {
+      "sha256": "6cf8e7ec6b83535eeb6914b50564d46f38e8a205cd10ad742cb5e990ec22e1ff",
+      "bytes": 2636917
+    },
+    "ait/scenarios/santos/processed/gold/santos-apache-gold.jsonl": {
+      "sha256": "a2212b01b096d060b9f7247180ea56664315f7a21dbf1eee3b5fb81db24c75d6",
+      "bytes": 4924461
+    },
+    "ait/scenarios/santos/processed/gold/santos-apache-scored-gold.jsonl": {
+      "sha256": "fb1c449269c93dc76c5b9dc58fd9af0f8fc6a659b1724d2d6df69a33bc4ff842",
+      "bytes": 7441738
+    },
+    "ait/scenarios/santos/processed/gold/santos-dnsmasq-gold.jsonl": {
+      "sha256": "0dd44daa1b0150f57ef5749f5bd943189a95f81d43cd0738648de46b436f8dab",
+      "bytes": 103779343
+    },
+    "ait/scenarios/santos/processed/gold/santos-dnsmasq-scored-gold.jsonl": {
+      "sha256": "7e09f7e1f1939eb60302c4f5f2e8ccec37df282e0b4a4f47916e0c09d379b431",
+      "bytes": 164171451
+    },
+    "ait/scenarios/santos/processed/gold/santos-intranet-audit-gold.jsonl": {
+      "sha256": "a81f68d72f66b17b69d9bcbbfe7949e3816af5e9c2b89458790835c909d0cfee",
+      "bytes": 815458
+    },
+    "ait/scenarios/santos/processed/gold/santos-intranet-audit-scored-gold.jsonl": {
+      "sha256": "e288f76841fbf8eed20cc2cf2e4dd17a6324448ec4bb408f3da5f449c5ad7d24",
+      "bytes": 1270235
+    },
+    "ait/scenarios/santos/processed/reports/santos-apache-completeness.json": {
+      "sha256": "56acc427cc3104399bb6278cd4c5ba31d8009c7551fd14e04aea91b2c75ca78a",
+      "bytes": 2049
+    },
+    "ait/scenarios/santos/processed/reports/santos-apache-join.json": {
+      "sha256": "f74c5159c4f94f118546e98bb59a388a933266545a7a394e0f390d45099232d5",
+      "bytes": 554
+    },
+    "ait/scenarios/santos/processed/reports/santos-dnsmasq-completeness.json": {
+      "sha256": "0109a66e630428bc07dd7b6aa5859a0fc708b0b38309f984d9c33c523e88848d",
+      "bytes": 2080
+    },
+    "ait/scenarios/santos/processed/reports/santos-dnsmasq-join.json": {
+      "sha256": "f0723f0709e10bdf94eed8b8929cf2a94f78d128314c9191b17b79ee28275c93",
+      "bytes": 528
+    },
+    "ait/scenarios/santos/processed/reports/santos-intranet-audit-completeness.json": {
+      "sha256": "2fb3e806b5979e3a591a28254f2f3a2daf4c6b283e73bdf49b96e7d590b1776a",
+      "bytes": 2002
+    },
+    "ait/scenarios/santos/processed/reports/santos-intranet-audit-join.json": {
+      "sha256": "4b6af50a5b583640f167e3b885538a512235d06822c82e9dda3e996a1854f003",
+      "bytes": 519
+    },
+    "ait/scenarios/santos/raw/gather/inet-firewall/logs/dnsmasq.log": {
+      "sha256": "2cee0cab1e1e4cd2b2ed43b93ec2044e9f8c7343ab1fe6d832d0372d5a1654b9",
+      "bytes": 31374969
+    },
+    "ait/scenarios/santos/raw/gather/intranet_server/logs/apache2/intranet.smith.santos.com-access.log": {
+      "sha256": "92d8fae4669a1fc10fbb23832c18b1429e894d9033f135c7e77fc4d0d90287ba",
+      "bytes": 1772221
+    },
+    "ait/scenarios/santos/raw/gather/intranet_server/logs/audit/audit.log": {
+      "sha256": "c0b288f21fe2d39e888f124b77a1162aafcc7329ba18f3e47c25398d8a15f54e",
+      "bytes": 409319
+    },
+    "ait/scenarios/santos/raw/labels/inet-firewall/logs/dnsmasq.log": {
+      "sha256": "48af8fbb41bd45be90eeea44cbd632d98bce900f433ba106252bdc4f0409b9ef",
+      "bytes": 8127719
+    },
+    "ait/scenarios/santos/raw/labels/intranet_server/logs/apache2/intranet.smith.santos.com-access.log": {
+      "sha256": "22a6c67df7525f3c45555c0056dc38bfb84f64b650ff585cceaae363633141c2",
+      "bytes": 1659031
+    },
+    "ait/scenarios/santos/raw/labels/intranet_server/logs/audit/audit.log": {
+      "sha256": "c52e271b7ae91a78269448bff45e438117f0e19d1a5d8f970861c07179a807bd",
+      "bytes": 5136
+    },
+    "ait/scenarios/shaw/processed/agent/shaw-apache-events.jsonl": {
+      "sha256": "5c1bc8350c6863e2bb76b0dbf6a882b9ee13356dce831bdbcccad676bc7405f0",
+      "bytes": 7803348
+    },
+    "ait/scenarios/shaw/processed/agent/shaw-dnsmasq-events.jsonl": {
+      "sha256": "d8c61f6358475de92809b854bb9c8625c8470dc8ed438c8b23a51ba25894eac0",
+      "bytes": 346232963
+    },
+    "ait/scenarios/shaw/processed/agent/shaw-intranet-audit-events.jsonl": {
+      "sha256": "fca674da6feabce4a014bb3b9bcb2e6ad8b9a5848e79911f6dad269a072f10ef",
+      "bytes": 3952469
+    },
+    "ait/scenarios/shaw/processed/gold/shaw-apache-gold.jsonl": {
+      "sha256": "bd7487556086842cb3e9d2ac3a271e929f0badc29ad216dcc1868e52c29d9969",
+      "bytes": 3442098
+    },
+    "ait/scenarios/shaw/processed/gold/shaw-apache-scored-gold.jsonl": {
+      "sha256": "c81e393d368a119f3049f45369bce6f3f99428d93193ece609dab446e9b2f1be",
+      "bytes": 5164478
+    },
+    "ait/scenarios/shaw/processed/gold/shaw-dnsmasq-gold.jsonl": {
+      "sha256": "f5e27764e1e3bdd4d45ecae0138f1eaa00d8d2ad57ec82e76db98554d4d6c85a",
+      "bytes": 115863358
+    },
+    "ait/scenarios/shaw/processed/gold/shaw-dnsmasq-scored-gold.jsonl": {
+      "sha256": "5ef8db5ee3d2a5cbbe9dc1ad0e1ab9436a2ca30e37b1f24c4ec06a565c07df08",
+      "bytes": 178627790
+    },
+    "ait/scenarios/shaw/processed/gold/shaw-intranet-audit-gold.jsonl": {
+      "sha256": "e5a4d1c4bc324cfb2aa07b41fba185ab05e0e918e10b8b4e0efacdcdd2379a18",
+      "bytes": 1215056
+    },
+    "ait/scenarios/shaw/processed/gold/shaw-intranet-audit-scored-gold.jsonl": {
+      "sha256": "e16943b535a23845f16a6f5e2eaf450c887d75ea0cc7be8edad56bde8ae6c3e9",
+      "bytes": 1889443
+    },
+    "ait/scenarios/shaw/processed/reports/shaw-apache-completeness.json": {
+      "sha256": "2986d7c2a0f74056d58616f7c146a26279963b2d2dfe244390b7224704f7916a",
+      "bytes": 2049
+    },
+    "ait/scenarios/shaw/processed/reports/shaw-apache-join.json": {
+      "sha256": "83d2e3b15ca68fbf19be8fc3fd09819ce749f95be3a57c9aa914ebb7ac1e7fd7",
+      "bytes": 560
+    },
+    "ait/scenarios/shaw/processed/reports/shaw-dnsmasq-completeness.json": {
+      "sha256": "ff77f7266e25eab6993dd998985e482de53681ce4948ce8843af28027c333300",
+      "bytes": 2050
+    },
+    "ait/scenarios/shaw/processed/reports/shaw-dnsmasq-join.json": {
+      "sha256": "b7c4ed1f051ced997916f5516a61287ffc694c3139c03e953fd26012c318eaa3",
+      "bytes": 520
+    },
+    "ait/scenarios/shaw/processed/reports/shaw-intranet-audit-completeness.json": {
+      "sha256": "8b2eb5d14b9c9817081ff05ee73d56313e212af796fd145bbb456a51299ec459",
+      "bytes": 1978
+    },
+    "ait/scenarios/shaw/processed/reports/shaw-intranet-audit-join.json": {
+      "sha256": "485960b03d4389e3bd69743199a6c9f136d3aa0cda4cd4425ce69f7a018c58bd",
+      "bytes": 517
+    },
+    "ait/scenarios/shaw/raw/gather/inet-firewall/logs/dnsmasq.log": {
+      "sha256": "25cb4de4cf72f7678ee1fbbc0f767d739dc6aed5a31b2166460a9cc647562839",
+      "bytes": 27514843
+    },
+    "ait/scenarios/shaw/raw/gather/intranet_server/logs/apache2/intranet.thomasmurray.shaw.info-access.log.2": {
+      "sha256": "1357c0c5b8dbe090765a601bc94063ea082568eb8902eeee40711968a2020d38",
+      "bytes": 1122335
+    },
+    "ait/scenarios/shaw/raw/gather/intranet_server/logs/audit/audit.log": {
+      "sha256": "bef1bfe6d15ff4236f65c0e85947647405c0f5d259c853cd5bf66f7f677ca23c",
+      "bytes": 614867
+    },
+    "ait/scenarios/shaw/raw/labels/inet-firewall/logs/dnsmasq.log": {
+      "sha256": "3f77f7f18c90ca4538e00391039602c874dad755815f026b578acb9d29f0069f",
+      "bytes": 101488
+    },
+    "ait/scenarios/shaw/raw/labels/intranet_server/logs/apache2/intranet.thomasmurray.shaw.info-access.log.2": {
+      "sha256": "dd2a70052b8e4f90f6df1ecb073822e6e05b1b77f2defa16f3b406fd2186559f",
+      "bytes": 1104036
+    },
+    "ait/scenarios/shaw/raw/labels/intranet_server/logs/audit/audit.log": {
+      "sha256": "5273543a5f5509e9457f9bb47e554f9531dbba0ab92e19022d4f13aae37ea644",
+      "bytes": 5136
+    },
+    "ait/scenarios/wardbeck/processed/agent/wardbeck-apache-events.jsonl": {
+      "sha256": "9dcc516c1160e3fc3b8f70c652f38bd4a1a8b5e2d6ea74443a85bec73b1879b8",
+      "bytes": 14901616
+    },
+    "ait/scenarios/wardbeck/processed/agent/wardbeck-dnsmasq-events.jsonl": {
+      "sha256": "9733c06e23cb0d0cb8f00c48f589cfa7a5b0bfbd3a6810e1e8f43c1b84551fd4",
+      "bytes": 348163630
+    },
+    "ait/scenarios/wardbeck/processed/agent/wardbeck-intranet-audit-events.jsonl": {
+      "sha256": "fd23ef7e8d4066a6713fa4fbbe510a3874f1baf21e01e864f081f9e17069fa8f",
+      "bytes": 3412666
+    },
+    "ait/scenarios/wardbeck/processed/gold/wardbeck-apache-gold.jsonl": {
+      "sha256": "2adbe2d53cee17ae70c65da0d7eca60477bd9de7f9ee3eda317c35a22debead1",
+      "bytes": 5338853
+    },
+    "ait/scenarios/wardbeck/processed/gold/wardbeck-apache-scored-gold.jsonl": {
+      "sha256": "669c812152bef8a8f67257c5e99e8c170135700a77901e078d5ce2db86cd498d",
+      "bytes": 7994755
+    },
+    "ait/scenarios/wardbeck/processed/gold/wardbeck-dnsmasq-gold.jsonl": {
+      "sha256": "8f4fb5c8a58a683877e5504e33b24440faaae251c9177e3b67f7141c07354b66",
+      "bytes": 113698315
+    },
+    "ait/scenarios/wardbeck/processed/gold/wardbeck-dnsmasq-scored-gold.jsonl": {
+      "sha256": "dcfbbe0a8c34ff3b1516239dd14ef81b73d5a7d43e6ae34f96639a912a492c8e",
+      "bytes": 180429655
+    },
+    "ait/scenarios/wardbeck/processed/gold/wardbeck-intranet-audit-gold.jsonl": {
+      "sha256": "30845e6d34841537bc0b0d5bc2b3d125934d89e3d7d7c2738c734bcf7bdc7406",
+      "bytes": 1056800
+    },
+    "ait/scenarios/wardbeck/processed/gold/wardbeck-intranet-audit-scored-gold.jsonl": {
+      "sha256": "a966414f279fe594082359a60b77efbd87ba17783d201e2824600110a8e31130",
+      "bytes": 1648615
+    },
+    "ait/scenarios/wardbeck/processed/reports/wardbeck-apache-completeness.json": {
+      "sha256": "cdd5e749cdf24904312066b723905db4274d9bfb9dedba2cb6be5b528d6d1a9f",
+      "bytes": 2102
+    },
+    "ait/scenarios/wardbeck/processed/reports/wardbeck-apache-join.json": {
+      "sha256": "21f3f91abf833d3c126946f91a436441fb0d981e0bd9c40de601022120220d87",
+      "bytes": 567
+    },
+    "ait/scenarios/wardbeck/processed/reports/wardbeck-dnsmasq-completeness.json": {
+      "sha256": "56a551fe7956339d32f9e4eef937010711bd3e1567cdb9baed1dfc8d0e38bc1f",
+      "bytes": 2104
+    },
+    "ait/scenarios/wardbeck/processed/reports/wardbeck-dnsmasq-join.json": {
+      "sha256": "2c91a3f93d11cc9c920d725b3d326b00652115d5bd14ba6bc93aeb4f345e9d17",
+      "bytes": 530
+    },
+    "ait/scenarios/wardbeck/processed/reports/wardbeck-intranet-audit-completeness.json": {
+      "sha256": "91888bead44a81108bce3f73da3a941eec07445bf5d222e58a643b10491f2715",
+      "bytes": 2026
+    },
+    "ait/scenarios/wardbeck/processed/reports/wardbeck-intranet-audit-join.json": {
+      "sha256": "db56e014c791247377827652194df2775ad70cc803b628cf685fc57f175a022a",
+      "bytes": 521
+    },
+    "ait/scenarios/wardbeck/raw/gather/inet-firewall/logs/dnsmasq.log": {
+      "sha256": "b74e5ffe2452960c5291e3003d9369258acc89a9307daf1595fd23153a638465",
+      "bytes": 34560264
+    },
+    "ait/scenarios/wardbeck/raw/gather/intranet_server/logs/apache2/intranet.hurstwong.wardbeck.info-access.log.1": {
+      "sha256": "3092c1d29e74a6409d0077f4a1d606eb47e28ba342d56779b658808cfbdcb7e8",
+      "bytes": 2440467
+    },
+    "ait/scenarios/wardbeck/raw/gather/intranet_server/logs/audit/audit.log": {
+      "sha256": "803f046a4f51db204d295a9480fa535b388076ae434104f89f63fed496d7ad0d",
+      "bytes": 529641
+    },
+    "ait/scenarios/wardbeck/raw/labels/inet-firewall/logs/dnsmasq.log": {
+      "sha256": "c3fe80b0165fd0b1a0dac73f980b516e49c92d8e684c028ccc76e44099e0a250",
+      "bytes": 9493341
+    },
+    "ait/scenarios/wardbeck/raw/labels/intranet_server/logs/apache2/intranet.hurstwong.wardbeck.info-access.log.1": {
+      "sha256": "3193c9b14d7f72991a624526823c702e61be8f0596d05e6311d438f14a662db5",
+      "bytes": 1120707
+    },
+    "ait/scenarios/wardbeck/raw/labels/intranet_server/logs/audit/audit.log": {
+      "sha256": "275c66e97a0bfd03fc076334dbb9e0b8d4589867ddae761d691267fb43ee0a2b",
+      "bytes": 5136
+    },
+    "ait/scenarios/wheeler/processed/agent/wheeler-apache-events.jsonl": {
+      "sha256": "ed1d4b3d54512e442d0a22c8c5f3a54f6819c59d9fb0215cdd77dbbb6ee61268",
+      "bytes": 500634102
+    },
+    "ait/scenarios/wheeler/processed/agent/wheeler-dnsmasq-events.jsonl": {
+      "sha256": "2fbba5d784c47a6db44a10f10ed7fd287a0eab8e0f2f68b1f8b5cecdacecc2ff",
+      "bytes": 454389045
+    },
+    "ait/scenarios/wheeler/processed/agent/wheeler-intranet-audit-events.jsonl": {
+      "sha256": "a7b2d8a92846df4c65510fe9c16d3bbb17f09491c79b8d4c060e23602591061b",
+      "bytes": 3317008
+    },
+    "ait/scenarios/wheeler/processed/gold/wheeler-apache-gold.jsonl": {
+      "sha256": "f24a25c6a327d8d292db0e7e74c316711b8904dc8286630f798bd7693ae28b8a",
+      "bytes": 239336540
+    },
+    "ait/scenarios/wheeler/processed/gold/wheeler-apache-scored-gold.jsonl": {
+      "sha256": "05db5e1f23324be13287b34c2369e6e073e85aabde19cd6bc402b9e153569e02",
+      "bytes": 360947409
+    },
+    "ait/scenarios/wheeler/processed/gold/wheeler-dnsmasq-gold.jsonl": {
+      "sha256": "c48156622a6307b8ec944758f34bbb9b9caccb651dc683d7cace86e77fad7bf2",
+      "bytes": 149852133
+    },
+    "ait/scenarios/wheeler/processed/gold/wheeler-dnsmasq-scored-gold.jsonl": {
+      "sha256": "32abad0231659fabd94362c99c425989a1a064aa7115a7d1b537601925d6ecae",
+      "bytes": 237380563
+    },
+    "ait/scenarios/wheeler/processed/gold/wheeler-intranet-audit-gold.jsonl": {
+      "sha256": "bb97a35c1aaa24ad34c1bfb64d6a2fb503fff6190ffa8b3846ecbdd801b54a45",
+      "bytes": 1024975
+    },
+    "ait/scenarios/wheeler/processed/gold/wheeler-intranet-audit-scored-gold.jsonl": {
+      "sha256": "2822baf5926370d50d359c538ddb337978ffb44b471c7488038675780bc03717",
+      "bytes": 1598198
+    },
+    "ait/scenarios/wheeler/processed/reports/wheeler-apache-completeness.json": {
+      "sha256": "796d3548529e3fd1eca08c1b655525c01b6abf0c06d8f69c088d62c28de9cabd",
+      "bytes": 2083
+    },
+    "ait/scenarios/wheeler/processed/reports/wheeler-apache-join.json": {
+      "sha256": "ce1f7bc7d7f5891d41f288d1d440f86ec2633ab8dd7c4bd3fca9ca859cb25239",
+      "bytes": 569
+    },
+    "ait/scenarios/wheeler/processed/reports/wheeler-dnsmasq-completeness.json": {
+      "sha256": "cb4da97e1093bc8bb25420be5bdb7f5addb070f6ef3bcf9911f289adfa487e8e",
+      "bytes": 2092
+    },
+    "ait/scenarios/wheeler/processed/reports/wheeler-dnsmasq-join.json": {
+      "sha256": "8e8e568edfe4130ddd9c1d81da3c744c7ecda7a221e982cc0f11f198ba7560da",
+      "bytes": 529
+    },
+    "ait/scenarios/wheeler/processed/reports/wheeler-intranet-audit-completeness.json": {
+      "sha256": "9b55818047575dae19f1b46e0c2da562892b4486d55e56dae02a7fb09727068d",
+      "bytes": 2014
+    },
+    "ait/scenarios/wheeler/processed/reports/wheeler-intranet-audit-join.json": {
+      "sha256": "e2c153d2686eb2c00ccb3bf731819d1508331cbdb31111aedc9ba34f057058e5",
+      "bytes": 520
+    },
+    "ait/scenarios/wheeler/raw/gather/inet-firewall/logs/dnsmasq.log": {
+      "sha256": "701061d868d604174796a168b2fc052b4cc20dd2e3cd74f77542dc343b058466",
+      "bytes": 43781554
+    },
+    "ait/scenarios/wheeler/raw/gather/intranet_server/logs/apache2/intranet.flores.wheeler.biz-access.log.1": {
+      "sha256": "c77f3a167ceb0954aabe2d1fabeedc14922ad58613c69f91e2c8c6094af0fbab",
+      "bytes": 70171271
+    },
+    "ait/scenarios/wheeler/raw/gather/intranet_server/logs/audit/audit.log": {
+      "sha256": "fef0d456efeb1e196da050d992bb0cd08bf30fcacaace9f82daa1aaac1421d71",
+      "bytes": 514902
+    },
+    "ait/scenarios/wheeler/raw/labels/inet-firewall/logs/dnsmasq.log": {
+      "sha256": "5c46d48eb0558862d8d6c44ccc03eba3852c156cf6549a3b2baed8dce2f8fd18",
+      "bytes": 11994578
+    },
+    "ait/scenarios/wheeler/raw/labels/intranet_server/logs/apache2/intranet.flores.wheeler.biz-access.log.1": {
+      "sha256": "12c41cef8db50fbd4288353cabc5428b0b499ee1cda251182d4453df33709a59",
+      "bytes": 91529649
+    },
+    "ait/scenarios/wheeler/raw/labels/intranet_server/logs/audit/audit.log": {
+      "sha256": "950979ee93f528b7e07694e36959b7bb765c97df4e7244123dcc9878ebc708ee",
+      "bytes": 4050
+    },
+    "ait/scenarios/wilson/processed/agent/wilson-apache-events.jsonl": {
+      "sha256": "3775bf457842483830c451f39132fa5e8a878f9bdbaf215aa629ecc51ad8d58b",
+      "bytes": 503794490
+    },
+    "ait/scenarios/wilson/processed/agent/wilson-dnsmasq-events.jsonl": {
+      "sha256": "5b54515ef7fd93f4f45ced5e5473e5cc075127541674c4bfa9e8d7b251fed90a",
+      "bytes": 563145142
+    },
+    "ait/scenarios/wilson/processed/agent/wilson-intranet-audit-events.jsonl": {
+      "sha256": "a6fc590a9028aed73ea47275e6992ad7e020273ccdeb3231a56864274ba3ca1e",
+      "bytes": 4053660
+    },
+    "ait/scenarios/wilson/processed/gold/wilson-apache-gold.jsonl": {
+      "sha256": "52da44ff610c357dd508a6ae1b17ccf78955f111bdccb5b4c903d055da19513c",
+      "bytes": 239760815
+    },
+    "ait/scenarios/wilson/processed/gold/wilson-apache-scored-gold.jsonl": {
+      "sha256": "c8c7eaddc3f7fc37cee2df7b136caac1daf63bcfb10eb3e85eae20606eaa7625",
+      "bytes": 360891256
+    },
+    "ait/scenarios/wilson/processed/gold/wilson-dnsmasq-gold.jsonl": {
+      "sha256": "1c2632b3cc96ac46a5ed6f0e7e2ac7d971fbfb3f28839c3881e62008ffcee546",
+      "bytes": 185920894
+    },
+    "ait/scenarios/wilson/processed/gold/wilson-dnsmasq-scored-gold.jsonl": {
+      "sha256": "afe429952735b369d3dd63ea10708e1d4a56ccfa7908d88d9b42f5dac3ef9094",
+      "bytes": 293503970
+    },
+    "ait/scenarios/wilson/processed/gold/wilson-intranet-audit-gold.jsonl": {
+      "sha256": "fbf4c582a84abe23e3e4100afe7529b2cb869ab9815eaee1ce6d5e86ac2c67ce",
+      "bytes": 1251522
+    },
+    "ait/scenarios/wilson/processed/gold/wilson-intranet-audit-scored-gold.jsonl": {
+      "sha256": "264cae2b0bc2ddf28b1964da0fedecb9d6151f290cfcbd27ea17644e761f2445",
+      "bytes": 1949467
+    },
+    "ait/scenarios/wilson/processed/reports/wilson-apache-completeness.json": {
+      "sha256": "4bfc1dc277a014c83206dab3f907414b99fa9740ea97cc315f4bee6d2b88fa93",
+      "bytes": 2077
+    },
+    "ait/scenarios/wilson/processed/reports/wilson-apache-join.json": {
+      "sha256": "5de944080052e367579966a45a07a3e8e77fd4c27d6e377eb71ff865388e5c3b",
+      "bytes": 570
+    },
+    "ait/scenarios/wilson/processed/reports/wilson-dnsmasq-completeness.json": {
+      "sha256": "1e2aac69903a2eee096becf94b00791e651ff41fb2168313f946782eda493b14",
+      "bytes": 2080
+    },
+    "ait/scenarios/wilson/processed/reports/wilson-dnsmasq-join.json": {
+      "sha256": "fa400ebc610325ed1b7d740e5ad30575cd6f397a90b1c3328bd2bffaa4be7f2e",
+      "bytes": 528
+    },
+    "ait/scenarios/wilson/processed/reports/wilson-intranet-audit-completeness.json": {
+      "sha256": "78d59048347c1b20e75733b30178e905530b1e7cf66a5a40cadf9c5e51339b0d",
+      "bytes": 2002
+    },
+    "ait/scenarios/wilson/processed/reports/wilson-intranet-audit-join.json": {
+      "sha256": "3e3039cfd23d7ca60f75f97c145615c7c63cf36ae2d8c2fe822950faa129d9a8",
+      "bytes": 519
+    },
+    "ait/scenarios/wilson/raw/gather/inet-firewall/logs/dnsmasq.log": {
+      "sha256": "a06f41d3324752cfcf2960566c2139eb30d9395c51a6ba2558fd78d3ad9de041",
+      "bytes": 53315580
+    },
+    "ait/scenarios/wilson/raw/gather/intranet_server/logs/apache2/intranet.hallbrown.wilson.com-access.log.2": {
+      "sha256": "6b294fa8b73ff300a9badc41ea4f366bb6a43a8e4c1742f9997abaae0f8407e1",
+      "bytes": 70766181
+    },
+    "ait/scenarios/wilson/raw/gather/intranet_server/logs/audit/audit.log": {
+      "sha256": "b171438ed4cbc3f6447838a2efd253de4b10f671d2426c9cf95f73916d1f6ab7",
+      "bytes": 630090
+    },
+    "ait/scenarios/wilson/raw/labels/inet-firewall/logs/dnsmasq.log": {
+      "sha256": "8485106769c939cbce4fc2bf4a0e44918c09c75a7885d711918fc1b5288a5262",
+      "bytes": 13334416
+    },
+    "ait/scenarios/wilson/raw/labels/intranet_server/logs/apache2/intranet.hallbrown.wilson.com-access.log.2": {
+      "sha256": "09c204e07e81f0e31d94a0fa05b818848a8447c70e748d19be2eac9ba5f762dd",
+      "bytes": 90782009
+    },
+    "ait/scenarios/wilson/raw/labels/intranet_server/logs/audit/audit.log": {
+      "sha256": "66130d04f84227d4d0eab08d0251c12848afb1f2f2239d6157b26d77abfb89c7",
+      "bytes": 6966
+    },
+    "manifests/ait-v2-splits.json": {
+      "sha256": "bd5cdaa8b95d2b6150fc3469db0ec85209737b90087af0c481371d6df694d718",
+      "bytes": 185
+    },
+    "manifests/harrison-development-audit-sources.json": {
+      "sha256": "bfacaf204c24b0895f801ded5d2034c33bc12dfd73b95018bb752acb698e797b",
+      "bytes": 522
+    },
+    "manifests/harrison-development-sources.json": {
+      "sha256": "8d93d2768bef79be379bc828efd0ef38b4fcbde7a25e23480da81370d17a02e8",
+      "bytes": 1284
+    },
+    "manifests/santos-development-audit-sources.json": {
+      "sha256": "11fec1bcc2dc2d4a750d229e769e2fe90fd26acd49de24a052cc5b1d3868e400",
+      "bytes": 506
+    },
+    "manifests/santos-development-sources.json": {
+      "sha256": "ce6097d020320aa7a3c25846d2bacba379d349579088a6257f3a623aac097bed",
+      "bytes": 1236
+    },
+    "manifests/shaw-test-apache-sources.json": {
+      "sha256": "a10ce69a217540f74aa3753b2aceb03d5a4a5002c406408da43bd0229f9ccf59",
+      "bytes": 496
+    },
+    "manifests/shaw-test-dnsmasq-sources.json": {
+      "sha256": "6bdda1ffac57d4c1a2f1de44bace6a7a05e8683710e12cae3bceefe5b2c4b5cb",
+      "bytes": 456
+    },
+    "manifests/shaw-test-intranet-audit-sources.json": {
+      "sha256": "f2842e022c2516b871cfc6a258607ff468e6315f8e20df0b3c8b5e1f7bb9ff7d",
+      "bytes": 483
+    },
+    "manifests/shaw-test-sources.json": {
+      "sha256": "015bfd57bb7b9587484223c93865a0bc0d7697e8b9f93e0d87f11a4e7b4a46e3",
+      "bytes": 1197
+    },
+    "manifests/wardbeck-validation-audit-sources.json": {
+      "sha256": "1bb90312555a538516ba468ec78941ff25facfcec2a2feffe1adef8caa78ba96",
+      "bytes": 521
+    },
+    "manifests/wardbeck-validation-sources.json": {
+      "sha256": "3b6770c72bd8c73d31fb9fbafbbc03d49286a177bbcb84ee5520b0167e38a9f0",
+      "bytes": 1284
+    },
+    "manifests/wheeler-development-audit-sources.json": {
+      "sha256": "db90857969a7f92f2034b2a8f22dcd95cfacc8940f9d40420465bb03f3310d82",
+      "bytes": 514
+    },
+    "manifests/wheeler-development-sources.json": {
+      "sha256": "05c64cab70b0578b75d12dc793d581b35af8e2d8cb3f42eea371ab3f8cd1e8f0",
+      "bytes": 1260
+    },
+    "manifests/wilson-test-apache-sources.json": {
+      "sha256": "b0b2d1dc3949c454c205785cbb97cd85d4f5b3f68fb10bbf34204734a27dbd27",
+      "bytes": 510
+    },
+    "manifests/wilson-test-dnsmasq-sources.json": {
+      "sha256": "030133454d6cd6d3a2e6e6a7ea1606e3c3fcd289891d3dcde1b71aeedbf98943",
+      "bytes": 472
+    },
+    "manifests/wilson-test-intranet-audit-sources.json": {
+      "sha256": "7c441f5e380557073dbdb999eed5d01312ab843dba5ab601860eb462302d383d",
+      "bytes": 499
+    },
+    "manifests/wilson-test-sources.json": {
+      "sha256": "da9588f43db19db0d3c74f7aede303a857b2d3c7f15549cb1be5e2a3d2c37222",
+      "bytes": 1235
+    }
+  },
+  "profiles": [
+    {
+      "dataset_id": "ait-v2.1:harrison",
+      "relative_log_path": "intranet_server/logs/apache2/intranet.mannsmith.harrison.com-access.log.1",
+      "proof": "ait/scenarios/harrison/processed/reports/harrison-apache-completeness.json",
+      "archive_md5": "4e837053ce4c5496227e0a3b65048c1c",
+      "complete": true,
+      "counts": {
+        "read_events": 420831,
+        "labeled_events": 415376,
+        "unlabeled_unknown_events": 5455,
+        "matched_annotation_lines": 415376,
+        "unmatched_annotation_lines": 0,
+        "read_annotation_lines": 415376,
+        "raw_line_count": 420831,
+        "parse_errors": 0
+      }
+    },
+    {
+      "dataset_id": "ait-v2.1:harrison",
+      "relative_log_path": "intranet_server/logs/audit/audit.log",
+      "proof": "ait/scenarios/harrison/processed/reports/harrison-intranet-audit-completeness.json",
+      "archive_md5": "4e837053ce4c5496227e0a3b65048c1c",
+      "complete": true,
+      "counts": {
+        "read_events": 2830,
+        "labeled_events": 24,
+        "unlabeled_unknown_events": 2806,
+        "matched_annotation_lines": 24,
+        "unmatched_annotation_lines": 0,
+        "read_annotation_lines": 24,
+        "raw_line_count": 2830,
+        "parse_errors": 0
+      }
+    },
+    {
+      "dataset_id": "ait-v2.1:harrison",
+      "relative_log_path": "inet-firewall/logs/dnsmasq.log",
+      "proof": "ait/scenarios/harrison/processed/reports/harrison-dnsmasq-completeness.json",
+      "archive_md5": "4e837053ce4c5496227e0a3b65048c1c",
+      "complete": true,
+      "counts": {
+        "read_events": 331344,
+        "labeled_events": 71327,
+        "unlabeled_unknown_events": 260017,
+        "matched_annotation_lines": 71327,
+        "unmatched_annotation_lines": 0,
+        "read_annotation_lines": 71327,
+        "raw_line_count": 331344,
+        "parse_errors": 0
+      }
+    },
+    {
+      "dataset_id": "ait-v2.1:santos",
+      "relative_log_path": "intranet_server/logs/apache2/intranet.smith.santos.com-access.log",
+      "proof": "ait/scenarios/santos/processed/reports/santos-apache-completeness.json",
+      "archive_md5": "cb484a2c55ea03c63c556f0531fe8367",
+      "complete": true,
+      "counts": {
+        "read_events": 9462,
+        "labeled_events": 7794,
+        "unlabeled_unknown_events": 1668,
+        "matched_annotation_lines": 7794,
+        "unmatched_annotation_lines": 0,
+        "read_annotation_lines": 7794,
+        "raw_line_count": 9462,
+        "parse_errors": 0
+      }
+    },
+    {
+      "dataset_id": "ait-v2.1:santos",
+      "relative_log_path": "intranet_server/logs/audit/audit.log",
+      "proof": "ait/scenarios/santos/processed/reports/santos-intranet-audit-completeness.json",
+      "archive_md5": "cb484a2c55ea03c63c556f0531fe8367",
+      "complete": true,
+      "counts": {
+        "read_events": 2263,
+        "labeled_events": 19,
+        "unlabeled_unknown_events": 2244,
+        "matched_annotation_lines": 19,
+        "unmatched_annotation_lines": 0,
+        "read_annotation_lines": 19,
+        "raw_line_count": 2263,
+        "parse_errors": 0
+      }
+    },
+    {
+      "dataset_id": "ait-v2.1:santos",
+      "relative_log_path": "inet-firewall/logs/dnsmasq.log",
+      "proof": "ait/scenarios/santos/processed/reports/santos-dnsmasq-completeness.json",
+      "archive_md5": "cb484a2c55ea03c63c556f0531fe8367",
+      "complete": true,
+      "counts": {
+        "read_events": 275667,
+        "labeled_events": 39426,
+        "unlabeled_unknown_events": 236241,
+        "matched_annotation_lines": 39426,
+        "unmatched_annotation_lines": 0,
+        "read_annotation_lines": 39426,
+        "raw_line_count": 275667,
+        "parse_errors": 0
+      }
+    },
+    {
+      "dataset_id": "ait-v2.1:wheeler",
+      "relative_log_path": "intranet_server/logs/apache2/intranet.flores.wheeler.biz-access.log.1",
+      "proof": "ait/scenarios/wheeler/processed/reports/wheeler-apache-completeness.json",
+      "archive_md5": "774a146275a22707ee78bcb4574aca23",
+      "complete": true,
+      "counts": {
+        "read_events": 433194,
+        "labeled_events": 431560,
+        "unlabeled_unknown_events": 1634,
+        "matched_annotation_lines": 431560,
+        "unmatched_annotation_lines": 0,
+        "read_annotation_lines": 431560,
+        "raw_line_count": 433194,
+        "parse_errors": 0
+      }
+    },
+    {
+      "dataset_id": "ait-v2.1:wheeler",
+      "relative_log_path": "intranet_server/logs/audit/audit.log",
+      "proof": "ait/scenarios/wheeler/processed/reports/wheeler-intranet-audit-completeness.json",
+      "archive_md5": "774a146275a22707ee78bcb4574aca23",
+      "complete": true,
+      "counts": {
+        "read_events": 2841,
+        "labeled_events": 14,
+        "unlabeled_unknown_events": 2827,
+        "matched_annotation_lines": 14,
+        "unmatched_annotation_lines": 0,
+        "read_annotation_lines": 14,
+        "raw_line_count": 2841,
+        "parse_errors": 0
+      }
+    },
+    {
+      "dataset_id": "ait-v2.1:wheeler",
+      "relative_log_path": "inet-firewall/logs/dnsmasq.log",
+      "proof": "ait/scenarios/wheeler/processed/reports/wheeler-dnsmasq-completeness.json",
+      "archive_md5": "774a146275a22707ee78bcb4574aca23",
+      "complete": true,
+      "counts": {
+        "read_events": 396280,
+        "labeled_events": 58104,
+        "unlabeled_unknown_events": 338176,
+        "matched_annotation_lines": 58104,
+        "unmatched_annotation_lines": 0,
+        "read_annotation_lines": 58104,
+        "raw_line_count": 396280,
+        "parse_errors": 0
+      }
+    },
+    {
+      "dataset_id": "ait-v2.1:wardbeck",
+      "relative_log_path": "intranet_server/logs/apache2/intranet.hurstwong.wardbeck.info-access.log.1",
+      "proof": "ait/scenarios/wardbeck/processed/reports/wardbeck-apache-completeness.json",
+      "archive_md5": "14eeacd83571a83615c2cce1f6a6eacf",
+      "complete": true,
+      "counts": {
+        "read_events": 11262,
+        "labeled_events": 5299,
+        "unlabeled_unknown_events": 5963,
+        "matched_annotation_lines": 5299,
+        "unmatched_annotation_lines": 0,
+        "read_annotation_lines": 5299,
+        "raw_line_count": 11262,
+        "parse_errors": 0
+      }
+    },
+    {
+      "dataset_id": "ait-v2.1:wardbeck",
+      "relative_log_path": "intranet_server/logs/audit/audit.log",
+      "proof": "ait/scenarios/wardbeck/processed/reports/wardbeck-intranet-audit-completeness.json",
+      "archive_md5": "14eeacd83571a83615c2cce1f6a6eacf",
+      "complete": true,
+      "counts": {
+        "read_events": 2919,
+        "labeled_events": 19,
+        "unlabeled_unknown_events": 2900,
+        "matched_annotation_lines": 19,
+        "unmatched_annotation_lines": 0,
+        "read_annotation_lines": 19,
+        "raw_line_count": 2919,
+        "parse_errors": 0
+      }
+    },
+    {
+      "dataset_id": "ait-v2.1:wardbeck",
+      "relative_log_path": "inet-firewall/logs/dnsmasq.log",
+      "proof": "ait/scenarios/wardbeck/processed/reports/wardbeck-dnsmasq-completeness.json",
+      "archive_md5": "14eeacd83571a83615c2cce1f6a6eacf",
+      "complete": true,
+      "counts": {
+        "read_events": 299055,
+        "labeled_events": 46078,
+        "unlabeled_unknown_events": 252977,
+        "matched_annotation_lines": 46078,
+        "unmatched_annotation_lines": 0,
+        "read_annotation_lines": 46078,
+        "raw_line_count": 299055,
+        "parse_errors": 0
+      }
+    },
+    {
+      "dataset_id": "ait-v2.1:shaw",
+      "relative_log_path": "intranet_server/logs/apache2/intranet.thomasmurray.shaw.info-access.log.2",
+      "proof": "ait/scenarios/shaw/processed/reports/shaw-apache-completeness.json",
+      "archive_md5": "f890a1f52bc9f893b44254ad86118e39",
+      "complete": true,
+      "counts": {
+        "read_events": 6626,
+        "labeled_events": 5226,
+        "unlabeled_unknown_events": 1400,
+        "matched_annotation_lines": 5226,
+        "unmatched_annotation_lines": 0,
+        "read_annotation_lines": 5226,
+        "raw_line_count": 6626,
+        "parse_errors": 0
+      }
+    },
+    {
+      "dataset_id": "ait-v2.1:shaw",
+      "relative_log_path": "intranet_server/logs/audit/audit.log",
+      "proof": "ait/scenarios/shaw/processed/reports/shaw-intranet-audit-completeness.json",
+      "archive_md5": "f890a1f52bc9f893b44254ad86118e39",
+      "complete": true,
+      "counts": {
+        "read_events": 3395,
+        "labeled_events": 19,
+        "unlabeled_unknown_events": 3376,
+        "matched_annotation_lines": 19,
+        "unmatched_annotation_lines": 0,
+        "read_annotation_lines": 19,
+        "raw_line_count": 3395,
+        "parse_errors": 0
+      }
+    },
+    {
+      "dataset_id": "ait-v2.1:shaw",
+      "relative_log_path": "inet-firewall/logs/dnsmasq.log",
+      "proof": "ait/scenarios/shaw/processed/reports/shaw-dnsmasq-completeness.json",
+      "archive_md5": "f890a1f52bc9f893b44254ad86118e39",
+      "complete": true,
+      "counts": {
+        "read_events": 328329,
+        "labeled_events": 503,
+        "unlabeled_unknown_events": 327826,
+        "matched_annotation_lines": 503,
+        "unmatched_annotation_lines": 0,
+        "read_annotation_lines": 503,
+        "raw_line_count": 328329,
+        "parse_errors": 0
+      }
+    },
+    {
+      "dataset_id": "ait-v2.1:wilson",
+      "relative_log_path": "intranet_server/logs/apache2/intranet.hallbrown.wilson.com-access.log.2",
+      "proof": "ait/scenarios/wilson/processed/reports/wilson-apache-completeness.json",
+      "archive_md5": "98285593473dc05d0a6899f7cdefcd2d",
+      "complete": true,
+      "counts": {
+        "read_events": 434598,
+        "labeled_events": 428116,
+        "unlabeled_unknown_events": 6482,
+        "matched_annotation_lines": 428116,
+        "unmatched_annotation_lines": 0,
+        "read_annotation_lines": 428116,
+        "raw_line_count": 434598,
+        "parse_errors": 0
+      }
+    },
+    {
+      "dataset_id": "ait-v2.1:wilson",
+      "relative_log_path": "intranet_server/logs/audit/audit.log",
+      "proof": "ait/scenarios/wilson/processed/reports/wilson-intranet-audit-completeness.json",
+      "archive_md5": "98285593473dc05d0a6899f7cdefcd2d",
+      "complete": true,
+      "counts": {
+        "read_events": 3473,
+        "labeled_events": 22,
+        "unlabeled_unknown_events": 3451,
+        "matched_annotation_lines": 22,
+        "unmatched_annotation_lines": 0,
+        "read_annotation_lines": 22,
+        "raw_line_count": 3473,
+        "parse_errors": 0
+      }
+    },
+    {
+      "dataset_id": "ait-v2.1:wilson",
+      "relative_log_path": "inet-firewall/logs/dnsmasq.log",
+      "proof": "ait/scenarios/wilson/processed/reports/wilson-dnsmasq-completeness.json",
+      "archive_md5": "98285593473dc05d0a6899f7cdefcd2d",
+      "complete": true,
+      "counts": {
+        "read_events": 496214,
+        "labeled_events": 64573,
+        "unlabeled_unknown_events": 431641,
+        "matched_annotation_lines": 64573,
+        "unmatched_annotation_lines": 0,
+        "read_annotation_lines": 64573,
+        "raw_line_count": 496214,
+        "parse_errors": 0
+      }
+    }
+  ]
+}

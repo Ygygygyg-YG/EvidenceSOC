@@ -9,7 +9,7 @@ import json
 import re
 import zipfile
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 _spec = importlib.util.spec_from_file_location(
     "_ait_taxonomy_join", Path(__file__).with_name("join_labels.py")
@@ -182,21 +182,40 @@ _SCENARIOS = {
 for _scenario, _apache_log in _EXTENDED_APACHE_LOGS.items():
     _audit_pairs = {
         **_AUDIT_PAIRS,
-        ("attacker_change_user", "attacker.escalate.audit.su.login"): "privilege_escalation",
+        (
+            "attacker_change_user",
+            "attacker.escalate.audit.su.login",
+        ): "privilege_escalation",
     }
     if _scenario == "wilson":
         _audit_pairs[
-            ("escalated_sudo_command", "attacker.escalate.audit.sudo.command.events_iptables")
+            (
+                "escalated_sudo_command",
+                "attacker.escalate.audit.sudo.command.events_iptables",
+            )
         ] = "privilege_escalation"
     _dns_pairs = dict(_DNS_PAIRS)
     if _scenario == "harrison":
-        _dns_pairs.update({
-            ("dirb", "attacker_foothold_dnsmasq_dirb_parent_query"): "reconnaissance",
-            ("dirb", "attacker_foothold_dnsmasq_dirb_sub_query"): "reconnaissance",
-        })
+        _dns_pairs.update(
+            {
+                (
+                    "dirb",
+                    "attacker_foothold_dnsmasq_dirb_parent_query",
+                ): "reconnaissance",
+                ("dirb", "attacker_foothold_dnsmasq_dirb_sub_query"): "reconnaissance",
+            }
+        )
     _SCENARIOS[f"ait-v2.1:{_scenario}"] = {
-        _apache_log: (f"{_scenario}-apache-taxonomy-v1", dict(_PAIRS), _parser.parse_apache_line),
-        _AUDIT_LOG: (f"{_scenario}-intranet-audit-taxonomy-v1", _audit_pairs, _audit_parser.parse_audit_line),
+        _apache_log: (
+            f"{_scenario}-apache-taxonomy-v1",
+            dict(_PAIRS),
+            _parser.parse_apache_line,
+        ),
+        _AUDIT_LOG: (
+            f"{_scenario}-intranet-audit-taxonomy-v1",
+            _audit_pairs,
+            _audit_parser.parse_audit_line,
+        ),
         _DNS_LOG: (f"{_scenario}-dnsmasq-taxonomy-v1", _dns_pairs, _parse_dns_line),
     }
 
@@ -297,10 +316,72 @@ def _hash(path, algorithm="sha256"):
     return digest.hexdigest()
 
 
-def _paths(paths):
+def _data_root(value):
+    if value is None:
+        raise ValueError("portable references require an explicit data_root")
+    root = Path(value).absolute()
+    _parser._reject_path_links(root)
+    root = root.resolve()
+    if not root.is_dir():
+        raise NotADirectoryError(root)
+    return root
+
+
+def _relative_reference(path, data_root):
+    root = _data_root(data_root)
+    candidate = Path(path).absolute()
+    _parser._reject_path_links(candidate)
+    candidate = candidate.resolve()
+    if not candidate.is_relative_to(root) or candidate == root:
+        raise ValueError("input must be contained by the explicit data root")
+    return candidate.relative_to(root).as_posix()
+
+
+def _resolve_reference(reference, data_root):
+    root = _data_root(data_root)
+    if (
+        not isinstance(reference, str)
+        or not reference
+        or "\\" in reference
+        or PurePosixPath(reference).is_absolute()
+        or PureWindowsPath(reference).drive
+        or any(part in ("", ".", "..") for part in reference.split("/"))
+    ):
+        raise ValueError("input reference must be canonical relative POSIX path")
+    candidate = root.joinpath(*reference.split("/"))
+    _parser._reject_path_links(candidate)
+    resolved = candidate.resolve()
+    if not resolved.is_relative_to(root) or resolved == root:
+        raise ValueError("input reference escapes data root")
+    return resolved
+
+
+def portable_proof(proof, *, data_root):
+    """Normalize a verified legacy proof without embedding a machine or clock.
+
+    Content verification remains the caller's responsibility; _load_proof
+    revalidates the resulting proof against all six current files and archive.
+    """
+    value = dict(proof)
+    value["schema_version"] = 2
+    value["path_base"] = "data_root"
+    value.pop("generated_at", None)
+    value["dataset_root"] = _relative_reference(proof["dataset_root"], data_root)
+    value["inputs"] = {
+        name: {**entry, "path": _relative_reference(entry["path"], data_root)}
+        for name, entry in proof["inputs"].items()
+    }
+    return value
+
+
+def _paths(paths, *, data_root=None):
     result = {}
     for name, value in paths.items():
-        path = Path(value)
+        path = (
+            _resolve_reference(value, data_root)
+            if data_root is not None
+            else Path(value)
+        )
         _parser._reject_path_links(path)
         path = path.resolve()
         if not path.is_file():
@@ -378,7 +459,16 @@ def _archive_check(paths, log=_LOG, dataset_id=_DATASET, *, check_md5=True):
 
 
 def verify(
-    *, dataset_root, events, gold, join_report, archive, time_from, time_to, output
+    *,
+    dataset_root,
+    events,
+    gold,
+    join_report,
+    archive,
+    time_from,
+    time_to,
+    output,
+    data_root=None,
 ):
     """Stream and reparse every physical line; bind all six current input files."""
     _parser._reject_path_links(Path(dataset_root))
@@ -548,6 +638,8 @@ def verify(
     }
     if log == _DNS_LOG:
         proof["timestamp_parameters"] = dict(_DNS_TIMESTAMP_PARAMETERS)
+    if data_root is not None:
+        proof = portable_proof(proof, data_root=data_root)
     destination.parent.mkdir(parents=True, exist_ok=True)
     created = False
     try:
@@ -561,14 +653,19 @@ def verify(
     return proof
 
 
-def _load_proof(path, gold):
+def _load_proof(path, gold, *, data_root=None):
     path = _paths({"proof": path})["proof"]
     proof = _object(path.read_bytes())
     dataset_id = proof.get("dataset_id")
     log = proof.get("relative_log_path")
     version, _, _ = _profile(log, dataset_id)
+    portable = proof.get("schema_version") == 2
+    if portable:
+        _data_root(data_root)
+        if proof.get("path_base") != "data_root" or "generated_at" in proof:
+            raise ValueError("invalid portable completeness proof")
     for key, value in {
-        "schema_version": 1,
+        "schema_version": 2 if portable else 1,
         "policy": _POLICY,
         "generator_version": version,
         "dataset_id": dataset_id,
@@ -597,7 +694,8 @@ def _load_proof(path, gold):
             if proof["observed_min"] != proof["observed_max"]
             else (_parser._utc_time(datetime.fromisoformat(proof["observed_min"])),) * 2
         )
-        _parser._utc_time(datetime.fromisoformat(proof["generated_at"]))
+        if not portable:
+            _parser._utc_time(datetime.fromisoformat(proof["generated_at"]))
         if not start <= lower <= upper < end:
             raise ValueError("invalid observed bounds")
         inputs = proof["inputs"]
@@ -605,8 +703,15 @@ def _load_proof(path, gold):
             raise TypeError("proof inputs must be an object")
         if set(inputs) != {"archive", "raw", "labels", "events", "gold", "join_report"}:
             raise ValueError("proof requires all six inputs")
-        paths = _paths({k: v["path"] for k, v in inputs.items()})
-        root = Path(proof["dataset_root"])
+        paths = _paths(
+            {k: v["path"] for k, v in inputs.items()},
+            data_root=data_root if portable else None,
+        )
+        root = (
+            _resolve_reference(proof["dataset_root"], data_root)
+            if portable
+            else Path(proof["dataset_root"])
+        )
         _parser._reject_path_links(root)
         if not root.is_absolute() or root.resolve() != root:
             raise ValueError("dataset root must be canonical absolute path")
@@ -618,7 +723,12 @@ def _load_proof(path, gold):
             raise ValueError("proof source paths mismatch")
         for name, current in paths.items():
             if (
-                inputs[name]["path"] != str(current)
+                inputs[name]["path"]
+                != (
+                    _relative_reference(current, data_root)
+                    if portable
+                    else str(current)
+                )
                 or _hash(current) != inputs[name]["sha256"]
             ):
                 raise ValueError("stale proof input hash")
@@ -679,18 +789,20 @@ def _load_proof(path, gold):
     return proof, paths, path
 
 
-def map_gold(*, gold, proof, output, report, max_events=None):
+def map_gold(*, gold, proof, output, report, max_events=None, data_root=None):
     """Validate current content binding and write isolated scoring JSONL."""
     if max_events is not None and (type(max_events) is not int or max_events < 1):
         raise ValueError("max_events must be positive integer")
-    bound, paths, proof_path = _load_proof(proof, gold)
+    bound, paths, proof_path = _load_proof(proof, gold, data_root=data_root)
     log = bound["relative_log_path"]
     dataset_id = bound["dataset_id"]
     _, _, parse_line = _profile(log, dataset_id)
     output, report = _outputs(
         [output, report],
         [*paths.values(), proof_path],
-        Path(bound["dataset_root"]),
+        _resolve_reference(bound["dataset_root"], data_root)
+        if bound["schema_version"] == 2
+        else Path(bound["dataset_root"]),
         paths["events"].parent,
     )
     summary = {
@@ -816,6 +928,8 @@ def main(argv=None):
     for flag in ("gold", "proof", "output", "report"):
         map_cli.add_argument("--" + flag, type=Path, required=True)
     map_cli.add_argument("--max-events", type=int)
+    verify_cli.add_argument("--data-root", type=Path)
+    map_cli.add_argument("--data-root", type=Path)
     args = vars(cli.parse_args(argv))
     command = args.pop("command")
     try:

@@ -45,6 +45,7 @@ from evidencesoc.persistence.tables import (
     SecurityEventTable,
     ValidationResultTable,
 )
+from evidencesoc.tools.ledger import Ledger
 from sqlalchemy import delete, select
 
 ROOT = Path(__file__).resolve().parents[4]
@@ -400,6 +401,7 @@ def read_sse(
     cursor: int = 0,
     started_at: float | None = None,
     until_agent: str | None = None,
+    first_event_samples: list[float] | None = None,
 ) -> list[dict[str, Any]]:
     frames: list[dict[str, Any]] = []
     frame: dict[str, Any] = {}
@@ -421,6 +423,11 @@ def read_sse(
                 assert frame["data"]["incident_id"] == metadata["incident_id"]
                 if not frames and started_at is not None:
                     elapsed = time.perf_counter() - started_at
+                    print(
+                        f"task9_tcp sse_first_event samples=1 elapsed_ms={elapsed * 1000:.2f}"
+                    )
+                    if first_event_samples is not None:
+                        first_event_samples.append(elapsed * 1000)
                     assert elapsed < 2, f"first TCP SSE event took {elapsed:.3f}s"
                 frames.append(frame)
                 if frame["event"] == until and (
@@ -455,12 +462,17 @@ def assert_completed(result: dict[str, Any], metadata: dict[str, Any]) -> None:
 
 def test_live_tcp_approval_stream_performance_and_secret_redaction(live_api):
     server, sessions = live_api
+    measurements: dict[str, Any] = {"first_sse_event_ms": [], "ordinary_api": {}}
     with server.client() as client:
         alert_id = server.create_alert(client)
         started_at = time.perf_counter()
         metadata = server.investigate(client, alert_id)
         initial = read_sse(
-            client, metadata, until="approval.required", started_at=started_at
+            client,
+            metadata,
+            until="approval.required",
+            started_at=started_at,
+            first_event_samples=measurements["first_sse_event_ms"],
         )
         assert initial[0]["event"] == "investigation.started"
         assert {frame["event"] for frame in initial} >= {
@@ -471,6 +483,8 @@ def test_live_tcp_approval_stream_performance_and_secret_redaction(live_api):
         }
         before = wait_status(client, metadata, "awaiting_approval")
         assert before["approval"] is None and before["validation_result"] is None
+        pending_budget = Ledger(sessions).summary(metadata["incident_id"], 1)
+        assert (pending_budget.total_used, pending_budget.verification_calls) == (3, 0)
         plan_id = before["response_plan"]["response_plan_id"]
         version = server.plan_version(client, plan_id)
         barrier = threading.Barrier(2)
@@ -512,6 +526,15 @@ def test_live_tcp_approval_stream_performance_and_secret_redaction(live_api):
         } == set(ROLE_NAMES)
         after = wait_status(client, metadata, "completed")
         assert_completed(after, metadata)
+        completed_budget = Ledger(sessions).summary(metadata["incident_id"], 1)
+        assert (
+            completed_budget.total_used,
+            completed_budget.verification_calls,
+            completed_budget.verification_attempts,
+        ) == (3, 1, 1)
+        print(
+            "task9_tcp approved_collection_calls=3 verification_calls=1 verification_attempts=1"
+        )
         with sessions() as session:
             assert (
                 len(
@@ -546,6 +569,14 @@ def test_live_tcp_approval_stream_performance_and_secret_redaction(live_api):
             p95 = sorted(durations)[math.ceil(len(durations) * 0.95) - 1]
             print(f"task9_tcp {name} samples=100 p95_ms={p95:.2f}")
             assert p95 < 500
+            measurements["ordinary_api"][name] = {
+                "sample_count": len(durations),
+                "durations_ms": durations,
+                "p95_ms": p95,
+            }
+        server.log_path.with_name("task12-api-performance.json").write_text(
+            json.dumps(measurements, indent=2) + "\n", encoding="utf-8"
+        )
         sentinel = "task9-secret-" + new_ulid()
         invalid = client.post(
             f"{API}/alerts?password={sentinel}&api_key={sentinel}",
@@ -953,4 +984,9 @@ def test_live_tcp_collect_internal_crash_keeps_budget_and_recovers(
         assert collect_run.output_summary["collection_budget_used"] == 3
         assert collect_run.output_summary["collection_tool_attempts"] == sum(
             row.attempts for row in rows
+        )
+        print(
+            f"task12_live collect_crash_stage={stage} charged_after_restart=3 "
+            f"seed_physical_attempts={recovered_seed.attempts} "
+            f"collect_physical_attempts={sum(row.attempts for row in rows)}"
         )

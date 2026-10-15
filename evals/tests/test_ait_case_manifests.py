@@ -2,6 +2,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import shutil
 import zipfile
 from pathlib import Path
 
@@ -754,6 +755,172 @@ def assert_configured_inputs_only(manifest, source_config, entries, indices):
         )
         expected_paths.update(item["path"] for item in proof["inputs"].values())
     assert set(manifest["input_sha256"]) == expected_paths
+
+
+def portable_sources(builder, source_config, data_root):
+    config = json.loads(source_config.read_text(encoding="utf-8"))
+    for entry in config["sources"]:
+        path = (source_config.parent / entry["proof"]).resolve()
+        proof = json.loads(path.read_text(encoding="utf-8"))
+        value = builder._taxonomy.portable_proof(proof, data_root=data_root)
+        path.write_text(json.dumps(value), encoding="utf-8")
+
+
+def test_portable_case_identity_uses_only_observable_selection_metadata(
+    modules, source_config
+):
+    _, builder = modules
+    args = {
+        "source_config": source_config,
+        "time_from": "2022-01-18T12:00:01Z",
+        "time_to": "2022-01-18T12:00:04Z",
+    }
+    first = builder.neutral_case_id(**args)
+    assert first.startswith("ait-") and len(first) == 28
+    config = json.loads(source_config.read_bytes())
+    config["sources"].reverse()
+    for entry in config["sources"]:
+        entry["scored_gold"] = "answer-webshell-upload.jsonl"
+        entry["proof"] = "answer-normal-proof.json"
+    source_config.write_text(json.dumps(config), encoding="utf-8")
+    assert builder.neutral_case_id(**args) == first
+    assert (
+        builder.neutral_case_id(**{**args, "time_to": "2022-01-18T12:00:05Z"}) != first
+    )
+
+
+def test_case_data_root_preserves_legacy_default_and_detects_portable_proofs(
+    modules, source_config, tmp_path
+):
+    _, builder = modules
+    args = {"source_config": source_config, "data_root": tmp_path}
+    assert builder.case_data_root(**args) is None
+    assert builder.case_data_root(**args, explicit=True) == tmp_path
+    portable_sources(builder, source_config, tmp_path)
+    assert builder.case_data_root(**args) == tmp_path
+
+
+@pytest.mark.parametrize("bad_target", ["identity", "folder"])
+def test_portable_case_rejects_answer_bearing_identity_and_output_folder(
+    modules, source_config, tmp_path, monkeypatch, bad_target
+):
+    _, builder = modules
+    monkeypatch.setattr(
+        builder._taxonomy,
+        "_OFFICIAL_MD5",
+        hashlib.md5((tmp_path / "archives/fox.zip").read_bytes()).hexdigest(),
+    )
+    portable_sources(builder, source_config, tmp_path)
+    case_id = builder.neutral_case_id(
+        source_config=source_config,
+        time_from="2022-01-18T12:00:01Z",
+        time_to="2022-01-18T12:00:04Z",
+    )
+    output = tmp_path / (
+        "fox-test-attack-webshell-upload" if bad_target == "folder" else case_id
+    )
+    with pytest.raises(ValueError, match="neutral case|case folder"):
+        build_args(
+            builder,
+            source_config,
+            tmp_path,
+            output,
+            data_root=tmp_path,
+            case_id="fox-test-attack-webshell-upload"
+            if bad_target == "identity"
+            else case_id,
+        )
+    assert not output.exists()
+
+
+def test_explicit_data_root_rebuilds_identically_after_original_inputs_are_removed(
+    modules, source_config, tmp_path, monkeypatch
+):
+    _, builder = modules
+    monkeypatch.setattr(
+        builder._taxonomy,
+        "_OFFICIAL_MD5",
+        hashlib.md5((tmp_path / "archives/fox.zip").read_bytes()).hexdigest(),
+    )
+    splits = split_file(tmp_path)
+    portable_sources(builder, source_config, tmp_path)
+    case_id = builder.neutral_case_id(
+        source_config=source_config,
+        time_from="2022-01-18T12:00:01Z",
+        time_to="2022-01-18T12:00:04Z",
+    )
+    output = tmp_path / case_id
+    build_args(
+        builder, source_config, tmp_path, output, data_root=tmp_path, case_id=case_id
+    )
+    manifest = json.loads((output / "scoring/manifest.json").read_bytes())
+    assert manifest["build"]["path_base"] == "data_root"
+    assert manifest["build"]["source_config"] == "metadata/sources.json"
+    assert manifest["build"]["splits"] == "metadata/splits.json"
+    assert all(
+        not Path(path).is_absolute()
+        and "\\" not in path
+        and ".." not in Path(path).parts
+        for path in manifest["input_sha256"]
+    )
+    relocated = tmp_path / "other-root"
+    relocated.mkdir()
+    for directory in list(tmp_path.iterdir()):
+        if directory.is_dir() and directory not in (output, relocated):
+            shutil.copytree(directory, relocated / directory.name)
+            for original in directory.rglob("*"):
+                if original.is_file():
+                    original.write_bytes(b"original input unavailable\n")
+    rebuilt = tmp_path / "reconstructed" / case_id
+    builder.rebuild_case(
+        manifest=output / "scoring/manifest.json",
+        output_dir=rebuilt,
+        data_root=relocated,
+    )
+    for relative in (
+        "agent/events.jsonl",
+        "agent/manifest.json",
+        "scoring/gold.jsonl",
+        "scoring/source-gold.json",
+        "scoring/manifest.json",
+    ):
+        assert (output / relative).read_bytes() == (rebuilt / relative).read_bytes()
+    assert splits.name == "splits.json"
+
+
+@pytest.mark.parametrize(
+    "reference",
+    ["../outside.json", "/outside.json", "C:/outside.json", "metadata\\sources.json"],
+)
+def test_portable_rebuild_rejects_noncanonical_root_references(
+    modules, source_config, tmp_path, monkeypatch, reference
+):
+    _, builder = modules
+    monkeypatch.setattr(
+        builder._taxonomy,
+        "_OFFICIAL_MD5",
+        hashlib.md5((tmp_path / "archives/fox.zip").read_bytes()).hexdigest(),
+    )
+    portable_sources(builder, source_config, tmp_path)
+    case_id = builder.neutral_case_id(
+        source_config=source_config,
+        time_from="2022-01-18T12:00:01Z",
+        time_to="2022-01-18T12:00:04Z",
+    )
+    output = tmp_path / case_id
+    build_args(
+        builder, source_config, tmp_path, output, data_root=tmp_path, case_id=case_id
+    )
+    manifest = json.loads((output / "scoring/manifest.json").read_bytes())
+    original = manifest["build"]["source_config"]
+    manifest["build"]["source_config"] = reference
+    manifest["input_sha256"][reference] = manifest["input_sha256"].pop(original)
+    tampered = tmp_path / "bad-reference.json"
+    tampered.write_text(json.dumps(manifest), encoding="utf-8")
+    dest = tmp_path / "rejected"
+    with pytest.raises(ValueError, match="relative|reference"):
+        builder.rebuild_case(manifest=tampered, output_dir=dest, data_root=tmp_path)
+    assert not dest.exists()
 
 
 @pytest.mark.parametrize("source_config", ["early_dns"], indirect=True)

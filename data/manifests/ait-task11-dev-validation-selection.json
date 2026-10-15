@@ -2,7 +2,7 @@
   "schema_version": 1,
   "cases": [
     {
-      "case_id": "harrison-dev-001",
+      "case_id": "ait-352f38914e2be0e67439e080",
       "split": "development",
       "class": "attack",
       "scenario": "harrison",
@@ -14,11 +14,12 @@
         "normal": 0,
         "unknown": 0
       },
-      "scoring_manifest_sha256": "e0675a7e9c0d4ea4c16702d3deff0d360ec41ea0cf83efbc86b25afa29636d98",
-      "rebuild_verified": true
+      "scoring_manifest_sha256": "dac129684a7e24b7301780c846317c0eb712c50f13e7a5c37f821056d886f958",
+      "rebuild_verified": true,
+      "legacy_case_id": "harrison-dev-001"
     },
     {
-      "case_id": "harrison-dev-002",
+      "case_id": "ait-d7fe85c78ad4c1c16ee2699e",
       "split": "development",
       "class": "normal",
       "scenario": "harrison",
@@ -30,11 +31,12 @@
         "normal": 8,
         "unknown": 0
       },
-      "scoring_manifest_sha256": "3f7ed9288ee014836ac065c2164ef2e190107b5976937d075e1eddd17987e980",
-      "rebuild_verified": true
+      "scoring_manifest_sha256": "31cbb92860f0b0a2e6d2c6a5fe3b6a3c340080e4acda5623f36de3693d4b3cb7",
+      "rebuild_verified": true,
+      "legacy_case_id": "harrison-dev-002"
     },
     {
-      "case_id": "santos-dev-001",
+      "case_id": "ait-8df4b48d5e5714f78222f7e7",
       "split": "development",
       "class": "attack",
       "scenario": "santos",
@@ -46,11 +48,12 @@
         "normal": 0,
         "unknown": 0
       },
-      "scoring_manifest_sha256": "8acfeba6c7c2e88bd7c207661ecd4c7884a4cd32d59484a7ed3e12ff352e33aa",
-      "rebuild_verified": true
+      "scoring_manifest_sha256": "c8f6b35079214b632e9987a36afff1f78be3b4ad55f9d1b7aa42d4e1430a421c",
+      "rebuild_verified": true,
+      "legacy_case_id": "santos-dev-001"
     },
     {
-      "case_id": "santos-dev-002",
+      "case_id": "ait-ca3376203ce2e9589ff87a68",
       "split": "development",
       "class": "normal",
       "scenario": "santos",
@@ -62,11 +65,12 @@
         "normal": 8,
         "unknown": 0
       },
-      "scoring_manifest_sha256": "acaccab97674a3f2f463ec885a970d858dcd1aa2ee0f471582f0ad02a5aba81c",
-      "rebuild_verified": true
+      "scoring_manifest_sha256": "c77cb8e95b0e2985ce825c8e19eefbeb3dbcc5da99bec32f2568e962c3c311cc",
+      "rebuild_verified": true,
+      "legacy_case_id": "santos-dev-002"
     },
     {
-      "case_id": "wheeler-dev-001",
+      "case_id": "ait-635abb2308567d0b7afb6602",
       "split": "development",
       "class": "attack",
       "scenario": "wheeler",
@@ -78,11 +82,12 @@
         "normal": 15,
         "unknown": 0
       },
-      "scoring_manifest_sha256": "f19c0a78acb868cf83997b8172164fb1eafe413d9d868fdac0f56f10d61e049a",
-      "rebuild_verified": true
+      "scoring_manifest_sha256": "4eb3545ea0a5301cbbaa016681df6724892a86d7dfd96f4d2a10ae1e187be949",
+      "rebuild_verified": true,
+      "legacy_case_id": "wheeler-dev-001"
     },
     {
-      "case_id": "wheeler-dev-002",
+      "case_id": "ait-99ef5665a065babfcfb85add",
       "split": "development",
       "class": "normal",
       "scenario": "wheeler",
@@ -94,11 +99,12 @@
         "normal": 8,
         "unknown": 0
       },
-      "scoring_manifest_sha256": "34a64d315ecd7db75abac582465a0a9a93ce96f5f0442fb3da59bf85941bcfab",
-      "rebuild_verified": true
+      "scoring_manifest_sha256": "861a2833b4a6f7e4a5b49d0c6a0d4ea22a8cec7dca01c416ad43de37e2eef6c2",
+      "rebuild_verified": true,
+      "legacy_case_id": "wheeler-dev-002"
     },
     {
-      "case_id": "wardbeck-val-001",
+      "case_id": "ait-1d3c84afaabf50bc91c90df1",
       "split": "validation",
       "class": "attack",
       "scenario": "wardbeck",
@@ -110,11 +116,12 @@
         "normal": 0,
         "unknown": 0
       },
-      "scoring_manifest_sha256": "bfe4748c204bfe0387fc9c7262d98e0b9401ada5df6191cea5db661832cd0199",
-      "rebuild_verified": true
+      "scoring_manifest_sha256": "4f42119acf74084980b089f510af6a6853179bb8816d84355426388dce3aa71f",
+      "rebuild_verified": true,
+      "legacy_case_id": "wardbeck-val-001"
     },
     {
-      "case_id": "wardbeck-val-002",
+      "case_id": "ait-1448f9cdb46aa9a47ed2e219",
       "split": "validation",
       "class": "normal",
       "scenario": "wardbeck",
@@ -126,8 +133,10 @@
         "normal": 8,
         "unknown": 0
       },
-      "scoring_manifest_sha256": "ecfdae3d852cac2b059bc8afa13b1bb0789a0a0a9609af960c49a0fcde61387c",
-      "rebuild_verified": true
+      "scoring_manifest_sha256": "a8b28f2b52dbc46945e92048d4751428d5d5e6bd91b7199ee554d7fa25bc452f",
+      "rebuild_verified": true,
+      "legacy_case_id": "wardbeck-val-002"
     }
-  ]
+  ],
+  "case_identity": "sha256 of dataset/scenario/split/window/source paths/max_records; labels and legacy IDs excluded"
 }

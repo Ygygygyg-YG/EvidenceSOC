@@ -1,4 +1,4 @@
-﻿{
+{
   "development": [
     "fox",
     "harrison",
@@ -6,6 +6,11 @@
     "santos",
     "wheeler"
   ],
-  "validation": ["wardbeck"],
-  "test": ["shaw", "wilson"]
+  "validation": [
+    "wardbeck"
+  ],
+  "test": [
+    "shaw",
+    "wilson"
+  ]
 }

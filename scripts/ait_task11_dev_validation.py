@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import importlib.util
 import json
@@ -9,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+DATA = ROOT / "data"
 BASE = ROOT / "evals" / "datasets" / "ait_v2"
 SCENARIOS = {
     "harrison": "development",
@@ -42,12 +44,12 @@ def digest(path: Path) -> str:
 
 
 def source_config(scenario: str, split: str, profile: str | None) -> Path:
-    full = ROOT / "data" / "manifests" / f"{scenario}-{split}-sources.json"
+    full = DATA / "manifests" / f"{scenario}-{split}-sources.json"
     if profile is None:
         return full
     if profile != "audit":
         raise ValueError(f"unsupported single-source profile: {profile}")
-    path = ROOT / "data" / "manifests" / f"{scenario}-{split}-{profile}-sources.json"
+    path = DATA / "manifests" / f"{scenario}-{split}-{profile}-sources.json"
     value = json.loads(full.read_text(encoding="utf-8"))
     source = [row for row in value["sources"] if "/audit/" in row["relative_log_path"]]
     if len(source) != 1:
@@ -64,7 +66,7 @@ def source_config(scenario: str, split: str, profile: str | None) -> Path:
 
 
 def windows(scenario: str) -> tuple[tuple[str, str], tuple[str, str]]:
-    root = ROOT / "data" / "ait" / "scenarios" / scenario / "processed"
+    root = DATA / "ait" / "scenarios" / scenario / "processed"
     apache_events = root / "agent" / f"{scenario}-apache-events.jsonl"
     apache_gold = root / "gold" / f"{scenario}-apache-scored-gold.jsonl"
     first_upload = None
@@ -128,8 +130,13 @@ def windows(scenario: str) -> tuple[tuple[str, str], tuple[str, str]]:
 
 
 def main() -> None:
+    global DATA
+    cli = argparse.ArgumentParser(description=__doc__)
+    cli.add_argument("--data-root", type=Path)
+    args = cli.parse_args()
+    DATA = args.data_root.resolve() if args.data_root is not None else DATA
     builder = load("task11_dev_builder", BASE / "build_manifests.py")
-    splits = ROOT / "data" / "manifests" / "ait-v2-splits.json"
+    splits = DATA / "manifests" / "ait-v2-splits.json"
     summary = []
     for scenario, split in SCENARIOS.items():
         attack, normal = windows(scenario)
@@ -137,12 +144,24 @@ def main() -> None:
             (1, "attack", None, attack),
             (2, "normal", "audit", normal),
         ):
-            case_id = (
+            legacy_case_id = (
                 f"{scenario}-{'dev' if split == 'development' else 'val'}-{number:03d}"
             )
             config = source_config(scenario, split, profile)
-            output = ROOT / "data" / "ait" / "cases" / split / case_id
-            rebuilt = ROOT / "data" / "ait" / "rebuilds" / split / case_id
+            data_root = builder.case_data_root(
+                source_config=config,
+                data_root=DATA,
+                explicit=args.data_root is not None,
+            )
+            case_id = (
+                builder.neutral_case_id(
+                    source_config=config, time_from=bounds[0], time_to=bounds[1]
+                )
+                if data_root is not None
+                else legacy_case_id
+            )
+            output = DATA / "ait" / "cases" / split / case_id
+            rebuilt = DATA / "ait" / "rebuilds" / split / case_id
             if not output.exists():
                 builder.build_case(
                     source_config=config,
@@ -151,6 +170,7 @@ def main() -> None:
                     time_from=bounds[0],
                     time_to=bounds[1],
                     output_dir=output,
+                    data_root=data_root,
                 )
             manifest = output / "scoring" / "manifest.json"
             value = json.loads(manifest.read_text(encoding="utf-8"))
@@ -163,7 +183,9 @@ def main() -> None:
             ):
                 raise ValueError(f"case class/split mismatch: {case_id}")
             if not rebuilt.exists():
-                builder.rebuild_case(manifest=manifest, output_dir=rebuilt)
+                builder.rebuild_case(
+                    manifest=manifest, output_dir=rebuilt, data_root=data_root
+                )
             if any(
                 digest(output / file) != digest(rebuilt / file) for file in ARTIFACTS
             ):
@@ -171,6 +193,11 @@ def main() -> None:
             summary.append(
                 {
                     "case_id": case_id,
+                    **(
+                        {"legacy_case_id": legacy_case_id}
+                        if data_root is not None
+                        else {}
+                    ),
                     "split": split,
                     "class": klass,
                     "scenario": scenario,
@@ -187,7 +214,7 @@ def main() -> None:
                 }
             )
             print(case_id, summary[-1]["counts"], flush=True)
-    dest = ROOT / "data" / "manifests" / "ait-task11-dev-validation-selection.json"
+    dest = DATA / "manifests" / "ait-task11-dev-validation-selection.json"
     value = {"schema_version": 1, "cases": summary}
     if dest.exists():
         if json.loads(dest.read_text(encoding="utf-8")) != value:

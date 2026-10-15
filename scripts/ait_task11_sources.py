@@ -14,6 +14,7 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+DATA = ROOT / "data"
 BASE = ROOT / "evals" / "datasets" / "ait_v2"
 WINDOWS = {
     "harrison": ("2022-02-04T00:00:00Z", "2022-02-09T00:00:00Z", "development"),
@@ -77,13 +78,13 @@ def report(path: Path, **required) -> dict:
     return value
 
 
-def prepare(name: str, *, taxonomy, apache, audit, dns, join) -> None:
+def prepare(name: str, *, taxonomy, apache, audit, dns, join, portable=False) -> None:
     dataset_id = f"ait-v2.1:{name}"
     start, end, split = WINDOWS[name]
-    archive_path = ROOT / "data" / "ait" / "downloads" / f"{name}_no-pcaps.zip"
+    archive_path = DATA / "ait" / "downloads" / f"{name}_no-pcaps.zip"
     if taxonomy._hash(archive_path, "md5") != taxonomy._official_md5(dataset_id):
         raise ValueError(f"official MD5 mismatch: {name}")
-    raw_root = ROOT / "data" / "ait" / "scenarios" / name / "raw"
+    raw_root = DATA / "ait" / "scenarios" / name / "raw"
     processed = raw_root.parent / "processed"
     apache_log = taxonomy._EXTENDED_APACHE_LOGS[name]
     sources = (
@@ -97,7 +98,7 @@ def prepare(name: str, *, taxonomy, apache, audit, dns, join) -> None:
             for kind in ("gather", "labels"):
                 member_to_path(bundle, f"{kind}/{log}", raw_root / kind / log)
     entries = []
-    metadata = ROOT / "data" / "manifests"
+    metadata = DATA / "manifests"
     for stem, log, parse_file in sources:
         stem = f"{name}-{stem}"
         event = processed / "agent" / f"{stem}-events.jsonl"
@@ -154,10 +155,25 @@ def prepare(name: str, *, taxonomy, apache, audit, dns, join) -> None:
                 time_from=start,
                 time_to=end,
                 output=proof,
+                data_root=DATA if portable else None,
             )
         print(f"{name}/{log}: taxonomy", flush=True)
         if not scored.exists() and not map_path.exists():
-            taxonomy.map_gold(gold=gold, proof=proof, output=scored, report=map_path)
+            proof_root = (
+                DATA
+                if json.loads(proof.read_text(encoding="utf-8-sig")).get(
+                    "schema_version"
+                )
+                == 2
+                else None
+            )
+            taxonomy.map_gold(
+                gold=gold,
+                proof=proof,
+                output=scored,
+                report=map_path,
+                data_root=proof_root,
+            )
         elif not scored.exists() or not map_path.exists():
             raise ValueError(f"partial taxonomy outputs: {name}/{log}")
         mapped = report(map_path, truncated=False, unknown_events=0)
@@ -201,9 +217,12 @@ def prepare(name: str, *, taxonomy, apache, audit, dns, join) -> None:
 
 
 def main() -> None:
+    global DATA
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("scenarios", nargs="*", choices=WINDOWS, default=list(WINDOWS))
+    parser.add_argument("--data-root", type=Path)
     args = parser.parse_args()
+    DATA = args.data_root.resolve() if args.data_root is not None else DATA
     modules = {
         "taxonomy": load("taxonomy"),
         "apache": load("parse"),
@@ -212,7 +231,7 @@ def main() -> None:
         "join": load("join_labels"),
     }
     for name in args.scenarios:
-        prepare(name, **modules)
+        prepare(name, **modules, portable=args.data_root is not None)
 
 
 if __name__ == "__main__":

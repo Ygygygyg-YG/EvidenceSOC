@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
 
 import pytest
 from evidencesoc.config import Settings
@@ -34,6 +35,31 @@ QUERIES = (
     ("lateral movement using SSH", {"T1021.004"}),
     ("use stolen valid accounts to access systems", {"T1078"}),
 )
+
+
+@pytest.fixture(autouse=True)
+def isolated_acceptance_corpus(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Keep opt-in full-corpus reads separate from empty-corpus workflow tests.
+
+    A standalone RAG run can still supply DATABASE_URL as before. A complete
+    backend run supplies the corpus clone explicitly while DATABASE_URL remains
+    the dedicated workflow/test database for all other modules.
+    """
+    corpus_url = os.getenv("EVIDENCESOC_RAG_ACCEPTANCE_DATABASE_URL")
+    if corpus_url:
+        from evidencesoc.config import get_settings
+        from evidencesoc.rag import retriever
+
+        get_settings.cache_clear()
+        retriever._embedding_provider.cache_clear()
+        monkeypatch.setenv("DATABASE_URL", corpus_url)
+        try:
+            yield
+        finally:
+            get_settings.cache_clear()
+            retriever._embedding_provider.cache_clear()
+    else:
+        yield
 
 
 @pytest.mark.skipif(

@@ -17,6 +17,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+DATA = ROOT / "data"
 BASE = ROOT / "evals" / "datasets" / "ait_v2"
 SCENARIOS = ("shaw", "wilson")
 PROFILES = ("apache", "intranet-audit", "dnsmasq")
@@ -54,7 +55,7 @@ def iso(value: datetime) -> str:
 
 
 def profile_index(scenario: str, profile: str) -> dict:
-    root = ROOT / "data" / "ait" / "scenarios" / scenario / "processed"
+    root = DATA / "ait" / "scenarios" / scenario / "processed"
     event_path = root / "agent" / f"{scenario}-{profile}-events.jsonl"
     gold_path = root / "gold" / f"{scenario}-{profile}-scored-gold.jsonl"
     seconds = defaultdict(Counter)
@@ -211,11 +212,11 @@ def selection(scenarios: tuple[str, ...]) -> list[dict]:
 
 
 def source_config(scenario: str, profiles: list[str]) -> Path:
-    full = ROOT / "data" / "manifests" / f"{scenario}-test-sources.json"
+    full = DATA / "manifests" / f"{scenario}-test-sources.json"
     if len(profiles) == len(PROFILES):
         return full
     profile = profiles[0]
-    path = ROOT / "data" / "manifests" / f"{scenario}-test-{profile}-sources.json"
+    path = DATA / "manifests" / f"{scenario}-test-{profile}-sources.json"
     value = json.loads(full.read_text(encoding="utf-8"))
     name = profile.split("-")[-1]
     selected = [
@@ -251,13 +252,23 @@ def hash_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def build(cases: list[dict]) -> None:
+def build(cases: list[dict], *, explicit_data_root=False) -> None:
     builder = load_builder()
-    splits = ROOT / "data" / "manifests" / "ait-v2-splits.json"
+    splits = DATA / "manifests" / "ait-v2-splits.json"
     for row in cases:
         config = source_config(row["scenario"], row["profiles"])
-        output = ROOT / "data" / "ait" / "cases" / "test" / row["case_id"]
-        rebuilt = ROOT / "data" / "ait" / "rebuilds" / "test" / row["case_id"]
+        data_root = builder.case_data_root(
+            source_config=config, data_root=DATA, explicit=explicit_data_root
+        )
+        if data_root is not None:
+            row["legacy_case_id"] = row["case_id"]
+            row["case_id"] = builder.neutral_case_id(
+                source_config=config,
+                time_from=row["time_from"],
+                time_to=row["time_to"],
+            )
+        output = DATA / "ait" / "cases" / "test" / row["case_id"]
+        rebuilt = DATA / "ait" / "rebuilds" / "test" / row["case_id"]
         if not output.exists():
             result = builder.build_case(
                 source_config=config,
@@ -266,6 +277,7 @@ def build(cases: list[dict]) -> None:
                 time_from=row["time_from"],
                 time_to=row["time_to"],
                 output_dir=output,
+                data_root=data_root,
             )
             print(row["case_id"], result["counts"]["selected"], flush=True)
         manifest = output / "scoring" / "manifest.json"
@@ -280,7 +292,9 @@ def build(cases: list[dict]) -> None:
         ):
             raise ValueError(f"invalid class, split, or bounds: {row['case_id']}")
         if not rebuilt.exists():
-            builder.rebuild_case(manifest=manifest, output_dir=rebuilt)
+            builder.rebuild_case(
+                manifest=manifest, output_dir=rebuilt, data_root=data_root
+            )
         files = (
             "agent/events.jsonl",
             "agent/manifest.json",
@@ -324,7 +338,7 @@ def build(cases: list[dict]) -> None:
         "ablation_case_ids": subset,
         "cases": sorted(cases, key=lambda row: row["case_id"]),
     }
-    dest = ROOT / "data" / "manifests" / "ait-task11-test-selection.json"
+    dest = DATA / "manifests" / "ait-task11-test-selection.json"
     if dest.exists():
         if json.loads(dest.read_text(encoding="utf-8")) != report:
             raise ValueError(f"frozen selection differs: {dest}")
@@ -336,17 +350,20 @@ def build(cases: list[dict]) -> None:
 
 
 def main() -> None:
+    global DATA
     cli = argparse.ArgumentParser(description=__doc__)
     cli.add_argument("--build", action="store_true")
     cli.add_argument("--scenarios", nargs="+", choices=SCENARIOS, default=SCENARIOS)
+    cli.add_argument("--data-root", type=Path)
     args = cli.parse_args()
+    DATA = args.data_root.resolve() if args.data_root is not None else DATA
     cases = selection(tuple(args.scenarios))
     for row in cases:
         print(row["case_id"], row["time_from"], row["time_to"], row["expected_count"])
     if args.build:
         if tuple(args.scenarios) != SCENARIOS:
             raise ValueError("freeze requires both fixed test scenarios")
-        build(cases)
+        build(cases, explicit_data_root=args.data_root is not None)
 
 
 if __name__ == "__main__":

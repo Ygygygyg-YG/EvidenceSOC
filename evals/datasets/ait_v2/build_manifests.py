@@ -146,7 +146,7 @@ def _check_snapshot(initial):
             raise ValueError("input changed during build")
 
 
-def _safe_inputs(config_path, initial):
+def _safe_inputs(config_path, initial, *, data_root=None):
     config_path = Path(config_path).absolute()
     _parser._reject_path_links(config_path)
     config_path = config_path.resolve()
@@ -213,6 +213,8 @@ def _safe_inputs(config_path, initial):
                 candidate = config_path.parent / candidate
             _parser._reject_path_links(candidate)
             paths[key] = candidate.resolve()
+            if data_root is not None:
+                _taxonomy._relative_reference(paths[key], data_root)
         for path in paths.values():
             if not path.is_file():
                 raise FileNotFoundError(path)
@@ -233,9 +235,14 @@ def _safe_inputs(config_path, initial):
             }:
                 raise ValueError("proof requires all six inputs")
             captured_paths = _taxonomy._paths(
-                {key: value["path"] for key, value in captured_inputs.items()}
+                {key: value["path"] for key, value in captured_inputs.items()},
+                data_root=data_root if captured.get("schema_version") == 2 else None,
             )
-            gold = captured_inputs["gold"]["path"]
+            if data_root is not None and captured.get("schema_version") != 2:
+                raise ValueError(
+                    "explicit data root requires a portable completeness proof"
+                )
+            gold = captured_paths["gold"]
             for path in [*captured_paths.values(), *paths.values()]:
                 _snapshot(initial, path)
             if any(
@@ -245,7 +252,11 @@ def _safe_inputs(config_path, initial):
                 raise ValueError("stale proof input hash")
         except (KeyError, TypeError) as exc:
             raise ValueError("malformed completeness proof") from exc
-        proof, proof_inputs, proof_path = _taxonomy._load_proof(paths["proof"], gold)
+        proof, proof_inputs, proof_path = _taxonomy._load_proof(
+            paths["proof"],
+            gold,
+            **({"data_root": data_root} if data_root is not None else {}),
+        )
         if (
             not _same(proof, captured)
             or proof_inputs != captured_paths
@@ -298,7 +309,15 @@ def _contains_gold(value):
 
 
 def build_case(
-    *, source_config, splits, case_id, time_from, time_to, output_dir, max_records=10000
+    *,
+    source_config,
+    splits,
+    case_id,
+    time_from,
+    time_to,
+    output_dir,
+    max_records=10000,
+    data_root=None,
 ):
     return _build_case(
         source_config=source_config,
@@ -308,6 +327,7 @@ def build_case(
         time_to=time_to,
         output_dir=output_dir,
         max_records=max_records,
+        data_root=data_root,
     )
 
 
@@ -332,6 +352,38 @@ def _mkdir_owned(path, created):
     created.append((path, _owned_identity(path.lstat())))
 
 
+def _neutral_case_id(config, start, end, max_records):
+    # Gold paths, annotations, chosen labels and legacy IDs are deliberately absent.
+    identity = {
+        "dataset_id": config["dataset_id"],
+        "scenario": config["scenario"],
+        "split": config["split"],
+        "time_from": start.isoformat(),
+        "time_to": end.isoformat(),
+        "sources": sorted(row["relative_log_path"] for row in config["sources"]),
+        "max_records": max_records,
+    }
+    return "ait-" + hashlib.sha256(_canonical(identity).encode()).hexdigest()[:24]
+
+
+def neutral_case_id(*, source_config, time_from, time_to, max_records=10000):
+    config = json.loads(Path(source_config).read_text(encoding="utf-8-sig"))
+    return _neutral_case_id(config, _time(time_from), _time(time_to), max_records)
+
+
+def case_data_root(*, source_config, data_root, explicit=False):
+    """Retain legacy defaults while automatically recognizing portable proofs."""
+    if explicit:
+        return data_root
+    path = Path(source_config)
+    config = json.loads(path.read_text(encoding="utf-8-sig"))
+    for row in config["sources"]:
+        proof = json.loads((path.parent / row["proof"]).read_text(encoding="utf-8-sig"))
+        if proof.get("schema_version") == 2:
+            return data_root
+    return None
+
+
 def _build_case(
     *,
     source_config,
@@ -343,6 +395,7 @@ def _build_case(
     max_records=10000,
     expected_manifest=None,
     manifest_snapshot=None,
+    data_root=None,
 ):
     if not isinstance(case_id, str) or not re.fullmatch(
         r"[a-z0-9][a-z0-9_-]{0,63}", case_id
@@ -357,17 +410,28 @@ def _build_case(
     _parser._reject_path_links(config_lexical)
     config_hash_at_start = _hash(config_lexical)
     initial = {str(config_lexical.resolve()): config_hash_at_start}
-    config_path, _config, sources = _safe_inputs(config_lexical, initial)
+    if data_root is not None:
+        data_root = _taxonomy._data_root(data_root)
+        _taxonomy._relative_reference(config_lexical, data_root)
+    config_path, _config, sources = _safe_inputs(
+        config_lexical, initial, data_root=data_root
+    )
     schema_version = _config["schema_version"]
     dataset_id = _config["dataset_id"]
     scenario = _config["scenario"]
     split = _config["split"]
+    if data_root is not None and case_id != _neutral_case_id(
+        _config, start, end, max_records
+    ):
+        raise ValueError("portable packs require the neutral case identity")
     apache_log = _SCENARIOS[dataset_id]["apache_log"]
     splits_lexical = Path(splits).absolute()
     _parser._reject_path_links(splits_lexical)
     splits_hash_at_start = _hash(splits_lexical)
     _snapshot(initial, splits_lexical.resolve(), splits_hash_at_start)
     splits_path, _split_data = _check_splits(splits_lexical)
+    if data_root is not None:
+        _taxonomy._relative_reference(splits_path, data_root)
     _check_snapshot(initial)
     all_paths = [path for _, paths, _, _, _ in sources for path in paths.values()]
     if len(all_paths) != len(set(all_paths)):
@@ -375,6 +439,8 @@ def _build_case(
     dest = Path(output_dir).absolute()
     _parser._reject_path_links(dest)
     dest = dest.resolve()
+    if data_root is not None and dest.name != case_id:
+        raise ValueError("portable case folder must equal the neutral case identity")
     protected = [
         p
         for _, paths, _, proof_inputs, proof_path in sources
@@ -387,7 +453,12 @@ def _build_case(
         config_path.parent,
         splits_path.parent,
         *(Path(path).parent for path in (manifest_snapshot or {})),
-        *(Path(proof["dataset_root"]) for _, _, proof, _, _ in sources),
+        *(
+            _taxonomy._resolve_reference(proof["dataset_root"], data_root)
+            if proof["schema_version"] == 2
+            else Path(proof["dataset_root"])
+            for _, _, proof, _, _ in sources
+        ),
         *(paths["events"].parent for _, paths, _, _, _ in sources),
         *(
             path.parent
@@ -643,7 +714,15 @@ def _build_case(
         emit("agent/manifest.json", (_canonical(agent_manifest) + "\n").encode())
         emit("scoring/gold.jsonl", gold_data)
         emit("scoring/source-gold.json", (_canonical(source_gold) + "\n").encode())
-        ledger = {k: v for k, v in sorted(initial.items())}
+
+        def reference(path):
+            return (
+                _taxonomy._relative_reference(path, data_root)
+                if data_root is not None
+                else str(path)
+            )
+
+        ledger = dict(sorted((reference(k), v) for k, v in initial.items()))
         scoring = {
             "schema_version": schema_version,
             "case_id": case_id,
@@ -652,14 +731,15 @@ def _build_case(
             "split": split,
             "generator_version": f"ait-{scenario}-{split}-case-v{schema_version}",
             "build": {
-                "source_config": str(config_path),
+                "source_config": reference(config_path),
                 "source_config_sha256": initial[str(config_path)],
-                "splits": str(splits_path),
+                "splits": reference(splits_path),
                 "splits_sha256": initial[str(splits_path)],
                 "case_id": case_id,
                 "time_from": start.isoformat(),
                 "time_to": end.isoformat(),
                 "max_records": max_records,
+                **({"path_base": "data_root"} if data_root is not None else {}),
             },
             "input_sha256": ledger,
             "profiles": [
@@ -695,7 +775,7 @@ def _build_case(
         raise
 
 
-def rebuild_case(*, manifest, output_dir):
+def rebuild_case(*, manifest, output_dir, data_root=None):
     manifest_path = Path(manifest).absolute()
     _parser._reject_path_links(manifest_path)
     manifest_path = manifest_path.resolve()
@@ -751,6 +831,7 @@ def rebuild_case(*, manifest, output_dir):
     ):
         raise ValueError("unsupported or malformed scoring manifest")
     build = source["build"]
+    portable = isinstance(build, dict) and build.get("path_base") == "data_root"
     if not isinstance(build, dict) or set(build) != {
         "source_config",
         "source_config_sha256",
@@ -760,9 +841,13 @@ def rebuild_case(*, manifest, output_dir):
         "time_from",
         "time_to",
         "max_records",
-    }:
+    } | ({"path_base"} if portable else set()):
         raise ValueError("malformed scoring manifest build")
     ledger = source["input_sha256"]
+    if portable:
+        data_root = _taxonomy._data_root(data_root)
+        for reference in ledger:
+            _taxonomy._resolve_reference(reference, data_root)
     if (
         not isinstance(ledger, dict)
         or not ledger
@@ -783,8 +868,12 @@ def rebuild_case(*, manifest, output_dir):
     ):
         raise ValueError("malformed scoring manifest input ledger")
     return _build_case(
-        source_config=build["source_config"],
-        splits=build["splits"],
+        source_config=_taxonomy._resolve_reference(build["source_config"], data_root)
+        if portable
+        else build["source_config"],
+        splits=_taxonomy._resolve_reference(build["splits"], data_root)
+        if portable
+        else build["splits"],
         case_id=build["case_id"],
         time_from=build["time_from"],
         time_to=build["time_to"],
@@ -792,6 +881,7 @@ def rebuild_case(*, manifest, output_dir):
         max_records=build["max_records"],
         expected_manifest=source,
         manifest_snapshot=manifest_snapshot,
+        data_root=data_root if portable else None,
     )
 
 
@@ -812,6 +902,8 @@ def main(argv=None):
     rebuild = commands.add_parser("rebuild")
     rebuild.add_argument("--manifest", required=True)
     rebuild.add_argument("--output-dir", required=True)
+    build.add_argument("--data-root")
+    rebuild.add_argument("--data-root")
     args = vars(cli.parse_args(argv))
     command = args.pop("command")
     result = (
