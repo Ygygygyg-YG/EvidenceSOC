@@ -21,32 +21,32 @@
   },
   "shortfall_reason": "The two fixed AIT test scenarios have only a few distinct attack phases; slicing dense scans into extra windows would create correlated duplicates.",
   "ablation_case_ids": [
-    "shaw-test-attack-dns-recon",
-    "shaw-test-attack-privilege-escalation",
-    "shaw-test-attack-remote-command",
-    "shaw-test-attack-web-recon",
-    "shaw-test-attack-webshell-upload",
-    "wilson-test-attack-dns-exfiltration",
-    "wilson-test-attack-dns-recon",
-    "wilson-test-attack-privilege-escalation",
-    "wilson-test-attack-remote-command",
-    "wilson-test-attack-web-recon",
-    "wilson-test-attack-webshell-upload",
-    "shaw-test-normal-apache-early",
-    "shaw-test-normal-apache-late",
-    "shaw-test-normal-audit-early",
-    "shaw-test-normal-audit-late",
-    "shaw-test-normal-dnsmasq-early",
-    "wilson-test-normal-apache-early",
-    "wilson-test-normal-apache-late",
-    "wilson-test-normal-audit-early",
-    "wilson-test-normal-audit-late",
-    "wilson-test-normal-dnsmasq-early",
-    "wilson-test-normal-dnsmasq-late"
+    "ait-3174d9bce2c76256141a7ecd",
+    "ait-76770d797c555cd9330b11fa",
+    "ait-8f1c3f910daf80094c66533b",
+    "ait-96293cab3e21b6cfa5bb605e",
+    "ait-21887c24004c4b9fc9237268",
+    "ait-6e0fcf3546af21557a088d08",
+    "ait-0e792b623775547364e4748e",
+    "ait-5a6fc6196ca1354cec874273",
+    "ait-d198a91a165a96103e320ea2",
+    "ait-f62148bdfdc29c83f078be92",
+    "ait-95155c4565b9b94426d99bc5",
+    "ait-59e5106f749b7a5231c53f94",
+    "ait-847e06df779aa40e119c6bff",
+    "ait-517b658800f1d1be8bdb047e",
+    "ait-01cf26383c40c0635e8bf88f",
+    "ait-65ca384561a7baac71075258",
+    "ait-f6ad16e37ebdf1db952755a1",
+    "ait-bfaedf153fe35de61e967ac2",
+    "ait-a60c076568904119c9921d8a",
+    "ait-fb785ed6ecc74ac87d421fd3",
+    "ait-9feb219752cfffbeb73fb95f",
+    "ait-43f5e460b49f6be31961dda2"
   ],
   "cases": [
     {
-      "case_id": "shaw-test-attack-dns-recon",
+      "case_id": "ait-3174d9bce2c76256141a7ecd",
       "scenario": "shaw",
       "class": "attack",
       "phase": "dns-recon",
@@ -65,12 +65,13 @@
         "normal": 4,
         "unknown": 0
       },
-      "scoring_manifest_sha256": "43567f0259ef0096b4c1da438115fe5accb5abeee4f1b304b1a954a8734e5b16",
-      "agent_manifest_sha256": "9d1c04b7f458ad654f6302fe77a1b7b76e064662bc4490127ae7d9028ed42842",
-      "rebuild_verified": true
+      "scoring_manifest_sha256": "02c298dc9cbda9b2b1310e9ec9b78acdffe5140c8097d305e7fe771e56a03a99",
+      "agent_manifest_sha256": "484ba4b6121d2e8e6348281bf6fd06f1751897a9f99bc86665b41b687d3df577",
+      "rebuild_verified": true,
+      "legacy_case_id": "shaw-test-attack-dns-recon"
     },
     {
-      "case_id": "shaw-test-attack-privilege-escalation",
+      "case_id": "ait-76770d797c555cd9330b11fa",
       "scenario": "shaw",
       "class": "attack",
       "phase": "privilege-escalation",
@@ -91,12 +92,13 @@
         "normal": 28,
         "unknown": 0
       },
-      "scoring_manifest_sha256": "19219ffb54ef695fc98552fc1137d476671f0b8cb0a5e335ad9288f584e78a77",
-      "agent_manifest_sha256": "1bf9c31663ca3a52a4afde6f823a5274c247a44847dce7c5c8964e488ee019f2",
-      "rebuild_verified": true
+      "scoring_manifest_sha256": "c215b68683f2af4b2116126dbcc88ab669148bb42dd9f9d02670610e93638070",
+      "agent_manifest_sha256": "619f73f3de429f02fdbbf386b91ec0dd237b2cf76cd98ff05733097e2a58c4da",
+      "rebuild_verified": true,
+      "legacy_case_id": "shaw-test-attack-privilege-escalation"
     },
     {
-      "case_id": "shaw-test-attack-remote-command",
+      "case_id": "ait-8f1c3f910daf80094c66533b",
       "scenario": "shaw",
       "class": "attack",
       "phase": "remote-command",
@@ -114,12 +116,13 @@
         "normal": 0,
         "unknown": 0
       },
-      "scoring_manifest_sha256": "9bff784482bfb793d29b2d0e52c6c913f0c7d79072e71527cf3c9fa6a306e9d5",
-      "agent_manifest_sha256": "9a524064e0f6537708dfba5a2a47e22eac065b3a414afd201b57ad8305aa0ec4",
-      "rebuild_verified": true
+      "scoring_manifest_sha256": "ee9848bb853c62b8a6be49ef70349f54e4196d3d449f1b6b3b6cf84b820c0537",
+      "agent_manifest_sha256": "4991381944700fa8ffbaf0a2329fd91ceb7707a8d4f141923ada4777ecc1bb29",
+      "rebuild_verified": true,
+      "legacy_case_id": "shaw-test-attack-remote-command"
     },
     {
-      "case_id": "shaw-test-attack-web-recon",
+      "case_id": "ait-96293cab3e21b6cfa5bb605e",
       "scenario": "shaw",
       "class": "attack",
       "phase": "web-recon",
@@ -137,12 +140,13 @@
         "normal": 0,
         "unknown": 0
       },
-      "scoring_manifest_sha256": "4b500d179e33c0b965999fe7bc4109fc43b00104b46115a2ee2f77920396e69e",
-      "agent_manifest_sha256": "a996769a03ed36100dd5b093313baeb7ee0aeb4c65ee7eb47fa8b7d83cb0791e",
-      "rebuild_verified": true
+      "scoring_manifest_sha256": "c008882de8efda672d762d492bb4d7d3fbdb858c394902a4e7c4b2d8e6d6a818",
+      "agent_manifest_sha256": "39f51a80015dd26dbbaad2e2108a176b1dca25349193dde4c72c8ce239f76e3b",
+      "rebuild_verified": true,
+      "legacy_case_id": "shaw-test-attack-web-recon"
     },
     {
-      "case_id": "shaw-test-attack-webshell-upload",
+      "case_id": "ait-21887c24004c4b9fc9237268",
       "scenario": "shaw",
       "class": "attack",
       "phase": "webshell-upload",
@@ -160,12 +164,13 @@
         "normal": 0,
         "unknown": 0
       },
-      "scoring_manifest_sha256": "4e2744f5637acc0a93552c7e2314e50993ad60372e428dfb24cd81413ce2a117",
-      "agent_manifest_sha256": "1e6fc4e1d5b8d091e626fc7f83b82218260e693de3c7d5121cfef42e3420bfda",
-      "rebuild_verified": true
+      "scoring_manifest_sha256": "fa61be7b2b1fe49decab4c4e09f7d139eeb83bd20437ec182cac162aa3bc3e42",
+      "agent_manifest_sha256": "b7638a93e55d971bf92a9a05bc081fd2f7bea7ec3cc71896f223249d0f9fdafe",
+      "rebuild_verified": true,
+      "legacy_case_id": "shaw-test-attack-webshell-upload"
     },
     {
-      "case_id": "shaw-test-normal-apache-early",
+      "case_id": "ait-59e5106f749b7a5231c53f94",
       "scenario": "shaw",
       "class": "normal",
       "phase": "apache-background-early",
@@ -183,12 +188,13 @@
         "normal": 9,
         "unknown": 0
       },
-      "scoring_manifest_sha256": "ff6fe999a357c937c4403f2ac9837f24bd5ecaf897acbdbb85bb6ebe44966cd6",
-      "agent_manifest_sha256": "9a8e2bd92b1af52f179b7bbbe7b6947825ffca88b71accda5cc0c2666a0cdf62",
-      "rebuild_verified": true
+      "scoring_manifest_sha256": "2a5c844c141a10e966730466f5c003bd4ea4839e4da218b16d87b9bcbd7fe731",
+      "agent_manifest_sha256": "ceadfcbc046df052fc8b1b52d6b6acc670a2b9b1dff87e85954b85f14a02c74a",
+      "rebuild_verified": true,
+      "legacy_case_id": "shaw-test-normal-apache-early"
     },
     {
-      "case_id": "shaw-test-normal-apache-late",
+      "case_id": "ait-847e06df779aa40e119c6bff",
       "scenario": "shaw",
       "class": "normal",
       "phase": "apache-background-late",
@@ -206,12 +212,13 @@
         "normal": 19,
         "unknown": 0
       },
-      "scoring_manifest_sha256": "9826d334be420c8b35e703742df4ad075cc5112b89ab8393b0ffd4348d5bd285",
-      "agent_manifest_sha256": "4be96ef7797741f7337c9a4293198ce2ffb6c433bc41917b1226bd9849d8e313",
-      "rebuild_verified": true
+      "scoring_manifest_sha256": "cb4534178e830e710affdf0e5c31c232f6315ed5564594cd8d866b943484c68f",
+      "agent_manifest_sha256": "d0d219fed2ab5d68fcf1cba1e9b876b8373d31ed646ecc874e4441d9b51ebcff",
+      "rebuild_verified": true,
+      "legacy_case_id": "shaw-test-normal-apache-late"
     },
     {
-      "case_id": "shaw-test-normal-audit-early",
+      "case_id": "ait-517b658800f1d1be8bdb047e",
       "scenario": "shaw",
       "class": "normal",
       "phase": "intranet-audit-background-early",
@@ -229,12 +236,13 @@
         "normal": 8,
         "unknown": 0
       },
-      "scoring_manifest_sha256": "6ba91c3614189a785c6f0070449016ffc1617e436120262f6514a349766b3c80",
-      "agent_manifest_sha256": "fc066dc975b2e95196a5c443e824d4ca5456ed52e6198657120cc2c0f6730b6f",
-      "rebuild_verified": true
+      "scoring_manifest_sha256": "64fdcfb964f911611d40dffe571d8e60b2c9ec8dff9e28af61b62af46f797ebc",
+      "agent_manifest_sha256": "baf8b535d2e517541b10047aec7b3dd82920b9c3f9abdddbbdcec57d3c418a1f",
+      "rebuild_verified": true,
+      "legacy_case_id": "shaw-test-normal-audit-early"
     },
     {
-      "case_id": "shaw-test-normal-audit-late",
+      "case_id": "ait-01cf26383c40c0635e8bf88f",
       "scenario": "shaw",
       "class": "normal",
       "phase": "intranet-audit-background-late",
@@ -252,12 +260,13 @@
         "normal": 8,
         "unknown": 0
       },
-      "scoring_manifest_sha256": "b980525bc9b2584c8254667104a21b9c8bff297dc36edb4925eef7be7f4e6983",
-      "agent_manifest_sha256": "1bb2293a2f48d10f80206e2f5752073cb22515d52a87038f37e8302ec2049bd9",
-      "rebuild_verified": true
+      "scoring_manifest_sha256": "5f4189dbe2e8e59d0b34b2364c1cb47e4d914686a233de0099eeb4ec4b36280c",
+      "agent_manifest_sha256": "10f737364fd71d70223595be2cd9bcc51fff0e961a8635e92382ab95430dab7d",
+      "rebuild_verified": true,
+      "legacy_case_id": "shaw-test-normal-audit-late"
     },
     {
-      "case_id": "shaw-test-normal-dnsmasq-early",
+      "case_id": "ait-65ca384561a7baac71075258",
       "scenario": "shaw",
       "class": "normal",
       "phase": "dnsmasq-background-early",
@@ -275,12 +284,13 @@
         "normal": 56,
         "unknown": 0
       },
-      "scoring_manifest_sha256": "ab1a1e5fb341418966a6bc119c33158836f21ecf4dd1a32266006d1414f67797",
-      "agent_manifest_sha256": "28ac9f5af69748d02124690b08d5d39f6cdf848238df7c23437a80601a3e1ac1",
-      "rebuild_verified": true
+      "scoring_manifest_sha256": "dc0c232992ae670643cdab87ad88351b7ce81ab754cba60f8f96ca8269bb47c2",
+      "agent_manifest_sha256": "c1abbdaa5d3bf7ff8cdc98a2616ba9d331361a5187955d351f2a93129aff05c7",
+      "rebuild_verified": true,
+      "legacy_case_id": "shaw-test-normal-dnsmasq-early"
     },
     {
-      "case_id": "wilson-test-attack-dns-exfiltration",
+      "case_id": "ait-6e0fcf3546af21557a088d08",
       "scenario": "wilson",
       "class": "attack",
       "phase": "dns-exfiltration",
@@ -298,12 +308,13 @@
         "normal": 0,
         "unknown": 0
       },
-      "scoring_manifest_sha256": "0bb5f9caa8ca934752782e6d12dc711cc1ce4112d1fe4bd5fea4b9348b280d51",
-      "agent_manifest_sha256": "8980ad56f29bfad1c3504cfdce3b17382b7af05f7da1096b13b29d9c7dab6ac5",
-      "rebuild_verified": true
+      "scoring_manifest_sha256": "e490e08a54b411889c5837990e3638940130a105ad3750640cb232a9c98494d6",
+      "agent_manifest_sha256": "5bfa053bb32223ac901210020c00c5190c7627a43d3ca1a52f9919526b2f799a",
+      "rebuild_verified": true,
+      "legacy_case_id": "wilson-test-attack-dns-exfiltration"
     },
     {
-      "case_id": "wilson-test-attack-dns-recon",
+      "case_id": "ait-0e792b623775547364e4748e",
       "scenario": "wilson",
       "class": "attack",
       "phase": "dns-recon",
@@ -321,12 +332,13 @@
         "normal": 0,
         "unknown": 0
       },
-      "scoring_manifest_sha256": "402d3219c5cdf35d11c5c048655b9662f9757611c669354666e12abe6de08e0e",
-      "agent_manifest_sha256": "67b3849113a9c19d84fc4fa448ac3ea4413a84af42eefae1083bc438ee8bf997",
-      "rebuild_verified": true
+      "scoring_manifest_sha256": "b04ec121958ef95758d4132c36929db3f8b93f0e20e2300a61f8ad28b1cb14fb",
+      "agent_manifest_sha256": "9d2ea93034e34e2a3c864bb168908b982ca7668d6cbfc17b608dc4c6a3d5eb74",
+      "rebuild_verified": true,
+      "legacy_case_id": "wilson-test-attack-dns-recon"
     },
     {
-      "case_id": "wilson-test-attack-privilege-escalation",
+      "case_id": "ait-5a6fc6196ca1354cec874273",
       "scenario": "wilson",
       "class": "attack",
       "phase": "privilege-escalation",
@@ -347,12 +359,13 @@
         "normal": 8,
         "unknown": 0
       },
-      "scoring_manifest_sha256": "6a21dcd452affce47a046ced85264d8e0d049425d1f62cce7b15a34f18d5d307",
-      "agent_manifest_sha256": "f8d4dacdf8911b9c8d4a9566c47e8c47fef1a816c3ed3c68efa07a722507b646",
-      "rebuild_verified": true
+      "scoring_manifest_sha256": "49a5d71f0d5afbcb3b656f92b086a6532f2e5d90f163e43cbd80b076dd8f9308",
+      "agent_manifest_sha256": "c1d88b9654f21b5ceb3e9701232639ab23a3059d0dd9c85bc6d54b17946ed856",
+      "rebuild_verified": true,
+      "legacy_case_id": "wilson-test-attack-privilege-escalation"
     },
     {
-      "case_id": "wilson-test-attack-remote-command",
+      "case_id": "ait-d198a91a165a96103e320ea2",
       "scenario": "wilson",
       "class": "attack",
       "phase": "remote-command",
@@ -370,12 +383,13 @@
         "normal": 0,
         "unknown": 0
       },
-      "scoring_manifest_sha256": "fe1403249380ffb19a7a0cf18d5e2f8754c854ed18682e755d952f7a7790e201",
-      "agent_manifest_sha256": "ae0796b090f4888f99c4a9672be75fbb61a52a9371cb47bae79bfce060bf9f47",
-      "rebuild_verified": true
+      "scoring_manifest_sha256": "3ecb45656f445f56e7a8acbcd6f0b0999634849a22a25c2e18699d7be9d82594",
+      "agent_manifest_sha256": "a91e0221d46b3a31b26b1fde7a0569a141c41a9dfc6e6b8ee2ef967ebab2ea4b",
+      "rebuild_verified": true,
+      "legacy_case_id": "wilson-test-attack-remote-command"
     },
     {
-      "case_id": "wilson-test-attack-web-recon",
+      "case_id": "ait-f62148bdfdc29c83f078be92",
       "scenario": "wilson",
       "class": "attack",
       "phase": "web-recon",
@@ -393,12 +407,13 @@
         "normal": 0,
         "unknown": 0
       },
-      "scoring_manifest_sha256": "8fde014e2eada19a175961671c0efcb684df6768ef0e13400813d81ae74c5609",
-      "agent_manifest_sha256": "ccebb4653486785256739594a555aad68cd4da46e671a75868acf5356a7b3a79",
-      "rebuild_verified": true
+      "scoring_manifest_sha256": "1e65c2ebdadf8644d74f35a7ad73fe3307cce3d7c5a50c532adaeceac44337fc",
+      "agent_manifest_sha256": "aec62c56732e23e40557a0ed929a5c8e5fe7452062f81cce738819e5bed35bc5",
+      "rebuild_verified": true,
+      "legacy_case_id": "wilson-test-attack-web-recon"
     },
     {
-      "case_id": "wilson-test-attack-webshell-upload",
+      "case_id": "ait-95155c4565b9b94426d99bc5",
       "scenario": "wilson",
       "class": "attack",
       "phase": "webshell-upload",
@@ -416,12 +431,13 @@
         "normal": 0,
         "unknown": 0
       },
-      "scoring_manifest_sha256": "2d27eb63cec00658a6e173ee8d4e9a22b365b9abb89dbf8a24e49d413a430cf5",
-      "agent_manifest_sha256": "11255440a33736a37240b8022efec8684ef08c9334ccd51d3121e7ad629cfaf6",
-      "rebuild_verified": true
+      "scoring_manifest_sha256": "637ccaa90a2dbdcd5b916da60e74acf567c40b8f22f612af73ae45706795156c",
+      "agent_manifest_sha256": "e6e3f92bbe71a41f0c0aca04363ba2516f2402c5a53fc187fb2ce4477ad687d9",
+      "rebuild_verified": true,
+      "legacy_case_id": "wilson-test-attack-webshell-upload"
     },
     {
-      "case_id": "wilson-test-normal-apache-early",
+      "case_id": "ait-f6ad16e37ebdf1db952755a1",
       "scenario": "wilson",
       "class": "normal",
       "phase": "apache-background-early",
@@ -439,12 +455,13 @@
         "normal": 18,
         "unknown": 0
       },
-      "scoring_manifest_sha256": "343fca986aca861f4daa27a96947a2330f1984c53306a4cb7e687acde5de64d4",
-      "agent_manifest_sha256": "cb2a0079e7636ed0fba97711ddaf1cb08b1dc7dafea6d250c752ad4438d7844b",
-      "rebuild_verified": true
+      "scoring_manifest_sha256": "0ec95740b46420a294ac72e21fc66fb65842d9a85e94bd2435b41f5652967e64",
+      "agent_manifest_sha256": "f87a5079a260dd294816def3045d098a921677ed574497702dea4c5b30e8b8a1",
+      "rebuild_verified": true,
+      "legacy_case_id": "wilson-test-normal-apache-early"
     },
     {
-      "case_id": "wilson-test-normal-apache-late",
+      "case_id": "ait-bfaedf153fe35de61e967ac2",
       "scenario": "wilson",
       "class": "normal",
       "phase": "apache-background-late",
@@ -462,12 +479,13 @@
         "normal": 14,
         "unknown": 0
       },
-      "scoring_manifest_sha256": "e2b6b4208782e4b47c0f417c292e1dcea7d7da1a7abb1a5e4ee2451fe3ae4ae4",
-      "agent_manifest_sha256": "068d387a76d9b75d2d90581275c42b9b5f2aa132a187f7026cd66fb9f96e1031",
-      "rebuild_verified": true
+      "scoring_manifest_sha256": "ccb6ed87abc0f120e58f1d91ef6712874265a6143666721a0c482703dd57d459",
+      "agent_manifest_sha256": "856dae041de889a5ae15b03d780bb576f6d8df48b74f28d68f283f2700ce26ad",
+      "rebuild_verified": true,
+      "legacy_case_id": "wilson-test-normal-apache-late"
     },
     {
-      "case_id": "wilson-test-normal-audit-early",
+      "case_id": "ait-a60c076568904119c9921d8a",
       "scenario": "wilson",
       "class": "normal",
       "phase": "intranet-audit-background-early",
@@ -485,12 +503,13 @@
         "normal": 8,
         "unknown": 0
       },
-      "scoring_manifest_sha256": "d17fd6f0c5e25c422e003beb49d2d07ab998b4fd6c72165bcf6366dd070ca8c5",
-      "agent_manifest_sha256": "004bf10114a2e28e875f82508f9c35f3c7eb4c719a39fba0e8cdbeced18911ca",
-      "rebuild_verified": true
+      "scoring_manifest_sha256": "ee3a67de8025d0e89484d166c322f39688e1898e03d49110651053b612600d3c",
+      "agent_manifest_sha256": "c3c10e4e12f5dbf6b081f9c633a5cdcd566cdb866b15fb8f684e9cdbefcf9869",
+      "rebuild_verified": true,
+      "legacy_case_id": "wilson-test-normal-audit-early"
     },
     {
-      "case_id": "wilson-test-normal-audit-late",
+      "case_id": "ait-fb785ed6ecc74ac87d421fd3",
       "scenario": "wilson",
       "class": "normal",
       "phase": "intranet-audit-background-late",
@@ -508,12 +527,13 @@
         "normal": 10,
         "unknown": 0
       },
-      "scoring_manifest_sha256": "d588942c783fdde6f289fb6007bfe030a6f1bb41d4e805330bb73d3de4986210",
-      "agent_manifest_sha256": "714b9e86fef2044d4d1ab4d2b3d5d0aeb0cb52ab26b220ab07429301556dd918",
-      "rebuild_verified": true
+      "scoring_manifest_sha256": "824fc9bd241c40bda350130e22c433946b7ce8eadebaac75d82fdda55f4bf47a",
+      "agent_manifest_sha256": "6c5d7c11ba36ebf47940b7cf40e7ad634606289a69045060f7d13cb9590b5e00",
+      "rebuild_verified": true,
+      "legacy_case_id": "wilson-test-normal-audit-late"
     },
     {
-      "case_id": "wilson-test-normal-dnsmasq-early",
+      "case_id": "ait-9feb219752cfffbeb73fb95f",
       "scenario": "wilson",
       "class": "normal",
       "phase": "dnsmasq-background-early",
@@ -531,12 +551,13 @@
         "normal": 746,
         "unknown": 0
       },
-      "scoring_manifest_sha256": "ecf7e87c8cdfa705073ff4040e6d9574f43d088bb0157ca90a227caf3de84fe4",
-      "agent_manifest_sha256": "8c2c8578469ed10bf4934e74490d95c6a4190d6ef202e0500f4e6a6fb9039af8",
-      "rebuild_verified": true
+      "scoring_manifest_sha256": "e7ff8285779180f744c20c74199458a169346f65424d381759626247668e84a0",
+      "agent_manifest_sha256": "6f4f2440d8db299ff22871edc48332b7458f526a5b86064ffc2514483ceb5a86",
+      "rebuild_verified": true,
+      "legacy_case_id": "wilson-test-normal-dnsmasq-early"
     },
     {
-      "case_id": "wilson-test-normal-dnsmasq-late",
+      "case_id": "ait-43f5e460b49f6be31961dda2",
       "scenario": "wilson",
       "class": "normal",
       "phase": "dnsmasq-background-late",
@@ -554,9 +575,11 @@
         "normal": 110,
         "unknown": 0
       },
-      "scoring_manifest_sha256": "816cf25c3e5932962786f6647db0370ed4f0f1873bca89687cebe0365fa646b8",
-      "agent_manifest_sha256": "d0203ef11cc63671baf9d74d3a06e6c7d0d3bd077555158c0cecc17f3aa80bd8",
-      "rebuild_verified": true
+      "scoring_manifest_sha256": "41b232d4665f18ea2e937f2ba7831e6d01a92499209bee0752993112f5e67979",
+      "agent_manifest_sha256": "39b271e717490f8833d71b3ed47d741205401904231e5eeb840130e684a51431",
+      "rebuild_verified": true,
+      "legacy_case_id": "wilson-test-normal-dnsmasq-late"
     }
-  ]
+  ],
+  "case_identity": "sha256 of dataset/scenario/split/window/source paths/max_records; labels and legacy IDs excluded"
 }

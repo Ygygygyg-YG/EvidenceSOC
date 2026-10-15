@@ -4,7 +4,9 @@
 
 Step 1～3：已验收。原工作区的 60 个文件及 Git 状态复核保持不变。
 
-受测源码提交：`1e857709d2c02d4e0643e6f5dbefe913e60b4cd9`。本记录提交只补充文档，未更改受测源码；本地 `main` 仍为 `1f1dbfa`。
+Step 1～3 的历史受测源码提交为 `1e857709d2c02d4e0643e6f5dbefe913e60b4cd9`，随后 `23b49c9` / `2105c86` 补充记录及文档格式。
+
+Step 4～5 的实现代码提交为 `9cc4d51066ca9a22c5befd52beb3286624495038`。Step 4 全量运行时基底 HEAD 为 `2105c86`，三个新增/修改测试文件的当时 SHA256 已记录，并逐一核对等于 `9cc4d51` 的 Git blob；后端生产源码在两提交间没有变化。538 项 AIT 测试在实现文件停止编辑后运行，再提交为同一 `9cc4d51`。复核证据为 `step4-service-acceptance.json`、`step5-evals-commit.xml` 和 `step45-base-verification.json`。Step 5 最终选择清单提交及实际重建版本另见专项记录。本地 `main` 仍为 `1f1dbfa`。
 
 ## 1. 文件保全
 
