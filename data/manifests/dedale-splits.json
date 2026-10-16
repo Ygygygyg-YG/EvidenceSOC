@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "dataset_id": "dedale-v2.1",
+  "timezone": "UTC",
+  "bounds": "[start,end)",
+  "date_evidence": {
+    "official_scenario_url": "https://dedale.inria.fr/attack_scenario.html",
+    "official_days": "2024-12-23 through 2025-01-19 inclusive",
+    "timezone_basis": "Original @timestamp UTC Z; website alone does not specify timezone",
+    "raw_full_range_verified": false
+  },
+  "periods": [
+    {
+      "split": "development",
+      "purpose": "benign_calibration",
+      "start": "2024-12-23T00:00:00Z",
+      "end": "2025-01-06T00:00:00Z"
+    },
+    {
+      "split": "test",
+      "purpose": "external_test",
+      "start": "2025-01-06T00:00:00Z",
+      "end": "2025-01-20T00:00:00Z"
+    }
+  ],
+  "recent_months": 24,
+  "window_seconds": 1800,
+  "max_records": 100,
+  "seed": 42,
+  "benign_per_host_day": 1,
+  "window_grid": "UTC half-hour; start=floor(timestamp/1800)*1800",
+  "attack_window_rule": "greedy_class1_timestamp_nonoverlapping",
+  "attack_window_registration": {
+    "input": "Scoring-side official labels.entries metadata: source, host, timestamp, label=malicious (class_1)",
+    "group": ["source", "host"],
+    "order": "Ascending UTC class_1 timestamp; input label order has no effect",
+    "window": "[first uncovered class_1 timestamp, timestamp+1800s)",
+    "next": "A timestamp inside the preceding registered window creates no new candidate; timestamp>=end starts the next window",
+    "boundary": "Exclude and record registered candidates crossing the test period boundary; retain outside-test candidates with an explicit reason",
+    "normal": "UTC half-hour grid; exclude every grid window intersecting a registered attack candidate before seed-42 selection of one reliable benign window per source/host/UTC day",
+    "projection": "Earliest 100 unique observations by observed_at,external_id within the host window; labels never reorder or prioritize projected evidence",
+    "accounting": "Every parsed row contributes once to full-scan statistics and independently to each matching grid/registered window; every candidate is selected or excluded with a reason",
+    "ablation": "Use the same eligible test cases, M_D=N_D; no repeated slices to fill a target count"
+  },
+  "event_sort": [
+    "observed_at",
+    "external_id"
+  ],
+  "dedup_key": "source+canonical_event_fingerprint",
+  "campaign_id": "dedale-v2.1-single-campaign",
+  "overlap_policy": "nonoverlapping registered attack windows per source/host; overlapping grid candidates excluded; cross-host same campaign correlated",
+  "preregistration_revision": {
+    "revision": 2,
+    "date": "2026-10-15",
+    "previous_split_sha256": "778b9efd5f03d9646ef62871c888bacea6ceb45e5762602e0c48f037edec1061",
+    "reason": "Register input-observable attack candidate windows before any formal case selection; earliest-100 UTC grid projection can hide sparse class_1 evidence in benign background",
+    "formal_cases_generated": false,
+    "model_runs": 0,
+    "scope_change": "None: fixed 1800 seconds, one source/host, at most 100 records, alert at midpoint with +/-900-second scope"
+  },
+  "status": "preregistered_not_frozen"
+}

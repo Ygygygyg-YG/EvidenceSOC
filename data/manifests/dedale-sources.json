@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "dataset_id": "dedale-v2.1",
+  "doi": "10.57745/Y5JLDG",
+  "version": "2.1",
+  "release_time": "2026-09-25T12:40:15Z",
+  "license": "CC-BY-4.0",
+  "metadata_snapshot": {
+    "path": "metadata/official-v2.1.json",
+    "sha256": "80b328249f3bde761bb908611ceedf4059eef33540cd0d24b1dd3442c69435f9",
+    "url": "https://entrepot.recherche.data.gouv.fr/api/datasets/:persistentId/versions/2.1?persistentId=doi:10.57745/Y5JLDG"
+  },
+  "archives": [
+    {
+      "path": "system_logs_auditbeat.zip",
+      "datafile_id": 717881,
+      "bytes": 10896385060,
+      "md5": "d01b50094a93aa5ebc8a46e6150d256b",
+      "url": "https://entrepot.recherche.data.gouv.fr/api/access/datafile/717881",
+      "role": "observable_system_logs"
+    },
+    {
+      "path": "system_logs_labels.zip",
+      "datafile_id": 717882,
+      "bytes": 2669407,
+      "md5": "455d0a7042531eff74285006f97822e4",
+      "url": "https://entrepot.recherche.data.gouv.fr/api/access/datafile/717882",
+      "role": "scoring_only"
+    },
+    {
+      "path": "system_logs_winlogbeat.zip",
+      "datafile_id": 717892,
+      "bytes": 27123250952,
+      "md5": "7af54ba2977f7535d4c07beb6b1ec657",
+      "url": "https://entrepot.recherche.data.gouv.fr/api/access/datafile/717892",
+      "role": "observable_system_logs"
+    }
+  ],
+  "status": "acquiring_not_frozen"
+}

@@ -104,7 +104,7 @@ class AlertContextRepository:
             .where(
                 SecurityEventTable.event_id.in_(raw_event_ids),
                 SecurityEventTable.observed_at >= lower,
-                SecurityEventTable.observed_at <= upper,
+                SecurityEventTable.observed_at < upper,
             )
             .order_by(
                 SecurityEventTable.observed_at,

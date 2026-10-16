@@ -62,7 +62,7 @@ def _database() -> sessionmaker[Session]:
     return sessionmaker(bind=engine, class_=Session)
 
 
-def test_repository_enforces_incident_allowlist_and_inclusive_window() -> None:
+def test_repository_enforces_incident_allowlist_and_half_open_window() -> None:
     sessions = _database()
     with sessions() as session:
         repository = AlertContextRepository(session)
@@ -72,7 +72,7 @@ def test_repository_enforces_incident_allowlist_and_inclusive_window() -> None:
             before_seconds=300,
             after_seconds=300,
             limit=200,
-        ) == ["EVT-in-window-1", "EVT-in-window-2"]
+        ) == ["EVT-in-window-1"]
 
         with pytest.raises(ToolNotFoundError):
             repository.list_event_ids(
@@ -82,6 +82,18 @@ def test_repository_enforces_incident_allowlist_and_inclusive_window() -> None:
                 after_seconds=300,
                 limit=200,
             )
+
+
+def test_repository_excludes_event_exactly_at_upper_bound() -> None:
+    sessions = _database()
+    with sessions() as session:
+        assert AlertContextRepository(session).list_event_ids(
+            incident_id="IN-1",
+            alert_id="AL-1",
+            before_seconds=300,
+            after_seconds=300,
+            limit=200,
+        ) == ["EVT-in-window-1"]
 
 
 class FakeRepository:

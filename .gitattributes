@@ -6,3 +6,6 @@
 *.gif binary
 *.ico binary
 *.pdf binary
+
+# Preserve the exact bytes bound to DEDALE preregistration and checkpoints.
+data/manifests/dedale*.json -text whitespace=blank-at-eol,space-before-tab,cr-at-eol

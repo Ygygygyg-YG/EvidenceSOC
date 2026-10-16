@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "dataset_id": "dedale-v2.1",
+  "original_labels": [
+    "benign",
+    "malicious",
+    "malicious-related"
+  ],
+  "class_1": "malicious",
+  "class_1_and_2_minus_class_1": "malicious-related",
+  "unmatched": "benign only for checked official exhaustive label archive and documented source/host scope; otherwise unscorable",
+  "scorable_hosts": {
+    "winlogbeat": [
+      "CLIENT1.breach.local",
+      "CLIENT2.breach.local"
+    ],
+    "auditbeat": [
+      "internalserver"
+    ]
+  },
+  "attack_decision": {
+    "malicious": true,
+    "malicious-related": null,
+    "benign": false,
+    "unscorable": null
+  },
+  "project_taxonomy": "Six project categories remain unchanged; verified attacks without justified mapping use out_of_taxonomy",
+  "attack_types": [],
+  "taxonomy_status": "out_of_taxonomy",
+  "attack_version": null,
+  "attack_version_reason": "No ATT&CK technique gold inferred from raw command strings or dates; applicability false pending independent review",
+  "case_rule": "attack if a retained observable malicious event; reliable benign only if every window event is benign; related-only/unknown windows unscorable",
+  "scoring_only_fields": [
+    "source_label",
+    "is_attack",
+    "attack_types",
+    "taxonomy_status",
+    "campaign_id",
+    "stage",
+    "applicability",
+    "mapping_evidence"
+  ],
+  "status": "preregistered_not_frozen"
+}

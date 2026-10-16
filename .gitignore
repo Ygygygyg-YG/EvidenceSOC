@@ -48,3 +48,6 @@ pytest-cache-files-*/
 
 # 本地文件备份
 /.backups/
+
+# DEDALE local source archives, scoring data and generated cases
+/data/dedale/
