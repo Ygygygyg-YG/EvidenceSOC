@@ -1,0 +1,125 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-10-16T13:48:41.360259+00:00",
+  "scope": "Final-selected DEDALE public-text annotation inventory tooling only",
+  "source_commit": "d6d2626656f05c0f9b2ef823bda6cf66e98a0296",
+  "previous_main": "764e2d0bba1756e6cb3447874d66db6fdbfbee33",
+  "source_sha256": {
+    "scripts/dedale_task12_leak_inventory.py": "cdd3c15aafc2a582c2c9a112a218f354d9ec49db5c9442eac19f53a0e032d0a6",
+    "evals/tests/test_dedale_leak_inventory.py": "085a9bbb72c2df6e5fd6a75b86eb09fdefb7c69ff8ee2e3d4a42f0e4c65d0e1e"
+  },
+  "behavior": {
+    "checks_five_artifacts_and_public_case_closure": true,
+    "scans_all_selected_attack_and_normal_public_strings_and_keys": true,
+    "annotation_rules": [
+      "prereview technique/tactic/MITRE/Txxxx patterns",
+      "literal ATT&CK",
+      "structured and message RuleName"
+    ],
+    "candidate_excerpts_bounded": true,
+    "zero_hits_still_pending_independent_review": true,
+    "does_not_modify_selected_artifacts": true,
+    "does_not_freeze_or_run_models": true
+  },
+  "validation": {
+    "regression_reports": [
+      {
+        "path": "D:\\传智杯\\.backups\\task12-readiness\\data\\dedale\\research\\dedale-final-qa-20261016T134443Z.xml",
+        "sha256": "f48ae134ca796c1baa9478a8be978f40617a8398c01c0c1bd35054dbb68f043c",
+        "counts": {
+          "tests": 471,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 1,
+          "passed": 470
+        }
+      },
+      {
+        "path": "D:\\传智杯\\.backups\\task12-readiness\\data\\dedale\\research\\dedale-alert-qa-20261016T134634Z.xml",
+        "sha256": "61804830ede875afa698e309fa82d81f7aec9ecd03c4fe1eb6ae2844d37ff46e",
+        "counts": {
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 7
+        }
+      }
+    ],
+    "aggregate_counts": {
+      "tests": 478,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1,
+      "passed": 477
+    },
+    "baseline_417_report": {
+      "path": "D:\\传智杯\\.backups\\task12-readiness\\data\\dedale\\research\\dedale-commit-ready-regression-2026-10-16.xml",
+      "sha256": "d5d5bc77059d3b34a649ffed25cf9d2dbcbd58474e348c8090b48aa5e8d6a3a8",
+      "counts": {
+        "tests": 417,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "passed": 417
+      }
+    },
+    "baseline_test_names_missing": [],
+    "red": {
+      "path": "D:\\传智杯\\.backups\\task12-readiness\\data\\dedale\\research\\dedale-leak-red-2026-10-16.xml",
+      "sha256": "95f6386d20ce9319241390f327d57561888fb45916efa62eca13f68f764be8e6",
+      "counts": {
+        "tests": 61,
+        "failures": 60,
+        "errors": 0,
+        "skipped": 1,
+        "passed": 0
+      }
+    },
+    "green": {
+      "path": "D:\\传智杯\\.backups\\task12-readiness\\data\\dedale\\research\\dedale-leak-green-2026-10-16.xml",
+      "sha256": "32c8cbabbf3a0fcfe0da4561738728323ca51dcff5106bf400ad4360041558a1",
+      "counts": {
+        "tests": 61,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 1,
+        "passed": 60
+      }
+    },
+    "skip_reason": "Windows environment does not permit unprivileged symbolic links; one new filesystem symlink test skipped.",
+    "ruff": {
+      "scope": [
+        "scripts/dedale_task12_leak_inventory.py",
+        "evals/tests/test_dedale_leak_inventory.py"
+      ],
+      "exit_code": 0
+    },
+    "whitespace_check_exit_code": 0,
+    "independent_static_review": {
+      "reviewer": "Codex independent review agent",
+      "actionable_P1_P2_findings": 0,
+      "limitations": "Static review only; runtime evidence comes from the separate regression reports."
+    }
+  },
+  "preservation": {
+    "all_15_bound_preparation_and_finalization_inputs_unchanged": true,
+    "changed_source_files": [
+      "evals/tests/test_dedale_leak_inventory.py",
+      "scripts/dedale_task12_leak_inventory.py"
+    ],
+    "existing_backend_frontend_and_runtime_sources_unchanged": true,
+    "new_markdown_files": []
+  },
+  "data_status": {
+    "task12_accepted": false,
+    "dataset_frozen": false,
+    "formal_model_runs": 0,
+    "remaining": [
+      "Complete both exhaustive raw scans",
+      "Complete independent neutral builds and exact artifact comparison",
+      "Review actual selected stage visibility and annotation candidates",
+      "Pass final audit and record an external immutable freeze receipt"
+    ]
+  }
+}
