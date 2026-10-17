@@ -162,6 +162,61 @@ def test_scans_all_retained_events_and_manifests_but_never_signs_review(inventor
     assert {path: sha256(path) for path in before} == before
 
 
+def test_public_priority_protocol_preserves_unsigned_complete_text_inventory(inventory, tree):
+    root, selection = tree
+    selection["protocol"] = "dedale-public-priority-v4"
+    save_selection(root, selection)
+    packet = inventory.build_inventory(cases_root=root)
+    assert packet["protocol"] == "dedale-public-priority-v4"
+    assert packet["selection_file_sha256"] == sha256(root / "selection.json")
+    assert packet["scan_complete"] is True and packet["complete"] is False
+    assert packet["scope"]["includes_attack_and_normal_cases"] is True
+    assert packet["statistics"]["selected_cases"] == 2
+    assert packet["statistics"]["selected_events"] == 3
+    assert len(packet["artifact_bindings"]) == 10
+
+
+def test_group_digests_cover_hits_after_excerpt_cap_and_later_groups(inventory, tree, monkeypatch):
+    root, selection = tree
+    first, second = selection["cases"]
+    change_events(root, selection, first, lambda values: values[0].update(
+        extra={"T" + str(number): "ordinary observed filename" for number in range(1000, 2101)}))
+    change_events(root, selection, second, lambda values: values[0].update(
+        extra={"observed_name": "ATT&CK-demo.exe"}))
+    packet = inventory.build_inventory(cases_root=root)
+    assert packet["statistics"]["candidate_hits_recorded"] == 1000
+    assert packet["statistics"]["candidate_hits_omitted"] > 0
+    groups = packet["candidate_groups"]
+    assert sum(group["count"] for group in groups) == packet["statistics"]["candidate_hits_total"]
+    assert any(group["case_id"] == second["case_id"] and group["rule"] == "literal_attck" for group in groups)
+    monkeypatch.setattr(inventory, "MAX_HITS", 10000)
+    uncapped = inventory.build_inventory(cases_root=root)
+    assert groups == uncapped["candidate_groups"]
+    keys = ("case_id", "file", "rule", "external_id", "path_sha256", "location", "value_sha256", "line_number")
+    for group in groups:
+        hits = [hit for hit in uncapped["candidate_hits"]
+                if all(hit[key] == group[key] for key in ("case_id", "file", "rule"))]
+        digest = hashlib.sha256()
+        for hit in hits:
+            identity = {key: hit[key] for key in keys if key in hit}
+            digest.update((canonical(identity) + "\n").encode("utf-8"))
+        assert group["count"] == len(hits)
+        assert group["sha256"] == digest.hexdigest()
+        assert group["example_hit"] == hits[0]
+
+
+def test_group_hit_identity_binds_complete_json_pointer(inventory, tree):
+    root, selection = tree
+    case = selection["cases"][0]
+    key = "T1059/" + "长" * 700
+    change_events(root, selection, case, lambda values: values[0].update(extra={key: "ordinary"}))
+    packet = inventory.build_inventory(cases_root=root)
+    hit = next(hit for hit in packet["candidate_hits"] if hit["location"] == "json_key")
+    path = "/extra/" + key.replace("~", "~0").replace("/", "~1")
+    assert hit["path_truncated"] is True
+    assert hit["path_sha256"] == hashlib.sha256(path.encode("utf-8")).hexdigest()
+
+
 @pytest.mark.parametrize("content", ["ATT&CK annotation", "att&ck", "T1059.001", "technique_id", "tacticName", "MITRE"])
 def test_normal_actual_event_message_is_scanned(inventory, tree, content):
     root, selection = tree

@@ -19,7 +19,7 @@ SCRIPT = ROOT / "evals/datasets/dedale/scan.py"
 
 
 @pytest.fixture
-def scanner():
+def scanner(monkeypatch):
     if not SCRIPT.exists():
 
         class MissingScanner:
@@ -29,7 +29,10 @@ def scanner():
         return MissingScanner()
     spec = importlib.util.spec_from_file_location("evals.datasets.dedale.scan", SCRIPT)
     module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
+    # Keep package imports and direct imports on the same fresh test module,
+    # and restore both aliases when the fixture finishes.
+    monkeypatch.setitem(sys.modules, spec.name, module)
+    monkeypatch.setattr(sys.modules["evals.datasets.dedale"], "scan", module, raising=False)
     spec.loader.exec_module(module)
     return module
 

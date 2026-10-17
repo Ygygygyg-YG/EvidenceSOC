@@ -26,7 +26,7 @@ from evals.datasets.dedale.common import (
     sha256,
     write_new,
 )
-from evals.datasets.dedale.neutralize import PROTOCOL, instant, neutral_case_id
+from evals.datasets.dedale.neutralize import instant, neutral_case_id
 from scripts.dedale_task12_stage_inventory import _json_object
 
 ARTIFACTS = frozenset({"agent/events.jsonl", "agent/manifest.json", "scoring/gold.jsonl",
@@ -45,8 +45,11 @@ RULE_KEY = re.compile(RULE_KEY_REGEX)
 MESSAGE_RULE = re.compile(MESSAGE_RULE_REGEX)
 MAX_HITS = 1000
 EXCERPT_LIMIT = 240
-PATH_LIMIT = 512
+PATH_LIMIT = 384
 PROVENANCE_FIELDS = ("archive", "relative_log_path", "line_number", "raw_line_sha256", "event_fingerprint")
+PROTOCOLS = frozenset({"dedale-neutral-v3", "dedale-public-priority-v4"})
+HIT_IDENTITY_FIELDS = ("case_id", "file", "rule", "external_id", "path_sha256",
+                       "location", "value_sha256", "line_number")
 
 
 def _require(condition, detail):
@@ -74,7 +77,7 @@ def _jsonl(path: Path) -> list[dict]:
 
 def _selection_cases(selection: dict) -> tuple[list[dict], dict]:
     cases, ledger = selection.get("cases"), selection.get("candidate_ledger")
-    _require(selection.get("protocol") == PROTOCOL and selection.get("dataset_id") == "dedale-v2.1"
+    _require(selection.get("protocol") in PROTOCOLS and selection.get("dataset_id") == "dedale-v2.1"
              and selection.get("split") == "test" and selection.get("official_label_archive_verified") is True
              and selection.get("candidate_closure") is True, "invalid final selection protocol or closure")
     _require(isinstance(cases, list) and bool(cases) and all(isinstance(row, dict) for row in cases),
@@ -205,15 +208,24 @@ def _scan_public(value, *, case: dict, file: str, state: dict, external_id=None)
     """Visit every key and string, even after the evidence excerpt cap is full."""
     def hit(rule, text, path, location, match_start=0, **extra):
         state["candidate_hits_total"] += 1
+        start = max(0, match_start - 60)
+        candidate = {
+            "case_id": case["case_id"], "case_is_attack": case["is_attack"], "file": file,
+            "external_id": external_id, "path": _bounded(path, PATH_LIMIT),
+            "path_sha256": hashlib.sha256(path.encode("utf-8")).hexdigest(),
+            "path_truncated": len(path) > PATH_LIMIT, "location": location, "rule": rule,
+            "excerpt": text[start:start + EXCERPT_LIMIT], "value_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+            "review_status": "requires_manual_review", **extra,
+        }
+        key = case["case_id"], file, rule
+        group = state["candidate_groups"].setdefault(key, {
+            "count": 0, "digest": hashlib.sha256(), "example_hit": candidate,
+        })
+        identity = {name: candidate[name] for name in HIT_IDENTITY_FIELDS if name in candidate}
+        group["digest"].update((canonical(identity) + "\n").encode("utf-8"))
+        group["count"] += 1
         if len(state["candidate_hits"]) < MAX_HITS:
-            start = max(0, match_start - 60)
-            state["candidate_hits"].append({
-                "case_id": case["case_id"], "case_is_attack": case["is_attack"], "file": file,
-                "external_id": external_id, "path": _bounded(path, PATH_LIMIT),
-                "path_truncated": len(path) > PATH_LIMIT, "location": location, "rule": rule,
-                "excerpt": text[start:start + EXCERPT_LIMIT], "value_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
-                "review_status": "requires_manual_review", **extra,
-            })
+            state["candidate_hits"].append(candidate)
 
     def inspect(text, path, location):
         state["inspected_json_keys" if location == "json_key" else "inspected_string_values"] += 1
@@ -263,7 +275,7 @@ def build_inventory(*, cases_root: Path) -> dict:
             actual = sha256(path)
             _require(actual == expected, "selected artifact SHA256 mismatch: " + relative)
             bindings.append({"case_id": case["case_id"], "path": relative, "sha256": actual})
-    state = {"candidate_hits": [], "candidate_hits_total": 0, "inspected_json_keys": 0,
+    state = {"candidate_hits": [], "candidate_groups": {}, "candidate_hits_total": 0, "inspected_json_keys": 0,
              "inspected_string_values": 0, "rule_name_values": Counter()}
     class_cases, class_events, labels = Counter(), Counter(), Counter()
     for case in cases:
@@ -281,7 +293,7 @@ def build_inventory(*, cases_root: Path) -> dict:
         _require(sha256(path) == binding["sha256"], "selected artifact SHA256 changed while reading")
     _public_inventory(cases_root, cases)
     return {
-        "schema_version": 1, "dataset_id": "dedale-v2.1", "protocol": PROTOCOL,
+        "schema_version": 1, "dataset_id": "dedale-v2.1", "protocol": selection["protocol"],
         "complete": False, "scan_complete": True, "reviewer": None, "review_status": "pending_independent_review",
         "selection_file_sha256": selection_hash,
         "selection_sha256": hashlib.sha256((canonical(selection) + "\n").encode("utf-8")).hexdigest(),
@@ -299,6 +311,11 @@ def build_inventory(*, cases_root: Path) -> dict:
         "matching_rules": {"annotation_regex": ANNOTATION_REGEX, "literal_attck_regex": ATTACK_REGEX,
                            "rule_name_key_regex": RULE_KEY_REGEX, "message_rule_name_regex": MESSAGE_RULE_REGEX},
         "rule_name_values": dict(sorted(state["rule_name_values"].items())), "candidate_hits": state["candidate_hits"],
+        "candidate_groups": [
+            {"case_id": key[0], "file": key[1], "rule": key[2], "count": group["count"],
+             "sha256": group["digest"].hexdigest(), "example_hit": group["example_hit"]}
+            for key, group in sorted(state["candidate_groups"].items())
+        ],
         "scope": {"all_selected_agent_manifests": True, "all_selected_agent_events": True,
                   "all_json_keys_and_string_values": True, "includes_attack_and_normal_cases": True,
                   "full_raw_archives_scanned": False, "model_invocations": 0},
@@ -306,6 +323,7 @@ def build_inventory(*, cases_root: Path) -> dict:
             "candidate_interpretation": "Independent review must distinguish publisher answer annotations from factual commands, process names, scripts and filenames; candidates are never automatically removed or relabeled.",
             "rule_name_hyphen": "A trimmed hyphen is benign; every other RuleName value requires manual review.",
             "candidate_count": "One candidate per matching rule and key/string, plus each non-hyphen RuleName occurrence; multiple matches in one string need not be separate candidates.",
+            "candidate_group_coverage": "Every hit, including omitted excerpts, contributes its complete path and value identity to a count and ordered SHA256 per case/public-file/rule. Independent dispositions must close over every group and cite actual group evidence.",
             "recording_limits": {"candidate_hits": MAX_HITS, "excerpt_characters": EXCERPT_LIMIT, "path_characters": PATH_LIMIT},
             "limitations": "Pattern inspection does not establish universal semantic absence. This packet does not repeat source acquisition, raw scans, label verification or the final acceptance audit, and cannot sign an independent review or authorize freeze.",
         },

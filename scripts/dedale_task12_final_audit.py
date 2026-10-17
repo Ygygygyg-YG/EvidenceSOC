@@ -1,4 +1,4 @@
-"""Audit final DEDALE v3 cases without changing or freezing any dataset."""
+"""Audit final DEDALE v3/v4 cases without changing or freezing any dataset."""
 from __future__ import annotations
 
 import argparse
@@ -24,7 +24,8 @@ def main(argv=None) -> int:
     for name in ("sources", "scan-splits", "splits", "label-policy", "data-root", "cases-root",
                  "prepared-root", "preparation-checkpoints", "output"):
         parser.add_argument("--" + name, type=Path, required=True)
-    for name in ("live-report", "live-events", "live-raw-events", "cross-path-report", "stage-review", "resource-report"):
+    for name in ("live-report", "live-events", "live-raw-events", "cross-path-report", "stage-review", "resource-report",
+                 "neutral-root", "neutral-policy", "leak-review"):
         parser.add_argument("--" + name, type=Path)
     args = parser.parse_args(argv)
     errors = []
@@ -47,7 +48,7 @@ def main(argv=None) -> int:
     except (ValueError, OSError) as exc:
         selection_path, selection = None, None
         errors.append({"file": "selection.json", "error": type(exc).__name__})
-    if not isinstance(selection, dict) or selection.get("protocol") != "dedale-neutral-v3":
+    if not isinstance(selection, dict) or selection.get("protocol") not in {"dedale-neutral-v3", "dedale-public-priority-v4"}:
         errors.append({"file": "selection.json", "error": "MissingNeutralProtocol"})
         selection = {"protocol": "dedale-neutral-v3"}
     report = audit_prepared(
@@ -57,6 +58,8 @@ def main(argv=None) -> int:
         live_report=load(args.live_report), live_events_path=args.live_events,
         live_raw_events_path=args.live_raw_events, cross_path_report=load(args.cross_path_report),
         review_report=load(args.stage_review), resource_report=load(args.resource_report),
+        neutral_root=args.neutral_root, neutral_policy=args.neutral_policy,
+        leak_review=load(args.leak_review),
     )
     report["input_errors"] = errors
     report["selection_sha256"] = sha256(selection_path) if selection_path and selection_path.is_file() else None
