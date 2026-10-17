@@ -27,6 +27,8 @@ def main(argv=None) -> int:
     for name in ("live-report", "live-events", "live-raw-events", "cross-path-report", "stage-review", "resource-report",
                  "neutral-root", "neutral-policy", "leak-review"):
         parser.add_argument("--" + name, type=Path)
+    parser.add_argument("--replay-workers", type=int, choices=range(1, 9), default=1,
+                        help="v4 independent raw replay processes (default: serial)")
     args = parser.parse_args(argv)
     errors = []
 
@@ -59,7 +61,7 @@ def main(argv=None) -> int:
         live_raw_events_path=args.live_raw_events, cross_path_report=load(args.cross_path_report),
         review_report=load(args.stage_review), resource_report=load(args.resource_report),
         neutral_root=args.neutral_root, neutral_policy=args.neutral_policy,
-        leak_review=load(args.leak_review),
+        leak_review=load(args.leak_review), replay_workers=args.replay_workers,
     )
     report["input_errors"] = errors
     report["selection_sha256"] = sha256(selection_path) if selection_path and selection_path.is_file() else None

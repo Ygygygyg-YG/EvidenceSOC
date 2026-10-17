@@ -452,7 +452,8 @@ def audit_prepared(selection: dict, cases_root: Path, *, source_report=None, liv
                    live_events_path=None, live_raw_events_path=None, resource_report=None,
                    freeze_date=None, prepared_root=None, splits=None,
                    scan_splits=None, label_policy=None, preparation_checkpoints=None,
-                   neutral_root=None, neutral_policy=None, stage_review=None, leak_review=None) -> dict:
+                   neutral_root=None, neutral_policy=None, stage_review=None, leak_review=None,
+                   replay_workers=1) -> dict:
     if selection.get("protocol") == "dedale-public-priority-v4":
         from .priority_audit import audit_priority_prepared
         return audit_priority_prepared(
@@ -463,7 +464,7 @@ def audit_prepared(selection: dict, cases_root: Path, *, source_report=None, liv
             resource_report=resource_report, freeze_date=freeze_date, prepared_root=prepared_root,
             splits=splits, scan_splits=scan_splits, label_policy=label_policy,
             preparation_checkpoints=preparation_checkpoints, neutral_root=neutral_root,
-            neutral_policy=neutral_policy)
+            neutral_policy=neutral_policy, replay_workers=replay_workers)
     if selection.get("protocol") == "dedale-neutral-v3":
         from .neutral_audit import audit_neutral_prepared
         return audit_neutral_prepared(

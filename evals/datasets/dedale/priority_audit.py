@@ -8,6 +8,9 @@ from __future__ import annotations
 
 from bisect import insort
 from collections import Counter, defaultdict
+from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
+from multiprocessing import get_context
 from pathlib import Path
 from zipfile import BadZipFile
 
@@ -49,6 +52,7 @@ _GEOMETRY = ("case_id", "source", "host", "time_from", "time_to", "candidate_kin
 _ACCOUNTING = ("raw_window_count", "projected_count", "source_labels", "projected_labels",
                "duplicate_retained_rows", "priority_pass", "sampling_counts")
 _HIT_IDENTITY_FIELDS = ("case_id", "file", "rule", "external_id", "path_sha256", "location", "value_sha256", "line_number")
+_REPLAY_CONTEXT = None
 
 
 def _priority(value):
@@ -123,7 +127,7 @@ class _Replay:
                                     "anchor_fingerprint": anchor.fingerprint}, "records": records}
 
 
-def replay_windows(windows, *, data_root, index, labels):
+def _serial_replay_windows(windows, *, data_root, index, labels):
     """Exhaust each relevant raw member once, including rows outside windows.
 
     JSONL MD5, raw-row counts and ZIP CRC are enforced by the shared streaming
@@ -155,6 +159,70 @@ def replay_windows(windows, *, data_root, index, labels):
         receipts[key] = _decoded_pass(Path(data_root), [row], consume)[0]
     return {identifier: state.finish([receipts[key] for key in window_members[identifier]])
             for identifier, state in states.items()}
+
+
+def _replay_components(windows, index):
+    """Keep windows linked by any raw member together, including transitively."""
+    parents = list(range(len(windows)))
+    identifiers, members = set(), {}
+
+    def root(position):
+        while parents[position] != position:
+            parents[position] = parents[parents[position]]
+            position = parents[position]
+        return position
+
+    for position, window in enumerate(windows):
+        identifier = window["case_id"]
+        _require(identifier not in identifiers, "duplicate neutral window identity")
+        identifiers.add(identifier)
+        for row in eligible_members(index, window["source"], window["host"], window["time_from"], window["time_to"]):
+            key = row["archive"], row["member"]
+            if key in members:
+                previous, other = members[key]
+                _require(previous == row, "conflicting raw member inventory")
+                parents[root(position)] = root(other)
+            else:
+                members[key] = row, position
+    components = defaultdict(list)
+    for position, window in enumerate(windows):
+        components[root(position)].append(window)
+    return list(components.values())
+
+
+def _initialize_replay(data_root, index, labels):
+    global _REPLAY_CONTEXT
+    _REPLAY_CONTEXT = data_root, index, labels
+
+
+def _replay_component(windows):
+    data_root, index, labels = _REPLAY_CONTEXT
+    return _serial_replay_windows(windows, data_root=data_root, index=index, labels=labels)
+
+
+def replay_windows(windows, *, data_root, index, labels, workers=1):
+    """Optionally spawn independent components; each raw member is read once.
+
+    The default uses the unchanged serial oracle. Component membership preserves
+    each window's serial member order and leaves all transport checks intact.
+    """
+    _require(type(workers) is int and 1 <= workers <= 8, "replay workers must be an integer from 1 to 8")
+    if workers == 1:
+        return _serial_replay_windows(windows, data_root=data_root, index=index, labels=labels)
+    windows = list(windows)
+    components = _replay_components(windows, index)
+    if not components:
+        return {}
+    merged = {}
+    with ProcessPoolExecutor(max_workers=min(workers, len(components)), mp_context=get_context("spawn"),
+                             initializer=_initialize_replay, initargs=(Path(data_root), index, labels)) as executor:
+        for component, result in zip(components, executor.map(_replay_component, components), strict=True):
+            expected = {window["case_id"] for window in component}
+            _require(isinstance(result, dict) and set(result) == expected and not (merged.keys() & result.keys()),
+                     "parallel raw replay window identities differ")
+            merged.update(result)
+    _require(set(merged) == {window["case_id"] for window in windows}, "parallel raw replay window closure differs")
+    return {window["case_id"]: merged[window["case_id"]] for window in windows}
 
 
 def validate_candidate_ledger(selection, neutral, index, replay):
@@ -480,7 +548,8 @@ def audit_priority_prepared(selection, cases_root, *, sources=None, data_root=No
                             preparation_checkpoints=None, neutral_root=None, neutral_policy=None,
                             splits=None, scan_splits=None, label_policy=None, live_report=None,
                             stage_review=None, cross_path_report=None, review_report=None, leak_review=None,
-                            resource_report=None, live_events_path=None, live_raw_events_path=None, freeze_date=None):
+                            resource_report=None, live_events_path=None, live_raw_events_path=None, freeze_date=None,
+                            replay_workers=1):
     from .audit import _audit_cases
     from .neutral_audit import audit_neutral_prepared
     from .public_priority import implementation_hashes as priority_hashes
@@ -541,7 +610,8 @@ def audit_priority_prepared(selection, cases_root, *, sources=None, data_root=No
         _require(canonical(index) == canonical(neutral["preparation"]["member_index"])
                  and canonical(binding) == canonical(neutral["preparation"]["checkpoint_binding"]), "actual own checkpoints differ from neutral lineage")
         gates["preparation_lineage"] = True
-        replay = replay_windows(window_inventory(neutral), data_root=data_root, index=index, labels=labels)
+        replay = replay_windows(window_inventory(neutral), data_root=data_root, index=index, labels=labels,
+                                workers=replay_workers)
         selected = validate_candidate_ledger(selection, neutral, index, replay)
         gates["targeted_member_receipts"] = gates["raw_priority_replay"] = True
         artifact_gates, gold, artifact_errors = _audit_cases(selection, cases_root, selected,
@@ -566,7 +636,7 @@ def audit_priority_prepared(selection, cases_root, *, sources=None, data_root=No
         _require(priority_hashes() == code_before, "v4 builder code changed during audit")
         _verify_bound_files(snapshots)
         gates["unchanged_inputs"] = True
-    except (KeyError, ValueError, TypeError, OSError, AttributeError, OverflowError, BadZipFile) as exc:
+    except (KeyError, ValueError, TypeError, OSError, AttributeError, OverflowError, BadZipFile, BrokenProcessPool) as exc:
         errors.append({"priority_acceptance": type(exc).__name__, "detail": str(exc)})
         gates["candidate_closure"] = False
     return {"schema_version": 1, "protocol": PROTOCOL, "accepted": all(gates.values()), "gates": gates,
