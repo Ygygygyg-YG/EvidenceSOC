@@ -1,5 +1,48 @@
 # Task10 前端运营与调查界面操作指南
 
+## 当前状态与验收入口（2026-10-18）
+
+本节为当前执行口径；后面的 2026-09-28 起步步骤及分阶段验证记录保留为历史资料。Task10 原功能验收为 105 项单元测试、61 项浏览器测试通过，浏览器失败、跳过和 flaky 均为 0，lint、typecheck 和生产构建通过。61 项是模拟 API 边界及真实后端用例的混合回归；真实批准、拒绝闭环使用 `LLM_MODE=fixture` 规则模式，不代表真实模型能力或全部用例均接入真实后端。见 [2026-10-16 集成记录](../../acceptance/task12-integration-2026-10-16.json)和 [2026-10-18 证据复核](../../acceptance/task1-12-verification-2026-10-18.json)。这些历史数量和报告保持原样。
+
+维护代码提交为 `5646db4`，后端两个 P2 及生产发现的审批后轮询缺陷均已关闭。后端全量 747 项无跳过、搜索相关 215 项、SSE 21 项、验收入口 18 项、前端 110 项及最终生产浏览器 62 项通过，静态门禁与新正常校准 MCP live/隔离/清理通过。最终生产无失败、跳过、flaky 或重试，源码和知识输入前后未变。详细证据见 [readiness 维护小节](../../acceptance/task12-readiness.md)及已验收的 [维护记录](../../acceptance/task12-maintenance-2026-10-18.json)；旧 JSON/JUnit 和冻结数据保持原样。维护分支的本地 main 整合另记。
+
+日常启动以 [前端 README](../../../apps/web/README.md)及现有配置为准，默认访问 `http://127.0.0.1:3000`。`BACKEND_URL` 由前端服务进程读取，指向 FastAPI；前端、后端两个进程的 `FRONTEND_ORIGIN` 必须与实际浏览器来源精确一致。后端源码默认 `LLM_MODE=fixture`、`DEMO_SESSION_ENABLED=false`；需要本地演示账户时显式开启后重启后端。不要因使用了不同的 `localhost` 来源而放宽 Origin 校验。
+
+历史第 1～3 节的分支创建、追加依赖、测试配置/主题重建，以及第 3.2、4.1 节的页面生成器不应在现有实现上重新执行；这会覆盖已完成的业务实现或改写锁定环境。历史第 5～7 节关于缺少端点、代理、会话和 SSE 的判断也不是当前缺口清单。历史命令和勾选不等于现在仍需安装或重新开发；先核对现有文件与验收记录，新增工作只按本节待执行范围开展。
+
+### 已实现：生产模式与隔离启动
+
+统一入口为 [scripts/task10_browser_acceptance.py](../../../scripts/task10_browser_acceptance.py)。从当前独立 checkout/worktree 的仓库根目录执行；使用锁定的 backend Python 环境及 pnpm，无需硬编码本机路径。先通过安全进程环境设置三个必要变量：`TASK10_POSTGRES_ADMIN_URL` 为有创建/删除本轮测试库及准备 `vector` 权限的本地管理连接，`OPENSEARCH_URL` 为可创建/删除本轮索引的本地服务，`RAG_DATA_DIRECTORY` 为含固定 STIX、manifest 和完整模型的已准备离线目录。不要把凭据写在命令参数或报告中；两个服务 URL 拒绝 query/fragment，checkout 中除 `.env.example` 外的隐式 dotenv 输入会被拒绝。详细准备见 [前端 README](../../../apps/web/README.md)。
+
+```powershell
+uv run --project services/backend python scripts/task10_browser_acceptance.py --web-mode production --api-port 8018 --web-port 3018 --artifacts-root .backups/task12-browser-acceptance
+```
+
+单独验证开发模式时，选择另一组空闲端口和独立报告目录：
+
+```powershell
+uv run --project services/backend python scripts/task10_browser_acceptance.py --web-mode dev --api-port 8019 --web-port 3019 --artifacts-root .backups/task12-browser-acceptance
+```
+
+- Playwright 的 `PLAYWRIGHT_WEB_MODE=dev|production` 默认 `dev`，未知值失败；统一入口默认 `production`。生产先运行 `build`，成功后才用 `start`，失败不复用旧产物；开发使用 `dev`。两种模式禁止复用现有 Web 进程，使用单 worker、零重试，端口占用即失败。
+- 每次分配独立运行 ID、数据库、OpenSearch 索引和报告目录；入口准备扩展/迁移、离线知识、样例、后端及真实用例变量，统一代理地址和前后端 `FRONTEND_ORIGIN`。真实用例准备不足即失败，不转换为 skip。不要手动把代理与直连检查指向不同后端。
+- 清理仅处理本轮创建的进程、索引和数据库，各项独立尝试并记录结果；任何清理失败都否决验收。运行前后校验源码及知识 hash，步骤日志脱敏并保留失败报告，不依赖旧忽略目录中的脚本。
+- 全量浏览器回归混合模拟接口和真实服务；报告必须按实际用例区分，不能只凭 `*-live.spec.ts` 文件名分类。统计读取与写入串行，各真实调查使用独立告警、幂等键及浏览器 context；开发和生产报告独立保留。
+
+### 已实现：续办 SSE 输出兼容与真实用例
+
+续办事件仅在后端 `api/sse.py` 输出层，将已有持久化的 `plan.renewal_requested`、`plan.renewed` 映射为既有 `status`，提供 `status=reconstructing`。原生产者、持久化事件名及载荷、事件 ID/顺序和去重键保持原样；主回放与终态 tail 共用适配，真正未知事件仍 reset。新方案实际就绪后继续发布 `approval.required`，不把旧方案续办提前解释为新方案已可审批。后端相关专项 21 项通过；前端沿用已有公共事件名。
+
+`responses.spec.ts` 保留模拟接口的受理/链接测试；新增 `response-renewal-live.spec.ts` 使用本轮拥有的真实案件与过期准备辅助函数，在原生 EventSource 已连接后通过页面续办，检查状态、新方案审批事件及无 `UNKNOWN_EVENT` reset。该辅助函数只接受本轮库与本轮案件，不提供生产强制过期 API；用例不替换 EventSource 或模拟后端响应。它还检查旧方案不可审批、新方案须人工批准、游标重连、模拟验证及刷新后的状态。
+
+首轮生产 `maintenance_prod_a` 的构建成功，浏览器 60 通过、2 失败、0 跳过/重试，验收失败记录和成功清理证据保留。该轮发现验证结果先落库时页面会提前停止轮询；现改为案件终态后才停止，保证随后落库的模拟执行快照能被刷新，新回归已纳入 110 项前端单元通过结果。新 SSE 用例的空闲连接等待也已覆盖既有心跳周期，保留原生事件断言。
+
+最终 `maintenance_prod_b` 的生产构建及 62 项浏览器测试通过：6 项真实服务契约/流程、7 项真实服务外壳 smoke、49 项模拟 API 边界；0 失败/跳过/flaky/重试。它覆盖批准、拒绝、续办、游标恢复、刷新及会话/Origin，源码/知识输入未变，六项清理成功。报告保存模式、用例分类、计数、受测提交/hash、案件 ID、报告 hash 和失败历史，不能只以最终 REST 快照证明 SSE 兼容。Task13 正式模型运行数仍为 0，截止日期、负责人、投入和模型/费用上限仍待补充；Task14 总验收与 Task15 材料不因本轮维护通过而自动完成。
+
+---
+
+## 历史操作正文（2026-09-28 起）
+
 更新：2026-09-28，已按 Task8、Task9 合入 main 后的实际代码调整。
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
@@ -66,7 +109,7 @@ pnpm --dir apps/web dev
 
 当前已核对本机 Node `v24.15.0`、pnpm `11.19.0`。新增版本来自设计方案候选，并重新核对了 antd/Registry 的 peer 元数据；仍需实际构建和 SSR 验收。已有 React Flow、ECharts、Query、Vitest、Playwright，不必重复安装。默认不安装 ProComponents。
 
-浏览器访问 `http://localhost:3000`。初始欢迎页说明开发服务器可用，还不代表业务完成。启动命令保持运行；后续检查使用另一个终端。
+浏览器访问 `http://127.0.0.1:3000`。初始欢迎页说明开发服务器可用，还不代表业务完成。启动命令保持运行；后续检查使用另一个终端。
 
 ## 3. 先补测试入口，再做主题和页面壳（M0）
 

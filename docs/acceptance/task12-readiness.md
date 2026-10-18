@@ -1,5 +1,40 @@
 # Task 12 集成与补充验收记录
 
+## 最新状态入口（2026-10-18）
+
+本节记录后续维护状态，下方 Step 1～5 正文保留 2026-10-14～15 的历史记录。旧正文中的“Step 6 尚未通过”“main 仍停在 1f1dbfa”描述当时状态，不再表示当前进度。
+
+- **历史验收已通过：** [Task 1～12 核验汇总](task1-12-verification-2026-10-18.json)及 [DEDALE 冻结记录](task12-dedale-freeze-2026-10-17.json)确认功能验收和数据准入；DEDALE `task12_accepted=true`，66 包（28 攻击、38 正常），最终 20 项数据关口通过。文档维护前代码基线为本地 `main` 的 `aafbddc`。
+- **历史证据边界：** [10 月 16 日集成记录](task12-integration-2026-10-16.json)保存后端 695 项、前端单元 105 项和浏览器 61 项的历史结果；浏览器回归包含模拟接口用例与真实后端批准/拒绝支路，模型模式为 fixture。DEDALE 专项回归记录为 576 通过、1 个 Windows 链接权限跳过。上述原记录不改写为本轮数量。
+- **本轮实现与验收：** 维护分支 `codex/task12-maintenance` 的代码提交 `5646db4` 已关闭 OpenSearch 响应检查、SSE 续期输出适配及生产发现的前端轮询三项缺陷，并实现隔离浏览器验收入口与真实续期用例。专项、后端全量、正常校准 MCP 隔离及最终生产回归均通过；[维护记录](task12-maintenance-2026-10-18.json)为 `accepted`。维护分支合入本地 main 随后单独记录，当前不提前声明完成整合。
+- **数据与历史证据：** 不修改已冻结的 AIT/DEDALE 数据、标签和选择规则；保留已有 JSON、JUnit、原始审计和实测报告。[重建说明](task12-dedale-rebuild-2026-10-18.json)仍为数据重建入口。
+- **修复后记录：** 新正常校准 live 报告 `dedale-live-report-final.json` 已通过，包含新 backend source/runtime hash、实际 MCP 文件系统隔离及清理检查，模型调用数为 0。命令 receipt 与实际报告分开保留，不更改旧哈希或弱化校验；[2026-10-18 维护记录](task12-maintenance-2026-10-18.json)已绑定完整报告、受测代码及失败历史。
+- **后续范围：** Task 13 正式模型运行数仍为 0；真实模型 worker 的评分目录、答案元数据及 Git 历史隔离在正式运行前验证。DEDALE 指标适用范围和 704 个案例×组别执行项见主计划 Task 13。
+
+### 本轮维护验证与后续边界
+
+原始报告归档批次为 `20261018T022747Z`，维护汇总已绑定完整路径、SHA256、受测提交及沿用边界。本轮已具备以下实际结果，不把这些数量相加为独立测试总数：
+
+| 检查 | 本轮结果 | 原始记录名 |
+| --- | --- | --- |
+| 完整后端及真实服务路径 | 747 通过，0 错误/失败/跳过 | `backend-full-final.xml` |
+| 搜索相关回归 | 215 通过，无跳过 | `search-regression-final.xml` |
+| SSE 与响应方案专项 | 21 通过，无跳过 | `sse-final.xml` |
+| 浏览器验收入口契约 | 18 通过，无跳过 | `harness-final.xml` |
+| 前端单元 | 110 通过，包含新增轮询回归 | `frontend-unit-accepted.log` |
+| 静态门禁 | 后端 Ruff/Mypy、前端 lint/typecheck 通过 | 对应命令 receipt/日志 |
+| 正常校准 MCP live | `passed`，新源码绑定、隔离与清理检查通过；不是正式模型实验或新的数据冻结 | `dedale-live-report-final.json` |
+| 冻结内容保留 | AIT 220、DEDALE 660 个文件无差异；非 Markdown 57 文件×2处=114次，最终含历史 Markdown 59 文件×2处=118次哈希核对均通过；未重复扫描 raw | `frozen-data-retention.json` |
+| 最终生产浏览器 | 62 通过，0 失败/跳过/flaky/重试，源码/知识输入未变，六项清理成功 | `frontend-maintenance_prod_b/acceptance.json` |
+
+首轮生产运行 `maintenance_prod_a` 已实际执行迁移、知识准备、样例导入及生产构建；浏览器 60 通过、2 失败、0 跳过/重试，`accepted=false`，后端/日志/索引/数据库/端口清理均成功。该轮发现验证先落库会导致审批后轮询提前停止，现改为按案件终态停止，并补回归；另调整新 SSE 用例的空闲连接等待以覆盖现有心跳周期。失败报告保留，不用后续通过覆盖它。
+
+最终生产运行 `maintenance_prod_b` 基于提交 `5646db4eecaa2db945659d17adf4067f86abd7d9`，生产构建及 62 项浏览器验收通过，`accepted=true`。62 项包括 6 项真实服务契约/流程、7 项真实服务外壳 smoke 和 49 项模拟 API 边界；`source_unchanged`、`knowledge_inputs_unchanged` 均为 true，六项资源清理均成功。实际数量、报告 hash、源文件绑定、失败和沿用边界见新维护 JSON，不能将 62 项统称全部真实服务用例。
+
+统一入口、三个必要环境变量及 production/dev 命令见 [前端 README](../../apps/web/README.md)。主计划 A～D 已关闭，工程报告和交接入口已给；E 的最终截止日期、负责人、实际投入和模型/费用上限仍待补充，不能据本轮工程通过推定 Task13 或 Task14 已完成。
+
+## Step 1～5 历史正文（截至 2026-10-15）
+
 日期：2026-10-14～15（Asia/Shanghai）。下文保留 Step 1～3 的原始结果，并追加用户选定的 Step 4～5 验收。本记录不代表完整 Task 12 通过，也不授权开始 Task 13。
 
 Step 1～5：已验收；完整 Task 12 尚需 Step 6。原工作区的 60 个文件及 Git 状态复核保持不变。

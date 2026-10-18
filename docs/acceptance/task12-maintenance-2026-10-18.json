@@ -1,0 +1,874 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-10-18T08:04:34.526186+00:00",
+  "status": "accepted",
+  "scope": "Task12 post-acceptance maintenance: two P2 backend fixes, production acceptance and resulting frontend polling fix",
+  "base_commit": "aafbddc6cedc041d773f8044639a6752cc97364d",
+  "implementation_commit": "5646db4eecaa2db945659d17adf4067f86abd7d9",
+  "integration_target": "local main by fast-forward; separate integration receipt binds final documentation commit",
+  "worktree": "D:\\传智杯\\.backups\\task12-maintenance",
+  "artifact_directory": "D:\\传智杯\\.backups\\task12-maintenance-artifacts\\20261018T022747Z",
+  "fixes": [
+    {
+      "id": "P2-SEARCH-METADATA",
+      "status": "closed",
+      "files": [
+        "services/backend/src/evidencesoc/persistence/event_search.py",
+        "services/backend/src/evidencesoc/tools/event_work.py"
+      ],
+      "behavior": "Reject timeout, failed shards and invalid metadata before hits; classify existing dependency errors and preserve retry/budget limits."
+    },
+    {
+      "id": "P2-RENEWAL-SSE",
+      "status": "closed",
+      "files": [
+        "services/backend/src/evidencesoc/api/sse.py"
+      ],
+      "behavior": "Map persisted internal renewal events at public output to status=reconstructing without changing persisted events or IDs; unknown events still reset."
+    },
+    {
+      "id": "P2-RESPONSE-POLLING",
+      "status": "closed",
+      "origin": "First production acceptance",
+      "files": [
+        "apps/web/src/features/responses/responseContract.ts",
+        "apps/web/src/features/responses/ResponseDetail.tsx"
+      ],
+      "behavior": "Continue approved-plan polling until incident terminal status even when validation is persisted before simulation snapshot."
+    }
+  ],
+  "source_binding": {
+    "normalization": "Git text blob comparison permits CRLF/LF only; SHA256 below binds actual executed checkout bytes.",
+    "files_sha256": {
+      "apps/web/e2e/response-renewal-live.spec.ts": "0e41ca11b0719ae53fe054569da14f5ebf2dfa3984555a4da88a65f6728cfb0f",
+      "apps/web/playwright.config.ts": "5ff04b6dde90186d81bea9136a320f8340f41722d5864325bd89d1ec5aa111f5",
+      "apps/web/src/features/responses/ResponseDetail.tsx": "f8093c3cd4a1548ced23d2d82d5c7709ae3158faada79da9f5c883d23df2b38d",
+      "apps/web/src/features/responses/responseContract.test.ts": "fb2b3e599017eb1fa6b15b3206bdcf3ebc04867f31dadda1b1b2e3cc8b205256",
+      "apps/web/src/features/responses/responseContract.ts": "4fcbc18b1e101d12ace3bf4d8bc69a180bba530c37865881868fa53a3c5625a5",
+      "apps/web/src/lib/testing/playwrightConfig.test.ts": "ba8c6f8287bab2bd0a4f15a316f5156dac393d18ec85717920655015f4c3d05c",
+      "scripts/task10_browser_acceptance.py": "550eb022cfc42e0074e3bb1256ed8b0918b3d1c339264c8a658253433e29918c",
+      "services/backend/src/evidencesoc/api/sse.py": "446d44739abc174784cb6d2e9eaa042e6cf91bd300b13a05c9a9ace16e5a5431",
+      "services/backend/src/evidencesoc/persistence/event_search.py": "934fc6bc9c5a524c2df1d0b69aa7da710fc2234991cb460a2e43a7a19c79e5a6",
+      "services/backend/src/evidencesoc/tools/event_work.py": "e024fad7258d58fc91383c6d5fcc25b284df051565de2388e6927d1154896e1e",
+      "services/backend/tests/api/test_response_plan_contract.py": "dd919842349df7aadfb9a616a180d58864eb32f15c0c9e1d9365076f5b19d9cf",
+      "services/backend/tests/api/test_sse_recovery.py": "3e946d491ef805ec398ed51e06f0c2697f4116ac24d3e2ce723162a6b2c577b0",
+      "services/backend/tests/evidence/test_service.py": "bbbf3e7bde887d7f77b009773f9b0493363137687d0f72be790c47300db2b780",
+      "services/backend/tests/persistence/test_event_search.py": "ae3f0c31d7b498c9434cd10bf8ec6bbc1e8ce2d56bdacec0fcf91dd07ac6aae5",
+      "services/backend/tests/test_task10_browser_acceptance.py": "222ba48b198480bcb9ed9d6ce2d2dac01c18e1d80c8a8e14293916ef6f78f8cc",
+      "services/backend/tests/tools/test_security_events.py": "0f70e617e5a4ca01fba991fa84c81505d835cce62acac6b09ce82ace1e0c792a"
+    },
+    "production_sources_unchanged_during_run": true,
+    "production_receipt": {
+      "path": "D:\\传智杯\\.backups\\task12-maintenance-artifacts\\20261018T022747Z\\frontend-maintenance_prod_b\\acceptance.json",
+      "sha256": "f2dd847332617aa65eea5a41e8ef562a63720b04b12ff7d5b2da6a8238165631",
+      "bytes": 25930
+    },
+    "backend_test_commit_context": "Backend full and targeted tests executed before implementation commit; files were stable, subsequently committed and compared to the final commit. Production run executed after commit."
+  },
+  "checks": {
+    "backend_full_real_postgres_opensearch_mcp_and_locked_rag": {
+      "path": "D:\\传智杯\\.backups\\task12-maintenance-artifacts\\20261018T022747Z\\backend-full-final.xml",
+      "sha256": "b408f8b793f19fc7abfae065e3f8ddae09652932653ab8ce5a678bb0c2d6fc02",
+      "bytes": 100828,
+      "tests": 747,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "opensearch_related_regression": {
+      "path": "D:\\传智杯\\.backups\\task12-maintenance-artifacts\\20261018T022747Z\\search-regression-final.xml",
+      "sha256": "bcd7f3ee5012c0b7de59c4627e3063891f4ba41a4fb0747975b13b097cfa360d",
+      "bytes": 28958,
+      "tests": 215,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "renewal_sse_recovery_contract": {
+      "path": "D:\\传智杯\\.backups\\task12-maintenance-artifacts\\20261018T022747Z\\sse-final.xml",
+      "sha256": "d9cd8a7440a79d4b7b03cc700b6c5f1947121fbff1332e553b1db485da0b623b",
+      "bytes": 3322,
+      "tests": 21,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "acceptance_harness_security_and_cleanup": {
+      "path": "D:\\传智杯\\.backups\\task12-maintenance-artifacts\\20261018T022747Z\\harness-final.xml",
+      "sha256": "2c5a87fc6cb27557acfad807c74e68a3dfdc3a5ab9fd281889240a4ec2b1fd85",
+      "bytes": 2930,
+      "tests": 18,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "frontend_unit": {
+    "test_files": 29,
+    "passed": 110,
+    "failed": 0,
+    "log": {
+      "path": "D:\\传智杯\\.backups\\task12-maintenance-artifacts\\20261018T022747Z\\frontend-unit-accepted.log",
+      "sha256": "d09698e6c63acbd79cd13e68ad9153cbcaf0c4f5783da14e01d01c9da82bb5bb",
+      "bytes": 869
+    }
+  },
+  "production_browser": {
+    "web_mode": "production",
+    "runtime": "fresh next build then next start",
+    "public_deployment_performed": false,
+    "llm_mode": "fixture",
+    "model_invocations": 0,
+    "stats": {
+      "startTime": "2026-10-18T08:01:35.543Z",
+      "duration": 118548.19499999999,
+      "expected": 62,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "retries": 0,
+    "workers": 1,
+    "category_counts": {
+      "real_service_contract_or_flow": 6,
+      "real_service_shell_smoke": 7,
+      "mock_api_ui_boundaries": 49
+    },
+    "categories": {
+      "real_service_contract_or_flow": [
+        {
+          "file": "alerts.spec.ts",
+          "title": "真实同源 API 的 total 与默认列表一致"
+        },
+        {
+          "file": "dashboard.spec.ts",
+          "title": "首页展示真实后端聚合值，与同源 API 一致"
+        },
+        {
+          "file": "full-flow-live.spec.ts",
+          "title": "真实规则调查经页面完成证据核验、人工批准与模拟验证"
+        },
+        {
+          "file": "full-flow-live.spec.ts",
+          "title": "真实规则调查经页面完成证据核验、人工拒绝并停止处置"
+        },
+        {
+          "file": "response-renewal-live.spec.ts",
+          "title": "真实过期方案续办经原生 SSE 返回新方案，再经页面批准和验证"
+        },
+        {
+          "file": "session-live.spec.ts",
+          "title": "同源会话代理签发 HttpOnly 演示 cookie，并由真实后端确认身份"
+        }
+      ],
+      "real_service_shell_smoke": [
+        {
+          "file": "shell.spec.ts",
+          "title": "运营总览在 1440px 下没有横向溢出"
+        },
+        {
+          "file": "shell.spec.ts",
+          "title": "运营总览在 1920px 下没有横向溢出"
+        },
+        {
+          "file": "shell.spec.ts",
+          "title": "运营总览在 1280px 下没有横向溢出"
+        },
+        {
+          "file": "shell.spec.ts",
+          "title": "运营总览在 1024px 下没有横向溢出"
+        },
+        {
+          "file": "shell.spec.ts",
+          "title": "运营总览在 390px 下没有横向溢出"
+        },
+        {
+          "file": "shell.spec.ts",
+          "title": "桌面导航可进入四个工作区并保留外壳"
+        },
+        {
+          "file": "shell.spec.ts",
+          "title": "窄屏导航支持键盘、焦点归还和路由切换"
+        }
+      ],
+      "mock_api_ui_boundaries": [
+        {
+          "file": "alerts.spec.ts",
+          "title": "URL 恢复、翻页和筛选重置页码"
+        },
+        {
+          "file": "alerts.spec.ts",
+          "title": "总览时间窗口、关键词与手动日期筛选在列表和详情返回中保持一致"
+        },
+        {
+          "file": "alerts.spec.ts",
+          "title": "错误显示 trace，手动重试后才进入空数据成功状态"
+        },
+        {
+          "file": "alerts.spec.ts",
+          "title": "同一查询更新失败时保留上次结果，重试后恢复真实数据"
+        },
+        {
+          "file": "alerts.spec.ts",
+          "title": "过滤无匹配与越界页分别提供真实状态"
+        },
+        {
+          "file": "alerts.spec.ts",
+          "title": "窄窗口使用紧凑卡片且没有页面横向溢出"
+        },
+        {
+          "file": "alerts.spec.ts",
+          "title": "告警标题可进入详情，启动调查只发一次写请求并跳转真实案件"
+        },
+        {
+          "file": "alerts.spec.ts",
+          "title": "已有调查显示继续入口；不存在告警显示 404 和重试，不提供启动操作"
+        },
+        {
+          "file": "alerts.spec.ts",
+          "title": "已有案件但尚无调查时仍可启动调查"
+        },
+        {
+          "file": "dashboard.spec.ts",
+          "title": "窗口图表、状态下钻和未知健康按后端数据展示，窄屏不溢出"
+        },
+        {
+          "file": "dashboard.spec.ts",
+          "title": "点击窗口内高危调查，列表请求沿用服务端时间边界和高危口径"
+        },
+        {
+          "file": "dashboard.spec.ts",
+          "title": "统计服务错误显示 trace，不把未知数据伪装为 0"
+        },
+        {
+          "file": "incident-detail.spec.ts",
+          "title": "可直接打开案件 URL，展示真实案件、告警、证据、步骤和运行摘要"
+        },
+        {
+          "file": "incident-detail.spec.ts",
+          "title": "加载中明确提示，完成后才显示后端记录"
+        },
+        {
+          "file": "incident-detail.spec.ts",
+          "title": "404 显示案件不存在，与服务故障区分"
+        },
+        {
+          "file": "incident-detail.spec.ts",
+          "title": "服务错误展示 trace，点击重试后显示实际记录"
+        },
+        {
+          "file": "incident-stream.spec.ts",
+          "title": "事件序号出现缺口时关闭旧流、重读快照并从新游标订阅"
+        },
+        {
+          "file": "incident-stream.spec.ts",
+          "title": "服务端 reset 后丢弃旧游标并从最新快照续订"
+        },
+        {
+          "file": "incident-stream.spec.ts",
+          "title": "快照校准返回 401 后停止当前订阅"
+        },
+        {
+          "file": "incident-stream.spec.ts",
+          "title": "快照校准返回 403 后停止当前订阅"
+        },
+        {
+          "file": "incident-stream.spec.ts",
+          "title": "业务心跳重置活动计时，随后失联超过 30 秒才校准重连"
+        },
+        {
+          "file": "incident-stream.spec.ts",
+          "title": "客户端切换调查时关闭旧流，迟到事件不改写新案件"
+        },
+        {
+          "file": "incident-stream.spec.ts",
+          "title": "事件到达后刷新案件快照，断线重放时不重复证据"
+        },
+        {
+          "file": "incident-stream.spec.ts",
+          "title": "刷新后以终态快照覆盖旧案件状态，不再订阅事件流"
+        },
+        {
+          "file": "incident-workbench.spec.ts",
+          "title": "证据按服务端总数分页，能继续加载快照之外的证据"
+        },
+        {
+          "file": "incident-workbench.spec.ts",
+          "title": "证据分页失败时只标记快照范围，重试后恢复服务端总数"
+        },
+        {
+          "file": "incident-workbench.spec.ts",
+          "title": "宽屏图谱选中步骤后只列出它引用的真实证据，并显示授权原文与 PostgreSQL 校验"
+        },
+        {
+          "file": "incident-workbench.spec.ts",
+          "title": "一致性快照提供关系边时仅绘制后端关系并展示节点支持状态"
+        },
+        {
+          "file": "incident-workbench.spec.ts",
+          "title": "攻击节点和阶段列表展示步骤自己的实体时间与置信度，选中后可查看完整事实"
+        },
+        {
+          "file": "incident-workbench.spec.ts",
+          "title": "攻击步骤缺少实体或置信度时显示未提供并保留观察时间"
+        },
+        {
+          "file": "incident-workbench.spec.ts",
+          "title": "因果候选保持虚线箭头和待证实语义"
+        },
+        {
+          "file": "incident-workbench.spec.ts",
+          "title": "行为关联是无方向点线，不伪称上一步导致下一步"
+        },
+        {
+          "file": "incident-workbench.spec.ts",
+          "title": "证据详情缺失或无权访问时保留引用和步骤，可重试且不显示校验通过"
+        },
+        {
+          "file": "incident-workbench.spec.ts",
+          "title": "证据哈希不匹配时明确标记异常，不当作通过"
+        },
+        {
+          "file": "incident-workbench.spec.ts",
+          "title": "服务端无法计算哈希时显示不可用，不伪造一致结论"
+        },
+        {
+          "file": "incident-workbench.spec.ts",
+          "title": "阶段列表与图谱使用同一步骤和证据引用，六角色只展示真实运行时间"
+        },
+        {
+          "file": "incident-workbench.spec.ts",
+          "title": "窄屏点击阶段步骤从右侧打开证据抽屉，关闭后仍保持选中步骤"
+        },
+        {
+          "file": "incidents-list.spec.ts",
+          "title": "调查列表展示真实分页和详情入口，URL 恢复状态筛选"
+        },
+        {
+          "file": "incidents-list.spec.ts",
+          "title": "调查列表区分失败和空数据，手动重试"
+        },
+        {
+          "file": "incidents-list.spec.ts",
+          "title": "调查列表刷新和详情返回保留时间窗口与高危筛选"
+        },
+        {
+          "file": "responses.spec.ts",
+          "title": "响应队列使用服务端 total 和状态筛选，链接进入真实方案详情"
+        },
+        {
+          "file": "responses.spec.ts",
+          "title": "已过期方案显示有效期并阻止审批提交"
+        },
+        {
+          "file": "responses.spec.ts",
+          "title": "旧方案缺少审查字段时说明原因且只允许拒绝"
+        },
+        {
+          "file": "responses.spec.ts",
+          "title": "旧方案仅缺动作追溯字段时说明不能批准的原因"
+        },
+        {
+          "file": "responses.spec.ts",
+          "title": "新方案能按动作编号追踪模拟结果、回滚与验证时间窗"
+        },
+        {
+          "file": "responses.spec.ts",
+          "title": "理由必填且审批人来自会话；202 后只展示服务端提交中状态"
+        },
+        {
+          "file": "responses.spec.ts",
+          "title": "409 后重读服务端结果，不自动重新提交决定"
+        },
+        {
+          "file": "responses.spec.ts",
+          "title": "批准后服务端先提交中再完成模拟验证，页面自动追踪到结论"
+        },
+        {
+          "file": "responses.spec.ts",
+          "title": "没有有效会话时禁止审批，启用本地演示账户后才可提交"
+        }
+      ]
+    },
+    "category_note": "By actual scenario and route.fulfill/continue behavior, including alerts/dashboard real contracts. Shell smoke reaches real service but does not establish a full business workflow.",
+    "cleanup": {
+      "backend_stopped": true,
+      "backend_log_closed": true,
+      "index_deleted": true,
+      "database_deleted": true,
+      "api_port_closed": true,
+      "web_port_closed": true
+    },
+    "source_unchanged": true,
+    "knowledge_inputs_unchanged": true,
+    "report": {
+      "path": "D:\\传智杯\\.backups\\task12-maintenance-artifacts\\20261018T022747Z\\frontend-maintenance_prod_b\\playwright-report.json",
+      "sha256": "471475121aed5b922cad92406c3bf7bd76af4fb91bcb956bcee1619214769f4e",
+      "bytes": 6320133
+    },
+    "business_evidence": [
+      {
+        "test": "真实规则调查经页面完成证据核验、人工批准与模拟验证",
+        "name": "verified-evidence.json",
+        "sha256": "2959291c5fa0256658fef46b7bffdb269089cf0c49b11922d6fb79fb7e4e8e9b",
+        "stored_in": "playwright-report.json inline base64 attachment",
+        "metadata": {
+          "final_status": null
+        }
+      },
+      {
+        "test": "真实规则调查经页面完成证据核验、人工批准与模拟验证",
+        "name": "persisted-live-flow.json",
+        "sha256": "281d2761c6436cd9ec5d1c745401f3305f31360c9c2dad514271e506e01f5ada",
+        "stored_in": "playwright-report.json inline base64 attachment",
+        "metadata": {
+          "alertId": "AL-TASK12-LIVE-APPROVE-230b1097-e3d7-4750-a1ef-a80d7ea3c94a",
+          "investigationId": "IV-01M570G2PPPXXK92BC996YKXQ4",
+          "planId": "RP-84cecb58a0dbc621b7134266",
+          "consoleErrors": [],
+          "viewports": [
+            {
+              "width": 1440,
+              "height": 900
+            },
+            {
+              "width": 1920,
+              "height": 1080
+            }
+          ],
+          "final_status": "completed"
+        }
+      },
+      {
+        "test": "真实规则调查经页面完成证据核验、人工拒绝并停止处置",
+        "name": "verified-evidence.json",
+        "sha256": "fca4abc79940373b541a4761733b0ababf1806bf6da2b621ad1c90907e5a7124",
+        "stored_in": "playwright-report.json inline base64 attachment",
+        "metadata": {
+          "final_status": null
+        }
+      },
+      {
+        "test": "真实规则调查经页面完成证据核验、人工拒绝并停止处置",
+        "name": "persisted-live-flow.json",
+        "sha256": "cd06916aa60b72a2e660eeed70735763a5a0faddb21af6aa7023b7bcca6708ff",
+        "stored_in": "playwright-report.json inline base64 attachment",
+        "metadata": {
+          "alertId": "AL-TASK12-LIVE-REJECT-17cf7f65-82f0-4e7d-8f89-c38106ac2ea3",
+          "investigationId": "IV-01M570GJ3NH5TFR009R5Q5T868",
+          "planId": "RP-fcad3d2a351c6ec42286a2fa",
+          "consoleErrors": [],
+          "viewports": [
+            {
+              "width": 1440,
+              "height": 900
+            },
+            {
+              "width": 1920,
+              "height": 1080
+            }
+          ],
+          "final_status": "rejected"
+        }
+      },
+      {
+        "test": "真实过期方案续办经原生 SSE 返回新方案，再经页面批准和验证",
+        "name": "renewal-live-flow.json",
+        "sha256": "98fe88b9c9706056dce65f94ac0cbbf209f2b59d5f6b9e951db58a58c5f11bd3",
+        "stored_in": "playwright-report.json inline base64 attachment",
+        "metadata": {
+          "runId": "maintenance_prod_b",
+          "alertId": "AL-RENEW-maintenance_prod_b-3e31bc68",
+          "investigationId": "IV-01M570HFYD8BB2D7MNXATEAKMT",
+          "oldPlanId": "RP-6e717cbf25ef4fa5e406997a",
+          "newPlanId": "RP-71bd872eee71b8e79e257991",
+          "renewalPosts": 1,
+          "resumeCursor": "27",
+          "final_status": "completed"
+        }
+      }
+    ]
+  },
+  "development_browser": {
+    "rerun_this_round": false,
+    "historical_reference": "docs/acceptance/task12-integration-2026-10-16.json",
+    "historical_passed": 61,
+    "note": "Historical dev result does not count as a new-code dev run."
+  },
+  "dedale_runtime_revalidation": {
+    "report": {
+      "path": "D:\\传智杯\\.backups\\task12-maintenance-artifacts\\20261018T022747Z\\dedale-live-report-final.json",
+      "sha256": "3a6e799a39f8558aaeb47d51ce9fa8a697f1e9bbfa11cf85786f3041c38ceba7",
+      "bytes": 8199
+    },
+    "current_source_gates": {
+      "path": "D:\\传智杯\\.backups\\task12-maintenance-artifacts\\20261018T022747Z\\dedale-current-source-gates.json",
+      "sha256": "b65e68e40c24eec5c06365c2af44382fc0fafac68a4a905b128800f5d5c4ea87",
+      "bytes": 227
+    },
+    "gates": {
+      "live_context": true,
+      "scoring_filesystem_isolation": true,
+      "current_runtime_hashes_match": true,
+      "model_invocations": 0,
+      "report_sha256": "3a6e799a39f8558aaeb47d51ce9fa8a697f1e9bbfa11cf85786f3041c38ceba7"
+    },
+    "runtime_artifacts": {
+      "harness_sha256": "73d4d5ffeb33284e7670865de3a817964521bddaa846f6bc91fc388fc8507eb3",
+      "bootstrap_sha256": "9e6841812620479e811afcf116363397a5be1d63933ed8fe227035e406a5ff66",
+      "backend_source_sha256": "f9531a7ed13d8b07fab926a7f2fbf8ea744681b92a603c143bd822dd7486c162",
+      "linux_dependencies_sha256": "1e5c2f5913df0e10ec1da8c402befc0ea58c886fdf0b85a4e34c71af859fc5b3",
+      "agent_events_sha256": "7378132cd6cf0deceac92caa07293271c8a2f516a38c214a58f4e7a15fd2daf7",
+      "host_scoring_canary_sha256": "a9c94bba8fe0ee9ef3af60733ee7d2725a30edb283def3a187cf8a24d2fa9fb0"
+    },
+    "docker_image": "python:3.14-slim",
+    "docker_image_id": "sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170",
+    "runtime_note": "Official Python 3.14 image with previously frozen cp314 Linux dependencies; host backend tests use existing Python 3.12 environment. No Strix runtime.",
+    "model_invocations": 0,
+    "does_not_replace_formal_model_worker_isolation": true
+  },
+  "data_retention": {
+    "receipt": {
+      "path": "D:\\传智杯\\.backups\\task12-maintenance-artifacts\\20261018T022747Z\\frozen-data-retention.json",
+      "sha256": "7dfbcefac0c592af43fa1e73418253a8ff913db1ecf2661414d60d882fc8eb07",
+      "bytes": 291
+    },
+    "passed": true,
+    "verified_files": {
+      "ait": 220,
+      "dedale": 660,
+      "protected_files": 114
+    },
+    "mismatches": [],
+    "raw_rebuild_repeated": false,
+    "frozen_cases_labels_selection_and_builder_rules_unchanged": true,
+    "checkout_newline_only_files_preserved": 18,
+    "historical_protected_files_sha256": {
+      "data/manifests/ait-task11-dev-validation-selection.json": "668ece29256f7f75acc093808af351d5c277ca8951ff14881b019c83a241da9f",
+      "data/manifests/ait-task11-test-selection.json": "bbabb8b072c29a770863c4a6a88537e446305ba7006ff40afa2cf1229fdbbd3b",
+      "data/manifests/ait-task12-portable-inputs.json": "dd18477824146bf83c5dfc31f02a389d04ce97b22492dda43a4070c7cc1b699a",
+      "data/manifests/ait-v2-splits.json": "bd5cdaa8b95d2b6150fc3469db0ec85209737b90087af0c481371d6df694d718",
+      "data/manifests/dedale-label-policy.json": "bd00801ee3769673c090c20360ee4a794975ce32cbf74e93e3d1bd333db6d844",
+      "data/manifests/dedale-neutral-policy-v3.json": "7a6cf0153be54e96cde46d5302876fabf6fc844e5056aa06d08379ad836ce839",
+      "data/manifests/dedale-public-priority-v4.json": "a00cf4abf7b5a54a0d35dc2298d7ca5e5f4eb6ccd9cab2d757baeb23e2325f08",
+      "data/manifests/dedale-scan-splits-v2.json": "610889e516f0b46fbbe58bd94569a12c6da41407c23b80aece335aede1db6fa3",
+      "data/manifests/dedale-selection.json": "047c2887a8057a348fc0c07fd6c3773c9e61f39302f7f9d4b1f4979d4e9b5c79",
+      "data/manifests/dedale-sources.json": "1c60bd99af9644489d226c8e71af9b6604be4f29340bdf4ac9e3e7bafa229bc2",
+      "data/manifests/dedale-splits.json": "610889e516f0b46fbbe58bd94569a12c6da41407c23b80aece335aede1db6fa3",
+      "data/manifests/fox-development-sources.json": "19bacd6f0f981fc33364aae300f65d68783e6a14b4692eb11fa4599b0eab2d03",
+      "data/manifests/fox-dns-development-sources.json": "f0ae9a3a1349be718e7d101120b8fa56dbb7ef9e4cab62f1c7d841f7fb3e7988",
+      "data/manifests/harrison-development-audit-sources.json": "a530a7ce640ccd0c66dc59c692a5fc512d9c08e99dad4f35897a654fc7602d38",
+      "data/manifests/harrison-development-sources.json": "1503e296569d61af16c8160ac209609fb6815568931f944f69bc0c99aab5e529",
+      "data/manifests/russellmitchell-development-sources.json": "05d962284707c0a51f9a9f7c2996867a1150f9de083c2324d63c69855083dcd9",
+      "data/manifests/santos-development-audit-sources.json": "4d9f1d0d5274e17ab2a585e1b7c250f635bfe2f5457c5b3a19ed53f374f8e428",
+      "data/manifests/santos-development-sources.json": "b8e4b4f37058ffb41073fee5b3033a9ee582250384a4ec4b5eff20222e8b2001",
+      "data/manifests/shaw-test-apache-sources.json": "1a54d67d218e676727796664a6cbca0c425a4d987c0d319fca505fd79622fc5a",
+      "data/manifests/shaw-test-dnsmasq-sources.json": "d702e476d7bb404f020b4f3fede519ec26f53d87a140132701f0a7700416b650",
+      "data/manifests/shaw-test-intranet-audit-sources.json": "e56c1601f6516ca7aa8d53500d992368c6458cfd9e6df73675ccd362ac34cfc8",
+      "data/manifests/shaw-test-sources.json": "9b6b17f503214e38e1226230054e4472198004bd2a93bfedadfaca205373ef2b",
+      "data/manifests/wardbeck-validation-audit-sources.json": "ce08fed3567a5a6ba0c708a0c0e396036889f2e88dda9359ea543b25f6c312fc",
+      "data/manifests/wardbeck-validation-sources.json": "6ebc96f2bd7a34794aab7fdaed420335cf24a606f0cdd7b9f3d80c24b48d3863",
+      "data/manifests/wheeler-development-audit-sources.json": "0f81a5b30ce968b8d42899176ac8fe7d35647927ae27c58c5eeefdffa42f6bc2",
+      "data/manifests/wheeler-development-sources.json": "241679ff310c3976ab15b4a95739ecfc831a6234bb4361d94feb82a1987c83a0",
+      "data/manifests/wilson-test-apache-sources.json": "69d4e121772f4cfc37f973e1bac85bfc0be0a98ecfed90850cd75225bcb12d60",
+      "data/manifests/wilson-test-dnsmasq-sources.json": "d3897e821285ef4b0f1a4372f254dcd819dbe6dbb392737d40948fbfea111d09",
+      "data/manifests/wilson-test-intranet-audit-sources.json": "9e70b03371afa00ba7049d87d1df9ba7eab25374b2c6a43c450f50fac5098cc6",
+      "data/manifests/wilson-test-sources.json": "a5f31b0ae2e1beb16c44d926af2c1f8cc84552d7e1df50e56c7b1df46e3f72cc",
+      "docs/acceptance/task1-12-verification-2026-10-18.json": "5ab8c2f6a04c14f1c4b7e71bc979fad9df5d477d04a0bfbd8176da36c0516f55",
+      "docs/acceptance/task12-ait-hashes.json": "dd3135b6a8de8baba190112d50687b7d0490743677686fa3a9556648a0b9925c",
+      "docs/acceptance/task12-ait-portability.md": "af25600af3d26b9a23411842f6387a6d3350ebbf5b7580c952a0fed7d5fca7ad",
+      "docs/acceptance/task12-dedale-freeze-2026-10-17.json": "7161f27ed07597abe6fdd8053801e3f923426783c7bbbe9b664309da2b2fdee5",
+      "docs/acceptance/task12-dedale-rebuild-2026-10-18.json": "a7e6d2af5fa1cacb7b1b13aaa0a5f061180f96120fd9346f2bde7a17afa1566f",
+      "docs/acceptance/task12-integration-2026-10-16.json": "a0696462a35919bffe0e9748164495e8f579ef12f01ab60f38fb8bb1488d364f",
+      "docs/acceptance/task12-parallel-replay-tooling-2026-10-17.json": "06e4e32cbc568a7ace6990e5c9d65b7768efc3c6696a1a22b3e6f20ff7a1e29c",
+      "docs/acceptance/task12-preservation.json": "c78f3b3093edfb2c0c3b1cc7001f04398f28fae1560ddcf4f224583603f838ce",
+      "docs/acceptance/task12-public-priority-tooling-2026-10-17.json": "e5b0c8549ef30fe4d65f1f98379dac5ebe56878576b40d4b0d686f7c306f83e3",
+      "docs/acceptance/task12-selected-text-tooling-2026-10-16.json": "e747ecc1114a971e74821cb303449afbbbe9fce9e3f2c906139d383986a6b9b3",
+      "docs/acceptance/task12-services.md": "fa8315ad65b799a81ff419e95e7f807b5a6f7bddd004fed46e7645d0f6a2a814",
+      "evals/datasets/ait_v2/audit_parse.py": "a2ccb762644ac987a8f5b6b440100da705db3113fa9461e1c3470494b2e12640",
+      "evals/datasets/ait_v2/build_manifests.py": "3606f0bdf33a1d5aaf1e936bbb82a55328ffc08461e78fb3974ac207fc1d30aa",
+      "evals/datasets/ait_v2/dnsmasq_parse.py": "020480e389c80cd383ab2014f0e0eaca8b3043740f8c6beade08f3a6ed0b6a48",
+      "evals/datasets/ait_v2/join_labels.py": "bb6f5a1d1372c3a060c87061553f5a04511c1bb00cd82f90e89ea8c044db7c18",
+      "evals/datasets/ait_v2/parse.py": "9f76c217e3e82564565e75566559f5974aac5588ff31dabdd12f598abda1d899",
+      "evals/datasets/ait_v2/taxonomy.py": "d7902e8392f936613cd6f7802cc38147b38203a258cb8ea58784c7c78c0098d5",
+      "evals/datasets/dedale/__init__.py": "7eb939e96484510bdf74e3aa3807b473d99a48b9bb0d9d5cf74f0b2c4c3e0331",
+      "evals/datasets/dedale/audit.py": "9514786174c232c6cedd57530b6d14320f75acc99359af155de214b266f22c11",
+      "evals/datasets/dedale/build_manifests.py": "5f81af6a1f0b0905769391c55c9ffeea7f7ac08dcc2a54b3cb8dd4a88b6c270e",
+      "evals/datasets/dedale/checkpoint.py": "9bc4b6bced7da3c3d813400dfd4f111e8ab0dab813d8740587839c42a911e8e8",
+      "evals/datasets/dedale/common.py": "2f5558f9526839df3d34e10be5464282d7a8626f0bf1bd554b8b17ee4ac8b576",
+      "evals/datasets/dedale/join_labels.py": "a3331ab290f7431ec1e580dd811fddfa21e4287fecb91c44b2a3812b56167670",
+      "evals/datasets/dedale/neutral_audit.py": "618e8b7b18b80848caa8fcf7142c01920a1155df4415d7cc670c55973d6d92fb",
+      "evals/datasets/dedale/neutralize.py": "8e30afa9bd54ca0529adfb1953accaa68878746af28217dd469dd6f5c3220f7c",
+      "evals/datasets/dedale/parse.py": "48e2e50519d4b91694e314d2ce2352f495cf79d8c8ce721a55ce930002c04d0e",
+      "evals/datasets/dedale/priority_audit.py": "ef7e1ea71e5fd5f245ea28837b9b2fe0c109082596b0f627fffb80d6c36ba66e",
+      "evals/datasets/dedale/public_priority.py": "3d0af9c9c41c244dfa1371926853943fe04f899f772717862a65c3268dcd959b",
+      "evals/datasets/dedale/scan.py": "3df9759f6104350cc7659bab986c09adcdf6e19de82bbf8e8a2003ff3d49ff34"
+    },
+    "checkout_byte_preservation": {
+      "path": "D:\\传智杯\\.backups\\task12-maintenance-artifacts\\20261018T022747Z\\checkout-byte-preservation.json",
+      "sha256": "1e5501b02a10f7e55a74ed8c8ed89584a1f9effc9989f5347b97387c77a09f17",
+      "bytes": 1081
+    },
+    "protected_file_count_scope": {
+      "retention_receipt": {
+        "unique_non_markdown_files": 57,
+        "locations": 2,
+        "byte_hash_checks": 114
+      },
+      "final_binding": {
+        "unique_files": 59,
+        "locations": 2,
+        "byte_hash_checks": 118,
+        "additional_historical_markdown": [
+          "docs/acceptance/task12-ait-portability.md",
+          "docs/acceptance/task12-services.md"
+        ]
+      },
+      "note": "Final binding includes the two historical Markdown records excluded by the earlier non-Markdown retention receipt. Both counts are valid for their stated scopes; no data changed."
+    }
+  },
+  "rerun_this_round": [
+    "search and SSE regressions",
+    "complete backend real-service regression including opt-in RAG",
+    "backend Ruff/Mypy",
+    "frontend unit/lint/typecheck",
+    "fresh production build and all browser tests",
+    "benign calibration MCP Docker live and current-source isolation gates",
+    "frozen data and rule/report hash retention"
+  ],
+  "historical_evidence_reused_without_modification": [
+    "docs/acceptance/task12-integration-2026-10-16.json",
+    "docs/acceptance/task12-ait-hashes.json",
+    "docs/acceptance/task12-dedale-freeze-2026-10-17.json",
+    "docs/acceptance/task12-dedale-rebuild-2026-10-18.json"
+  ],
+  "historical_data_gates_not_rerun": [
+    "Billion-row raw scan and source/label join",
+    "case selection and stage review",
+    "cross-path raw rebuild"
+  ],
+  "failed_attempts_retained": [
+    {
+      "evidence": "D:\\传智杯\\.backups\\task12-maintenance-artifacts\\20261018T022747Z\\backend-full.xml",
+      "result": "740 passed, 1 failed",
+      "reason": "Runner FRONTEND_ORIGIN was 3018 while session test contract uses 3000; isolated test environment corrected, final 747 passed."
+    },
+    {
+      "evidence": "D:\\传智杯\\.backups\\task12-maintenance-artifacts\\20261018T022747Z\\frontend-maintenance_prod_a\\acceptance.json",
+      "result": "60 passed, 2 failed; accepted=false",
+      "reason": "Real frontend early polling stop and new idle SSE open check shorter than 15-second heartbeat. Polling regression fixed; open wait now20s without weakening event assertions."
+    },
+    {
+      "evidence": "D:\\传智杯\\.backups\\task12-maintenance-artifacts\\20261018T022747Z\\dedale-live-maintenance.json",
+      "result": "exit0 command receipt only; excluded as complete live evidence",
+      "reason": "Initial live report output collided with outer receipt; rerun with distinct report filename."
+    },
+    {
+      "evidence": "D:\\传智杯\\.backups\\task12-maintenance-artifacts\\20261018T022747Z\\frozen-data-retention-initial-path-check.json",
+      "result": "Initial inventory rejected",
+      "reason": "Corrected alternate AIT root from cases/test to documented rebuilds/test; preserved 18 newline-only checkout files before byte comparison."
+    }
+  ],
+  "other_retained_diagnostics": "All initial RED, sandbox-temp, first typecheck and review boundary test failures remain in artifact directory; final passing reports above supersede them without overwriting logs.",
+  "command_receipts": {
+    "backend-full-final": {
+      "path": "D:\\传智杯\\.backups\\task12-maintenance-artifacts\\20261018T022747Z\\backend-full-final.json",
+      "sha256": "bd68214882535434e5e6ab8eef8ddc34ca14aa9a9602c3dfe1be69f0a8348b55",
+      "bytes": 550,
+      "command": [
+        "-m",
+        "pytest",
+        "services/backend/tests",
+        "-q",
+        "-rs",
+        "--basetemp",
+        "D:/传智杯/.backups/task12-maintenance-artifacts/20261018T022747Z/backend-full-final-temp",
+        "--junitxml",
+        "D:/传智杯/.backups/task12-maintenance-artifacts/20261018T022747Z/backend-full-final.xml"
+      ],
+      "exit_code": 0,
+      "seconds": 277.489,
+      "log": {
+        "path": "D:\\传智杯\\.backups\\task12-maintenance-artifacts\\20261018T022747Z\\backend-full-final.log",
+        "sha256": "cdac0e3c1fdc68de2c149cc5203589eb874a461d36e347a5e25541bd02edd789",
+        "bytes": 1456
+      }
+    },
+    "backend-mypy": {
+      "path": "D:\\传智杯\\.backups\\task12-maintenance-artifacts\\20261018T022747Z\\backend-mypy.json",
+      "sha256": "6f9c0970bd5b59a18713ba3a9ee412bad352771f9c30cd68f6603c9029f5ed09",
+      "bytes": 380,
+      "command": [
+        "-m",
+        "mypy",
+        "services/backend/src",
+        "--cache-dir",
+        "D:/传智杯/.backups/task12-maintenance-artifacts/20261018T022747Z/mypy-cache"
+      ],
+      "exit_code": 0,
+      "seconds": 71.591,
+      "log": {
+        "path": "D:\\传智杯\\.backups\\task12-maintenance-artifacts\\20261018T022747Z\\backend-mypy.log",
+        "sha256": "3825b341997dad52f369fbdbb666ad40b4dcc1b5d6b929e3be81b1340e0d196d",
+        "bytes": 401
+      }
+    },
+    "backend-ruff-final": {
+      "path": "D:\\传智杯\\.backups\\task12-maintenance-artifacts\\20261018T022747Z\\backend-ruff-final.json",
+      "sha256": "7fed75cd846ca65c1125bbb23754a471a8762d1b9c5cca354a9ab145ef8f5af2",
+      "bytes": 339,
+      "command": [
+        "-m",
+        "ruff",
+        "check",
+        "services/backend",
+        "scripts/task10_browser_acceptance.py"
+      ],
+      "exit_code": 0,
+      "seconds": 0.252,
+      "log": {
+        "path": "D:\\传智杯\\.backups\\task12-maintenance-artifacts\\20261018T022747Z\\backend-ruff-final.log",
+        "sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+        "bytes": 19
+      }
+    },
+    "frontend-unit-accepted": {
+      "path": "D:\\传智杯\\.backups\\task12-maintenance-artifacts\\20261018T022747Z\\frontend-unit-accepted.json",
+      "sha256": "cf79ef819d979d6cd3fac913b983d66ac1298d23c8bae5585c6ea899b0edae2e",
+      "bytes": 281,
+      "command": [
+        "--dir",
+        "apps/web",
+        "test"
+      ],
+      "exit_code": 0,
+      "seconds": 1.863,
+      "log": {
+        "path": "D:\\传智杯\\.backups\\task12-maintenance-artifacts\\20261018T022747Z\\frontend-unit-accepted.log",
+        "sha256": "d09698e6c63acbd79cd13e68ad9153cbcaf0c4f5783da14e01d01c9da82bb5bb",
+        "bytes": 869
+      }
+    },
+    "frontend-lint-final": {
+      "path": "D:\\传智杯\\.backups\\task12-maintenance-artifacts\\20261018T022747Z\\frontend-lint-final.json",
+      "sha256": "dffd54cce1ebff823dffa33a322b79e3dd7d2ca19e4342fc9227a454d69bdf71",
+      "bytes": 276,
+      "command": [
+        "--dir",
+        "apps/web",
+        "lint"
+      ],
+      "exit_code": 0,
+      "seconds": 49.397,
+      "log": {
+        "path": "D:\\传智杯\\.backups\\task12-maintenance-artifacts\\20261018T022747Z\\frontend-lint-final.log",
+        "sha256": "ebfee82d478f07b1e725885398b7046100b7b6a51ffc6438f52db8dc0230ea78",
+        "bytes": 9
+      }
+    },
+    "frontend-typecheck-recheck": {
+      "path": "D:\\传智杯\\.backups\\task12-maintenance-artifacts\\20261018T022747Z\\frontend-typecheck-recheck.json",
+      "sha256": "04bbcdb326cf8e26ab2790ccaeedbcc1e4420c8d92c6db1a12da3630ce90f1b4",
+      "bytes": 294,
+      "command": [
+        "--dir",
+        "apps/web",
+        "typecheck"
+      ],
+      "exit_code": 0,
+      "seconds": 3.536,
+      "log": {
+        "path": "D:\\传智杯\\.backups\\task12-maintenance-artifacts\\20261018T022747Z\\frontend-typecheck-recheck.log",
+        "sha256": "99d7c2179cdd316467c51f37901025a0753453664d741214ba56fc631fa6c0bc",
+        "bytes": 90
+      }
+    },
+    "dedale-live-final": {
+      "path": "D:\\传智杯\\.backups\\task12-maintenance-artifacts\\20261018T022747Z\\dedale-live-final.json",
+      "sha256": "bf11069827fcf5d2526573652d010297773b8ded507f77f5fb6c3d3ec00a4e87",
+      "bytes": 717,
+      "command": [
+        "scripts/dedale_task12_live_check.py",
+        "--events",
+        "data/dedale/maintenance-inputs/benign-events.jsonl",
+        "--raw-events",
+        "data/dedale/maintenance-inputs/benign-raw.jsonl",
+        "--output",
+        "D:\\传智杯\\.backups\\task12-maintenance-artifacts\\20261018T022747Z\\dedale-live-report-final.json",
+        "--runtime",
+        "docker",
+        "--docker-image",
+        "python:3.14-slim",
+        "--docker-network",
+        "evidencesoc-task12-maintenance-20261018_default"
+      ],
+      "exit_code": 0,
+      "seconds": 13.835,
+      "log": {
+        "path": "D:\\传智杯\\.backups\\task12-maintenance-artifacts\\20261018T022747Z\\dedale-live-final.log",
+        "sha256": "f18dcdefcaaa0e87e93083a5421be68987289cf44ff027f720e7a0f41cb3fe5d",
+        "bytes": 173
+      }
+    },
+    "frontend-production-final": {
+      "path": "D:\\传智杯\\.backups\\task12-maintenance-artifacts\\20261018T022747Z\\frontend-production-final.json",
+      "sha256": "7b6c017b0cd009f8a0ebe4eefe7901956a37f88b031accebbb21371701604b12",
+      "bytes": 542,
+      "command": [
+        "scripts/task10_browser_acceptance.py",
+        "--web-mode",
+        "production",
+        "--api-port",
+        "8018",
+        "--web-port",
+        "3018",
+        "--artifacts-root",
+        "D:\\传智杯\\.backups\\task12-maintenance-artifacts\\20261018T022747Z",
+        "--run-id",
+        "maintenance_prod_b"
+      ],
+      "exit_code": 0,
+      "seconds": 184.86,
+      "log": {
+        "path": "D:\\传智杯\\.backups\\task12-maintenance-artifacts\\20261018T022747Z\\frontend-production-final.log",
+        "sha256": "37edf21a13e92c27d39a3620b19764a197b92713bb7e64b970f15c82c7885e1c",
+        "bytes": 398
+      }
+    }
+  },
+  "review": {
+    "method": "Independent code reviews by backend_audit and dataset_audit plus regression verification",
+    "human_acceptance_signature": "待补充"
+  },
+  "remaining_scope": {
+    "task13_formal_runs": 0,
+    "task13_planned_case_group_executions": 704,
+    "formal_model_worker_isolation": "待执行",
+    "task14_final_acceptance": "待执行",
+    "task15_materials": "待完成",
+    "deadline_owner_actual_capacity_model_and_budget": "待补充"
+  },
+  "reproduction": {
+    "entry": "scripts/task10_browser_acceptance.py --web-mode production --api-port <free-api-port> --web-port <free-web-port> --run-id <new-id> --artifacts-root <new-directory>",
+    "explicit_environment": [
+      "TASK10_POSTGRES_ADMIN_URL",
+      "OPENSEARCH_URL",
+      "RAG_DATA_DIRECTORY"
+    ],
+    "private_runtime_file": "Retained locally in ignored artifact directory; excluded from committed records and output.",
+    "historical_archive_recovery": "Use retained freeze/rebuild/portability records and verify their source/artifact SHA256 before replay. A fresh clone requires separate protected data and pinned offline knowledge/model/dependency preparation."
+  },
+  "owned_runtime_cleanup": {
+    "passed": true,
+    "path": "D:\\传智杯\\.backups\\task12-maintenance-artifacts\\20261018T022747Z\\owned-runtime-cleanup.json",
+    "sha256": "49906da92cc4a93de2a896df4b7b0baffff04ecb63df2860b95be8c93ba8586b",
+    "development_containers_unchanged": true,
+    "owned_container_volumes_retained": true,
+    "owned_ports_closed": {
+      "5434": true,
+      "9203": true,
+      "8018": true,
+      "3018": true
+    }
+  }
+}
