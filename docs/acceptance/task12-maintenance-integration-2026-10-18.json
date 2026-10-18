@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "integrated_at": "2026-10-18T08:10:01.762856+00:00",
+  "status": "accepted",
+  "root": "D:\\传智杯",
+  "branch": "main",
+  "base_commit": "aafbddc6cedc041d773f8044639a6752cc97364d",
+  "implementation_commit": "5646db4eecaa2db945659d17adf4067f86abd7d9",
+  "integrated_commit": "5f7d452cfbfcb6d8d6b043692f3bf3f85fe96568",
+  "method": "fast-forward",
+  "approved_document_backup": {
+    "path": "D:\\传智杯\\.backups\\task12-maintenance-artifacts\\20261018T022747Z\\approved-documents-before-integration.zip",
+    "sha256": "0b78433b86b8a2f1b48b0b4677081e1df9d00e666fca40f0ac6e627bb7066714",
+    "entries": 4,
+    "exact_bytes_verified": true
+  },
+  "retained_backup_stash": "ea9f39deaec9771a32985f0c3633d9bd13ceaabb",
+  "stash_output": "Saved working directory and index state On main: task12 approved documentation backup before maintenance integration",
+  "merge_output": "Updating aafbddc..5f7d452\nFast-forward\n apps/web/README.md                                 |  91 ++-\n apps/web/e2e/response-renewal-live.spec.ts         | 142 ++++\n apps/web/playwright.config.ts                      |  14 +-\n apps/web/src/features/responses/ResponseDetail.tsx |  12 +-\n .../features/responses/responseContract.test.ts    |  20 +-\n .../web/src/features/responses/responseContract.ts |  10 +\n apps/web/src/lib/testing/playwrightConfig.test.ts  |  36 +\n docs/EvidenceSOC-project-preparation.md            | 119 ++-\n docs/acceptance/task12-maintenance-2026-10-18.json | 874 +++++++++++++++++++++\n docs/acceptance/task12-readiness.md                |  35 +\n .../plans/2026-09-27-task10-operation-guide.md     |  45 +-\n scripts/task10_browser_acceptance.py               | 670 ++++++++++++++++\n services/backend/src/evidencesoc/api/sse.py        |  12 +\n .../src/evidencesoc/persistence/event_search.py    |  18 +\n .../backend/src/evidencesoc/tools/event_work.py    |   3 +-\n .../tests/api/test_response_plan_contract.py       |  99 ++-\n services/backend/tests/api/test_sse_recovery.py    |  85 ++\n services/backend/tests/evidence/test_service.py    | 102 +++\n .../backend/tests/persistence/test_event_search.py |  61 +-\n .../tests/test_task10_browser_acceptance.py        | 196 +++++\n .../backend/tests/tools/test_security_events.py    |  57 ++\n 21 files changed, 2646 insertions(+), 55 deletions(-)\n create mode 100644 apps/web/e2e/response-renewal-live.spec.ts\n create mode 100644 apps/web/src/lib/testing/playwrightConfig.test.ts\n create mode 100644 docs/acceptance/task12-maintenance-2026-10-18.json\n create mode 100644 scripts/task10_browser_acceptance.py\n create mode 100644 services/backend/tests/test_task10_browser_acceptance.py",
+  "source_files_verified": 193,
+  "newline_only_source_alignment": [],
+  "historical_protected_files_verified": 59,
+  "root_runtime_gates": {
+    "live_context": true,
+    "scoring_filesystem_isolation": true,
+    "current_runtime_hashes_match": true
+  },
+  "maintenance_record": {
+    "path": "D:\\传智杯\\docs\\acceptance\\task12-maintenance-2026-10-18.json",
+    "sha256": "923d1fe699e5bd150d694bfa2235de7cf7e9aa303adeed47235f8936eec8b89f"
+  },
+  "tracked_diff_empty": true,
+  "index_diff_empty": true,
+  "untracked_nonignored_empty": true,
+  "push_performed": false,
+  "archive_receipt": {
+    "path": "D:\\传智杯\\.backups\\task12-maintenance-artifacts\\20261018T022747Z\\main-integration.json",
+    "sha256": "0f1f79c55b7165a2d983ecf93f325ac4519d0b45f1e449d334fcb224b05566d6"
+  },
+  "documentation_followup": "This appended record and four current-state documentation updates follow the observed fast-forward; executable source is unchanged.",
+  "task13_formal_runs": 0
+}

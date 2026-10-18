@@ -4,7 +4,7 @@
 
 本节为当前执行口径；后面的 2026-09-28 起步步骤及分阶段验证记录保留为历史资料。Task10 原功能验收为 105 项单元测试、61 项浏览器测试通过，浏览器失败、跳过和 flaky 均为 0，lint、typecheck 和生产构建通过。61 项是模拟 API 边界及真实后端用例的混合回归；真实批准、拒绝闭环使用 `LLM_MODE=fixture` 规则模式，不代表真实模型能力或全部用例均接入真实后端。见 [2026-10-16 集成记录](../../acceptance/task12-integration-2026-10-16.json)和 [2026-10-18 证据复核](../../acceptance/task1-12-verification-2026-10-18.json)。这些历史数量和报告保持原样。
 
-维护代码提交为 `5646db4`，后端两个 P2 及生产发现的审批后轮询缺陷均已关闭。后端全量 747 项无跳过、搜索相关 215 项、SSE 21 项、验收入口 18 项、前端 110 项及最终生产浏览器 62 项通过，静态门禁与新正常校准 MCP live/隔离/清理通过。最终生产无失败、跳过、flaky 或重试，源码和知识输入前后未变。详细证据见 [readiness 维护小节](../../acceptance/task12-readiness.md)及已验收的 [维护记录](../../acceptance/task12-maintenance-2026-10-18.json)；旧 JSON/JUnit 和冻结数据保持原样。维护分支的本地 main 整合另记。
+维护代码提交为 `5646db4`，后端两个 P2 及生产发现的审批后轮询缺陷均已关闭。后端全量 747 项无跳过、搜索相关 215 项、SSE 21 项、验收入口 18 项、前端 110 项及最终生产浏览器 62 项通过，静态门禁与新正常校准 MCP live/隔离/清理通过。最终生产无失败、跳过、flaky 或重试，源码和知识输入前后未变。详细证据见 [readiness 维护小节](../../acceptance/task12-readiness.md)及已验收的 [维护记录](../../acceptance/task12-maintenance-2026-10-18.json)；旧 JSON/JUnit 和冻结数据保持原样。本轮已快进整合到本地 `main`，见[整合记录](../../acceptance/task12-maintenance-integration-2026-10-18.json)。
 
 日常启动以 [前端 README](../../../apps/web/README.md)及现有配置为准，默认访问 `http://127.0.0.1:3000`。`BACKEND_URL` 由前端服务进程读取，指向 FastAPI；前端、后端两个进程的 `FRONTEND_ORIGIN` 必须与实际浏览器来源精确一致。后端源码默认 `LLM_MODE=fixture`、`DEMO_SESSION_ENABLED=false`；需要本地演示账户时显式开启后重启后端。不要因使用了不同的 `localhost` 来源而放宽 Origin 校验。
 

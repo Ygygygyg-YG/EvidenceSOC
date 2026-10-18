@@ -6,7 +6,7 @@
 
 - **历史验收已通过：** [Task 1～12 核验汇总](task1-12-verification-2026-10-18.json)及 [DEDALE 冻结记录](task12-dedale-freeze-2026-10-17.json)确认功能验收和数据准入；DEDALE `task12_accepted=true`，66 包（28 攻击、38 正常），最终 20 项数据关口通过。文档维护前代码基线为本地 `main` 的 `aafbddc`。
 - **历史证据边界：** [10 月 16 日集成记录](task12-integration-2026-10-16.json)保存后端 695 项、前端单元 105 项和浏览器 61 项的历史结果；浏览器回归包含模拟接口用例与真实后端批准/拒绝支路，模型模式为 fixture。DEDALE 专项回归记录为 576 通过、1 个 Windows 链接权限跳过。上述原记录不改写为本轮数量。
-- **本轮实现与验收：** 维护分支 `codex/task12-maintenance` 的代码提交 `5646db4` 已关闭 OpenSearch 响应检查、SSE 续期输出适配及生产发现的前端轮询三项缺陷，并实现隔离浏览器验收入口与真实续期用例。专项、后端全量、正常校准 MCP 隔离及最终生产回归均通过；[维护记录](task12-maintenance-2026-10-18.json)为 `accepted`。维护分支合入本地 main 随后单独记录，当前不提前声明完成整合。
+- **本轮实现与验收：** 维护分支 `codex/task12-maintenance` 的代码提交 `5646db4` 已关闭 OpenSearch 响应检查、SSE 续期输出适配及生产发现的前端轮询三项缺陷，并实现隔离浏览器验收入口与真实续期用例。专项、后端全量、正常校准 MCP 隔离及最终生产回归均通过；[维护记录](task12-maintenance-2026-10-18.json)为 `accepted`。维护版本已快进整合到本地 `main`，193 项源码/测试文件与受测字节一致，59 项历史保护文件未变；见[整合记录](task12-maintenance-integration-2026-10-18.json)。
 - **数据与历史证据：** 不修改已冻结的 AIT/DEDALE 数据、标签和选择规则；保留已有 JSON、JUnit、原始审计和实测报告。[重建说明](task12-dedale-rebuild-2026-10-18.json)仍为数据重建入口。
 - **修复后记录：** 新正常校准 live 报告 `dedale-live-report-final.json` 已通过，包含新 backend source/runtime hash、实际 MCP 文件系统隔离及清理检查，模型调用数为 0。命令 receipt 与实际报告分开保留，不更改旧哈希或弱化校验；[2026-10-18 维护记录](task12-maintenance-2026-10-18.json)已绑定完整报告、受测代码及失败历史。
 - **后续范围：** Task 13 正式模型运行数仍为 0；真实模型 worker 的评分目录、答案元数据及 Git 历史隔离在正式运行前验证。DEDALE 指标适用范围和 704 个案例×组别执行项见主计划 Task 13。
