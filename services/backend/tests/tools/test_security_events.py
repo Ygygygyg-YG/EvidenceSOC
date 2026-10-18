@@ -3,7 +3,10 @@ from types import SimpleNamespace
 
 import pytest
 from evidencesoc.domain.models import EvidenceItem
+from evidencesoc.persistence.event_search import OpenSearchEventQuery
 from evidencesoc.tools import security_events
+from evidencesoc.tools.errors import ToolExecutionError
+from evidencesoc.tools.event_work import EventSearchWork
 from evidencesoc.tools.policy import PolicyDeniedError
 
 
@@ -290,3 +293,57 @@ async def test_unexpected_work_failure_is_coded_and_audited_once() -> None:
     assert len(audit.records) == 1
     assert audit.records[0].error_code == "DEPENDENCY_UNAVAILABLE"
     assert "private database connection string" not in audit.records[0].result["reason"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("metadata", "code"),
+    [
+        ({"timed_out": True, "_shards": {"failed": 0}}, "DEPENDENCY_TIMEOUT"),
+        ({"timed_out": False, "_shards": {"failed": 1}}, "DEPENDENCY_UNAVAILABLE"),
+        ({}, "DEPENDENCY_UNAVAILABLE"),
+    ],
+    ids=["server-timeout", "failed-shard", "missing-metadata"],
+)
+async def test_incomplete_search_is_audited_with_no_hidden_managed_retry(
+    metadata: dict, code: str
+) -> None:
+    class SearchClient:
+        calls = 0
+
+        def search(self, **_kwargs: object) -> dict:
+            self.calls += 1
+            return {**metadata, "hits": {"hits": [{"_id": "SE-untrusted"}]}}
+
+    evidence_calls = []
+
+    def evidence_factory():
+        evidence_calls.append(True)
+        raise AssertionError("incomplete search must not create evidence")
+
+    client = SearchClient()
+    audit = AuditSpy()
+    tool = security_events.SecurityEventTools(
+        context=SimpleNamespace(
+            run_id="AR-unit-test",
+            incident_id="IN-unit-test",
+            trace_id="TRACE-unit-test",
+        ),
+        work=EventSearchWork(
+            query=OpenSearchEventQuery(client, index_name="security-events-v1"),
+            evidence_factory=evidence_factory,
+            max_attempts=1,
+        ),
+        audit=audit,
+    )
+    start = datetime(2026, 9, 21, 12, 0, tzinfo=UTC)
+    with pytest.raises(ToolExecutionError) as error:
+        await tool.search_security_events(
+            start, start + timedelta(minutes=5), {}, limit=2
+        )
+    assert error.value.code == code
+    assert evidence_calls == []
+    assert client.calls == 1
+    assert len(audit.records) == 1
+    assert audit.records[0].success is False
+    assert audit.records[0].error_code == code

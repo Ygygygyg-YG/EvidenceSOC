@@ -98,6 +98,10 @@ class EventSearchResponseError(RuntimeError):
     pass
 
 
+class EventSearchTimeoutError(TimeoutError):
+    pass
+
+
 class OpenSearchEventQuery:
     def __init__(
         self,
@@ -149,6 +153,20 @@ class OpenSearchEventQuery:
                 else {}
             ),
         )
+        timed_out = response.get("timed_out")
+        shards = response.get("_shards")
+        if (
+            type(timed_out) is not bool
+            or not isinstance(shards, dict)
+            or type(shards.get("failed")) is not int
+            or shards["failed"] < 0
+        ):
+            raise EventSearchResponseError("invalid event search response")
+        if timed_out:
+            raise EventSearchTimeoutError("event search timed out")
+        if shards["failed"] > 0:
+            raise EventSearchResponseError("event search returned failed shards")
+
         container = response.get("hits")
         if not isinstance(container, dict):
             raise EventSearchResponseError("invalid event search response")

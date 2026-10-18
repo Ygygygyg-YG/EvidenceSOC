@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildResponseQuery, loadResponseDetail, loadResponsePlans, readResponseFilters,
-  responseDetailSchema, responsePageSchema, submitResponseDecision,
+  responseDetailRefetchInterval, responseDetailSchema, responsePageSchema, submitResponseDecision,
   submitPlanRenewal,
 } from './responseContract';
 
@@ -31,6 +31,24 @@ const detail = { ...item, plan_version: planVersion, approval: null, validation_
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe('响应方案读模型', () => {
+  it('验证先落库时持续轮询，直到案件状态和模拟执行完成保存', () => {
+    const pending = responseDetailSchema.parse(detail);
+    const validation = {
+      validation_id: 'VAL-early', response_plan_id: 'RP-123', outcome: 'success',
+      summary: '验证先完成', checked_at: '2026-10-18T02:00:00Z', evidence_ids: ['EV-123'],
+    };
+    const earlyValidation = responseDetailSchema.parse({ ...detail,
+      decision_state: 'approved', validation_result: validation });
+    expect(earlyValidation.simulation_execution).toBeUndefined();
+    expect(responseDetailRefetchInterval(earlyValidation)).toBe(1000);
+    for (const incident_status of ['completed', 'failed', 'manual_review', 'rejected'] as const) {
+      expect(responseDetailRefetchInterval({ ...earlyValidation, incident_status })).toBe(false);
+    }
+    expect(responseDetailRefetchInterval(undefined)).toBe(false);
+    expect(responseDetailRefetchInterval(pending)).toBe(false);
+    expect(responseDetailRefetchInterval({ ...pending, decision_state: 'submitting' })).toBe(1000);
+    expect(responseDetailRefetchInterval({ ...pending, is_expired: true, incident_status: 'reconstructing' })).toBe(1000);
+  });
   it('接受真实批准流程中新查询的验证证据和带偏移的时间戳', async () => {
     // The live ApiStore payload cites fresh validation evidence outside the plan's baseline.
     const validation = {

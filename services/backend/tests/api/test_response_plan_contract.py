@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import asyncio
+import json
 from datetime import UTC, datetime, timedelta
 from time import monotonic, sleep
+from types import SimpleNamespace
 
+import pytest
+from evidencesoc.api import sse
+from evidencesoc.api.storage import ApiStore
 from evidencesoc.api.tables import ApiInvestigationTable
 from evidencesoc.persistence.tables import ResponsePlanTable
 from sqlalchemy import func, select
@@ -112,26 +118,45 @@ def test_expired_response_plan_disables_approval_and_returns_410(api_environment
     )
 
 
+@pytest.mark.parametrize("recover_pending", [False, True])
 def test_expired_plan_can_generate_a_fresh_reviewable_plan_in_same_investigation(
-    api_environment,
+    api_environment, monkeypatch, recover_pending
 ):
-    client, _store, _workflow, sessions, _app = api_environment
+    client, store, _workflow, sessions, app = api_environment
     created = create_investigation(client)
     awaiting = wait_status(client, created["incident_id"], "awaiting_approval")
     old_id = awaiting["response_plan"]["response_plan_id"]
+    old_cursor = store.get_investigation(created["investigation_id"])["last_event_id"]
     with sessions.begin() as session:
         old_plan = session.get(ResponsePlanTable, old_id)
         old_plan.expires_at = old_plan.created_at + timedelta(milliseconds=1)
     old_detail = client.get(f"/api/v1/response-plans/{old_id}").json()
     create_demo_session(client)
 
-    accepted = client.post(
-        f"/api/v1/response-plans/{old_id}/renew",
-        json={"plan_version": old_detail["plan_version"]},
-        headers=decision_headers("renew-" + old_id),
-    )
+    with monkeypatch.context() as paused:
+        if recover_pending:
+            # Leave the accepted command durable before a worker starts it.
+            paused.setattr(app.state.runner, "schedule", lambda _metadata: None)
+        accepted = client.post(
+            f"/api/v1/response-plans/{old_id}/renew",
+            json={"plan_version": old_detail["plan_version"]},
+            headers=decision_headers("renew-" + old_id),
+        )
+        if recover_pending:
+            restored = ApiStore(sessions)
+            pending = restored.get_investigation(created["investigation_id"])
+            assert pending["state"]["pending_renewal"]["response_plan_id"] == old_id
+            replay_pending = client.post(
+                f"/api/v1/response-plans/{old_id}/renew",
+                json={"plan_version": old_detail["plan_version"]},
+                headers=decision_headers("renew-" + old_id),
+            )
+            assert replay_pending.status_code == 200, replay_pending.text
     assert accepted.status_code == 202, accepted.text
     assert accepted.json()["investigation_id"] == created["investigation_id"]
+    if recover_pending:
+        app.state.runner.store = restored
+        client.portal.call(app.state.runner.recover)
 
     import time
 
@@ -161,6 +186,65 @@ def test_expired_plan_can_generate_a_fresh_reviewable_plan_in_same_investigation
     assert previous["is_current"] is False
     assert previous["available_actions"] == []
     assert previous["is_expired"] is True
+    persisted = store.list_events(created["investigation_id"], old_cursor)
+    renewal_events = [
+        item
+        for item in persisted
+        if item["event"] in {"plan.renewal_requested", "plan.renewed"}
+    ]
+    assert [item["event"] for item in renewal_events] == [
+        "plan.renewal_requested",
+        "plan.renewed",
+    ]
+
+    async def replay_until_new_approval():
+        async def is_disconnected():
+            return False
+
+        request = SimpleNamespace(
+            app=app, state=SimpleNamespace(), is_disconnected=is_disconnected
+        )
+        response = await sse.stream(
+            created["investigation_id"], request, last_event_id=str(old_cursor)
+        )
+        frames = []
+        try:
+            async with asyncio.timeout(3):
+                async for frame in response.body_iterator:
+                    frames.append(frame)
+                    if frame["event"] in {"stream.reset", "approval.required"}:
+                        break
+        finally:
+            await response.body_iterator.aclose()
+        return frames
+
+    frames = client.portal.call(replay_until_new_approval)
+    assert not any(frame["event"] == "stream.reset" for frame in frames)
+    assert [int(frame["id"]) for frame in frames] == list(
+        range(old_cursor + 1, old_cursor + len(frames) + 1)
+    )
+    by_id = {int(frame["id"]): frame for frame in frames}
+    for item in renewal_events:
+        frame = by_id[item["id"]]
+        assert frame["event"] == "status"
+        assert json.loads(frame["data"]) == {**item["data"], "status": "reconstructing"}
+    assert frames[-1]["event"] == "approval.required"
+    assert json.loads(frames[-1]["data"])["response_plan"]["response_plan_id"] == new_id
+    assert (
+        ApiStore(sessions).list_events(created["investigation_id"], old_cursor)
+        == persisted
+    )
+
+    expired_approval = client.post(
+        f"/api/v1/response-plans/{old_id}/approve",
+        json={
+            "reason": "Old plan must stay expired",
+            "plan_version": old_detail["plan_version"],
+        },
+        headers=decision_headers("old-approve-" + old_id),
+    )
+    assert expired_approval.status_code == 410, expired_approval.text
+    assert expired_approval.json()["error"]["code"] == "PLAN_EXPIRED"
     replay = client.post(
         f"/api/v1/response-plans/{old_id}/renew",
         json={"plan_version": old_detail["plan_version"]},
@@ -168,6 +252,7 @@ def test_expired_plan_can_generate_a_fresh_reviewable_plan_in_same_investigation
     )
     assert replay.status_code == 200, replay.text
     assert replay.json()["investigation_id"] == created["investigation_id"]
+    assert store.list_events(created["investigation_id"], old_cursor) == persisted
     with sessions() as session:
         assert (
             session.scalar(select(func.count()).select_from(ApiInvestigationTable)) == 1

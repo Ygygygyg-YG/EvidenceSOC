@@ -26,6 +26,7 @@ from evidencesoc.persistence.event_repository import (
 )
 from evidencesoc.persistence.event_search import (
     EventSearchResponseError,
+    EventSearchTimeoutError,
     OpenSearchEventQuery,
     OpenSearchEventStore,
 )
@@ -80,7 +81,7 @@ class EventSearchWork:
                     request_timeout=remaining,
                 )
                 break
-            except OpenSearchConnectionTimeout as exc:
+            except (OpenSearchConnectionTimeout, EventSearchTimeoutError) as exc:
                 if attempt == self._max_attempts - 1 or self._clock() >= deadline:
                     raise ToolDependencyTimeout("event search timed out") from exc
             except OpenSearchConnectionError as exc:

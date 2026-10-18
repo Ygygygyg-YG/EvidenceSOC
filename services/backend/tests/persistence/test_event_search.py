@@ -181,7 +181,7 @@ def test_event_query_reads_bounded_event_ids() -> None:
 
         def search(self, **kwargs: object) -> dict[str, Any]:
             self.calls.append(kwargs)
-            return {"hits": {"hits": [{"_id": "SE-first"}, {"_id": "SE-second"}]}}
+            return {"timed_out": False, "_shards": {"failed": 0}, "hits": {"hits": [{"_id": "SE-first"}, {"_id": "SE-second"}]}}
 
     client = SearchSpy()
     end = datetime(2026, 9, 21, 12, 5, tzinfo=UTC)
@@ -243,7 +243,7 @@ def test_event_query_rejects_untrusted_search_hits(hits: object) -> None:
 
         def search(self, **_kwargs: object) -> dict[str, Any]:
             self.calls += 1
-            return {"hits": {"hits": hits}}
+            return {"timed_out": False, "_shards": {"failed": 0}, "hits": {"hits": hits}}
 
     client = SearchClient()
     query = event_search.OpenSearchEventQuery(client, index_name="security-events-v1")
@@ -280,7 +280,7 @@ def test_event_query_rejects_invalid_args_before_search(
 
         def search(self, **_kwargs: object) -> dict[str, Any]:
             self.calls += 1
-            return {"hits": {"hits": []}}
+            return {"timed_out": False, "_shards": {"failed": 0}, "hits": {"hits": []}}
 
     client = SearchSpy()
     query = event_search.OpenSearchEventQuery(client, index_name="security-events-v1")
@@ -306,7 +306,7 @@ def test_event_query_forwards_request_timeout() -> None:
 
         def search(self, **kwargs: object) -> dict[str, Any]:
             self.kwargs = kwargs
-            return {"hits": {"hits": []}}
+            return {"timed_out": False, "_shards": {"failed": 0}, "hits": {"hits": []}}
 
     client = SearchSpy()
     query = event_search.OpenSearchEventQuery(client, index_name="security-events-v1")
@@ -320,3 +320,56 @@ def test_event_query_forwards_request_timeout() -> None:
     )
 
     assert client.kwargs["request_timeout"] == 1.5
+
+
+@pytest.mark.parametrize("hits", [[], [{"_id": "SE-partial"}]], ids=["empty", "partial"])
+def test_event_query_rejects_server_timeout_before_returning_hits(hits: list) -> None:
+    class SearchClient:
+        def search(self, **_kwargs: object) -> dict[str, Any]:
+            return {"timed_out": True, "_shards": {"failed": 0}, "hits": {"hits": hits}}
+
+    query = event_search.OpenSearchEventQuery(SearchClient(), index_name="security-events-v1")
+    with pytest.raises(TimeoutError, match="event search timed out"):
+        query.search_event_ids(time_from=NOW, time_to=NOW.replace(minute=5), filters={})
+
+
+@pytest.mark.parametrize("hits", [[], [{"_id": "SE-partial"}]], ids=["empty", "partial"])
+def test_event_query_rejects_failed_shards_before_returning_hits(hits: list) -> None:
+    class SearchClient:
+        def search(self, **_kwargs: object) -> dict[str, Any]:
+            return {"timed_out": False, "_shards": {"failed": 1}, "hits": {"hits": hits}}
+
+    query = event_search.OpenSearchEventQuery(SearchClient(), index_name="security-events-v1")
+    with pytest.raises(event_search.EventSearchResponseError):
+        query.search_event_ids(time_from=NOW, time_to=NOW.replace(minute=5), filters={})
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {},
+        {"_shards": {"failed": 0}},
+        {"timed_out": False},
+        {"timed_out": False, "_shards": {}},
+        *({"timed_out": value, "_shards": {"failed": 0}} for value in (None, 0, 1, "false")),
+        *({"timed_out": False, "_shards": value} for value in (None, [], "invalid")),
+        *({"timed_out": False, "_shards": {"failed": value}} for value in (None, True, False, -1, 0.0, "0")),
+    ],
+)
+def test_event_query_rejects_missing_or_invalid_completion_metadata(metadata: dict) -> None:
+    class SearchClient:
+        def search(self, **_kwargs: object) -> dict[str, Any]:
+            return {**metadata, "hits": {"hits": [{"_id": "SE-untrusted"}]}}
+
+    query = event_search.OpenSearchEventQuery(SearchClient(), index_name="security-events-v1")
+    with pytest.raises(event_search.EventSearchResponseError):
+        query.search_event_ids(time_from=NOW, time_to=NOW.replace(minute=5), filters={})
+
+
+def test_event_query_accepts_healthy_empty_response() -> None:
+    class SearchClient:
+        def search(self, **_kwargs: object) -> dict[str, Any]:
+            return {"timed_out": False, "_shards": {"failed": 0}, "hits": {"hits": []}}
+
+    query = event_search.OpenSearchEventQuery(SearchClient(), index_name="security-events-v1")
+    assert query.search_event_ids(time_from=NOW, time_to=NOW.replace(minute=5), filters={}) == []

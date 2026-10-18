@@ -169,6 +169,16 @@ export const responseDetailSchema = responseItemSchema.extend({
 });
 export type ResponsePlanDetail = z.infer<typeof responseDetailSchema>;
 
+export function responseDetailRefetchInterval(plan: ResponsePlanDetail | undefined): number | false {
+  if (!plan) return false;
+  if (plan.decision_state === 'submitting') return 1000;
+  if (plan.is_expired && plan.is_current && plan.incident_status === 'reconstructing') return 1000;
+  // Validation can be committed before the final incident/simulation snapshot.
+  if (plan.decision_state === 'approved'
+    && !['completed', 'failed', 'manual_review', 'rejected'].includes(plan.incident_status)) return 1000;
+  return false;
+}
+
 export const responsePageSchema = z.object({
   items: z.array(responseItemSchema), total: z.number().int().nonnegative(),
   page: z.number().int().positive(), page_size: z.number().int().min(1).max(200),

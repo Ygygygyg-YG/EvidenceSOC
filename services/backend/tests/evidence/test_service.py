@@ -21,6 +21,7 @@ from evidencesoc.persistence.event_repository import (
     EvidenceNotFoundError,
 )
 from opensearchpy.exceptions import ConnectionError as OpenSearchConnectionError
+from sqlalchemy.exc import SQLAlchemyError
 
 NOW = datetime(2026, 9, 21, 12, 0, tzinfo=UTC)
 EVENT_ID = "SE-01J8ZW4AAA0ABCDEFGHJKMNPQR"
@@ -523,3 +524,104 @@ def test_event_work_builder_disables_hidden_opensearch_retries(
         "retry_on_status": (),
         "retry_on_timeout": False,
     }
+
+
+def test_event_work_retries_server_timeout_then_persists_only_complete_results() -> None:
+    module = import_module("evidencesoc.tools.event_work")
+    event = make_event()
+    service, _, evidence_repository, _ = make_service(event)
+
+    class SearchClient:
+        calls = 0
+
+        def search(self, **_kwargs: object) -> dict[str, Any]:
+            self.calls += 1
+            return {
+                "timed_out": self.calls < 3,
+                "_shards": {"failed": 0},
+                "hits": {"hits": [{"_id": event.event_id}]},
+            }
+
+    client = SearchClient()
+    work = module.EventSearchWork(
+        query=module.OpenSearchEventQuery(client, index_name="security-events-v1"),
+        evidence_factory=lambda: nullcontext(service),
+    )
+    result = work(
+        time_from=NOW,
+        time_to=NOW + timedelta(minutes=5),
+        filters={},
+        limit=2,
+        incident_id=INCIDENT_ID,
+    )
+    assert client.calls == 3
+    assert evidence_repository.add_calls == [(INCIDENT_ID, result)]
+
+
+def test_event_work_exhausted_server_timeout_never_creates_evidence() -> None:
+    module = import_module("evidencesoc.tools.event_work")
+    event = make_event()
+    service, _, evidence_repository, _ = make_service(event)
+
+    class SearchClient:
+        calls = 0
+
+        def search(self, **_kwargs: object) -> dict[str, Any]:
+            self.calls += 1
+            return {
+                "timed_out": True,
+                "_shards": {"failed": 0},
+                "hits": {"hits": [{"_id": event.event_id}]},
+            }
+
+    client = SearchClient()
+    work = module.EventSearchWork(
+        query=module.OpenSearchEventQuery(client, index_name="security-events-v1"),
+        evidence_factory=lambda: nullcontext(service),
+    )
+    with pytest.raises(module.ToolDependencyTimeout) as error:
+        work(
+            time_from=NOW,
+            time_to=NOW + timedelta(minutes=5),
+            filters={},
+            limit=2,
+            incident_id=INCIDENT_ID,
+        )
+    assert error.value.code == "DEPENDENCY_TIMEOUT"
+    assert client.calls == 3
+    assert evidence_repository.add_calls == []
+
+
+def test_event_work_does_not_retry_evidence_creation_after_healthy_search() -> None:
+    module = import_module("evidencesoc.tools.event_work")
+
+    class Query:
+        calls = 0
+
+        def search_event_ids(self, **_kwargs: object) -> list[str]:
+            self.calls += 1
+            return [EVENT_ID]
+
+    class UnavailableEvidence:
+        calls = 0
+
+        def create_for_events(self, **_kwargs: object) -> list[EvidenceItem]:
+            self.calls += 1
+            raise SQLAlchemyError("ambiguous persistence failure")
+
+    query, service = Query(), UnavailableEvidence()
+    work = module.EventSearchWork(
+        query=query,
+        evidence_factory=lambda: nullcontext(service),
+    )
+    with pytest.raises(module.ToolDependencyError) as error:
+        work(
+            time_from=NOW,
+            time_to=NOW + timedelta(minutes=5),
+            filters={},
+            limit=2,
+            incident_id=INCIDENT_ID,
+        )
+    assert error.value.code == "DEPENDENCY_UNAVAILABLE"
+    assert query.calls == 1
+    assert service.calls == 1

@@ -52,6 +52,16 @@ def _has_gap(items: list[dict], cursor: int) -> bool:
     return any(item["id"] != cursor + offset for offset, item in enumerate(items, 1))
 
 
+def _public_event(item: dict) -> dict:
+    if item["event"] in {"plan.renewal_requested", "plan.renewed"}:
+        return {
+            **item,
+            "event": "status",
+            "data": {**item["data"], "status": "reconstructing"},
+        }
+    return item
+
+
 @router.get(
     "/{investigation_id}/stream",
     response_class=EventSourceResponse,
@@ -85,6 +95,7 @@ async def stream(
             ):
                 yield _reset(investigation_id, "CURSOR_EXPIRED")
                 return
+            pending = [_public_event(item) for item in pending]
             if any(item["event"] not in BUSINESS_EVENTS for item in pending):
                 yield _reset(investigation_id, "UNKNOWN_EVENT")
                 return
@@ -102,6 +113,7 @@ async def stream(
                 if _has_gap(tail, cursor):
                     yield _reset(investigation_id, "CURSOR_EXPIRED")
                     return
+                tail = [_public_event(item) for item in tail]
                 if any(item["event"] not in BUSINESS_EVENTS for item in tail):
                     yield _reset(investigation_id, "UNKNOWN_EVENT")
                     return

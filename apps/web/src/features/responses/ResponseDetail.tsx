@@ -8,7 +8,7 @@ import { Button, Input, Modal } from 'antd';
 import { AlertCircle, LoaderCircle, ShieldCheck } from 'lucide-react';
 import { severityLabels, statusLabels } from '../alerts/alertsContract';
 import {
-  buildResponseQuery, loadResponseDetail, readResponseFilters, ResponsePlanRequestError,
+  buildResponseQuery, loadResponseDetail, readResponseFilters, responseDetailRefetchInterval, ResponsePlanRequestError,
   submitPlanRenewal, submitResponseDecision, type ResponsePlanDetail,
 } from './responseContract';
 import { loadDemoSession, startDemoSession } from './sessionContract';
@@ -165,15 +165,7 @@ export default function ResponseDetail({ id }: { id: string }) {
   const query = useQuery({
     queryKey: ['response-plan-detail', id], queryFn: ({ signal }) => loadResponseDetail(id, signal),
     retry: false, staleTime: 0,
-    refetchInterval: (current) => {
-      const plan = current.state.data;
-      if (!plan) return false;
-      if (plan.decision_state === 'submitting') return 1000;
-      if (plan.is_expired && plan.is_current && plan.incident_status === 'reconstructing') return 1000;
-      if (plan.decision_state === 'approved' && !plan.validation_result
-        && !['completed', 'failed', 'manual_review', 'rejected'].includes(plan.incident_status)) return 1000;
-      return false;
-    },
+    refetchInterval: (current) => responseDetailRefetchInterval(current.state.data),
   });
   const sessionQuery = useQuery({
     queryKey: ['demo-session'], queryFn: loadDemoSession,
