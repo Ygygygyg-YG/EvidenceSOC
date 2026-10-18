@@ -1,0 +1,186 @@
+{
+  "bound_evidence": {
+    "corrected_freeze_receipt": {
+      "bytes": 66325,
+      "path": "D:\\传智杯\\.backups\\task12-readiness\\docs\\acceptance\\task12-dedale-freeze-2026-10-17.json",
+      "sha256": "7161f27ed07597abe6fdd8053801e3f923426783c7bbbe9b664309da2b2fdee5"
+    },
+    "current_code_regression": {
+      "errors": 0,
+      "failures": 0,
+      "passed": 576,
+      "path": "D:\\传智杯\\.backups\\task12-audit-parallel\\data\\dedale\\research\\priority-parallel-final-all-20261017.xml",
+      "seconds": 94.158,
+      "sha256": "61a2d85fd073ecaa20040fadfccdb30ee8bd465909889e045389a13966b34cfb",
+      "skipped": 1,
+      "tests": 577
+    },
+    "dedale_final_audit": {
+      "accepted": true,
+      "bytes": 1583,
+      "errors": [],
+      "failed_gates": [],
+      "finished_at_utc": "2026-10-17T15:24:17.9172478Z",
+      "gates": {
+        "annotation_leak_review": true,
+        "artifacts": true,
+        "candidate_closure": true,
+        "complete_label_join": true,
+        "cross_path_rebuild": true,
+        "dates": true,
+        "finalizer_code": true,
+        "live_context": true,
+        "minimum_size": true,
+        "neutral_policy": true,
+        "official_labels": true,
+        "official_sources": true,
+        "preparation_lineage": true,
+        "priority_policy": true,
+        "raw_priority_replay": true,
+        "resource_measurement": true,
+        "scoring_filesystem_isolation": true,
+        "stage_coverage": true,
+        "targeted_member_receipts": true,
+        "unchanged_inputs": true
+      },
+      "input_errors": [],
+      "model_invocations": 0,
+      "path": "D:\\传智杯\\data\\dedale\\research\\task12-priority-final-audit-20261017T135247.0902132Z.json",
+      "sha256": "1fa27811a72f452bd97ce0d84f3b33ad7429b4f0703a843228f9725771a70ab2"
+    },
+    "integrated_acceptance": {
+      "bytes": 10632,
+      "path": "D:\\传智杯\\.backups\\task12-readiness\\docs\\acceptance\\task12-integration-2026-10-16.json",
+      "sha256": "a0696462a35919bffe0e9748164495e8f579ef12f01ab60f38fb8bb1488d364f"
+    },
+    "rebuild_runbook": {
+      "bytes": 22886,
+      "path": "D:\\传智杯\\.backups\\task12-readiness\\docs\\acceptance\\task12-dedale-rebuild-2026-10-18.json",
+      "sha256": "a7e6d2af5fa1cacb7b1b13aaa0a5f061180f96120fd9346f2bde7a17afa1566f"
+    }
+  },
+  "corrections": [
+    {
+      "issue": "P1 answer-bearing stage evidence embedded in tracked freeze metadata",
+      "resolution": "Keep only review path/hash/size and stage counts. Full detailed review remains scoring-only; immutable data/code hashes unchanged."
+    },
+    {
+      "issue": "Accepted v4 command sequence existed only in ignored local supervisor states",
+      "resolution": "Tracked JSON runbook copies completed argv and adds explicit source/review/runtime prerequisites and fail-closed acceptance."
+    }
+  ],
+  "disclosed_variations": [
+    {
+      "detail": "Existing tested pgvector0.3.6 and TypeScript compatibility/native compiler configuration differ from the original installation example. This audit preserves the already-locked tested environment; completion refers to health/lint/type/build gates, not byte-for-byte identity with the historical dependency command.",
+      "item": "Dependency versions",
+      "task": 2
+    },
+    {
+      "detail": "The shorthand downgrade -1 failed at a merge head. The explicit downgrade target f3f8c2a59010 then upgrade/check/head passed with24 table contents unchanged; shorthand failure is not re-labeled success.",
+      "item": "Migration rollback command",
+      "task": 4
+    },
+    {
+      "detail": "The576-passed DEDALE regression has one Windows symlink-privilege skip. The20 actual data gates and critical live-service/browser cases passed; no critical gate was replaced by a skipped test.",
+      "item": "One noncritical test skip",
+      "task": 12
+    }
+  ],
+  "historical_git_answer_copies": "Previous commits remain local history. No remote is configured; do not expose repository history to future model processes.",
+  "inspection_basis_commit": "359901bf9c53f7d624c55aa6ce98552f3ab51804",
+  "method": "Read original requirements, current source, actual evidence files/JUnit and exact hashes. Prior execution is explicitly distinguished from this fresh read-only inspection. No complete backend/frontend/raw re-run during metadata correction.",
+  "new_markdown_files": 0,
+  "recorded_at_utc": "2026-10-18T01:51:48.498143+00:00",
+  "remaining_task1_12_engineering_items": [],
+  "root_worktree_inventory": {
+    "already_in_main_exact": 69,
+    "already_in_main_except_line_endings": 1,
+    "different_versions": 23,
+    "meaning": "Git compares the original directory to task11-ait HEADf21dda1; many apparent changes are already present in later main commits.",
+    "modified": 30,
+    "not_in_main": 15,
+    "not_in_main_breakdown": {
+      "historical_dedale_notes": 2,
+      "later_evaluation_drafts": 13
+    },
+    "total": 108,
+    "untracked": 78
+  },
+  "schema_version": 1,
+  "scope": "Task1-12 functional acceptance and current source/evidence binding; not Task13 experiments or Task14 final security acceptance.",
+  "task13_formal_runs": 0,
+  "tasks": [
+    {
+      "evidence_summary": "Environment and tool versions were verified in integrated service acceptance.",
+      "name": "环境与仓库",
+      "status": "functional_acceptance_evidence_verified",
+      "task": 1
+    },
+    {
+      "evidence_summary": "Health, backend lint/type checks and frontend lint/type/build passed in bound integrated evidence.",
+      "name": "脚手架和质量门禁",
+      "status": "functional_acceptance_evidence_verified",
+      "task": 2
+    },
+    {
+      "evidence_summary": "Actual PostgreSQL/OpenSearch health, restart persistence and vector path verified.",
+      "name": "数据库与检索存储",
+      "status": "functional_acceptance_evidence_verified",
+      "task": 3
+    },
+    {
+      "evidence_summary": "Unique merge head e902c4b7a1d6, explicit downgrade target/upgrade/check and preserved table content verified.",
+      "name": "领域模型和迁移",
+      "status": "functional_acceptance_evidence_verified",
+      "task": 4
+    },
+    {
+      "evidence_summary": "Stable IDs, source hashes, idempotency and real dual-store tests verified.",
+      "name": "日志接入与证据链",
+      "status": "functional_acceptance_evidence_verified",
+      "task": 5
+    },
+    {
+      "evidence_summary": "Scope/budget/timeout/retry and durable per-call ledger boundary tests verified.",
+      "name": "只读 MCP 工具",
+      "status": "functional_acceptance_evidence_verified",
+      "task": 6
+    },
+    {
+      "evidence_summary": "Real 997-chunk corpus retrieval, citation support and persisted reload checks verified.",
+      "name": "ATT&CK RAG",
+      "status": "functional_acceptance_evidence_verified",
+      "task": 7
+    },
+    {
+      "evidence_summary": "Approve/reject, fallback, query inheritance and PostgreSQL recovery verified.",
+      "name": "六角色调查工作流",
+      "status": "functional_acceptance_evidence_verified",
+      "task": 8
+    },
+    {
+      "evidence_summary": "Authentication/authorization, SSE, audit evidence and measured latency checks verified.",
+      "name": "FastAPI/SSE/审计",
+      "status": "functional_acceptance_evidence_verified",
+      "task": 9
+    },
+    {
+      "evidence_summary": "105 unit tests and61 actual browser cases include approval/rejection, role409 and viewport checks.",
+      "name": "前端调查闭环",
+      "status": "functional_acceptance_evidence_verified",
+      "task": 10
+    },
+    {
+      "evidence_summary": "22 cases11attack11normal,22ablation,110 artifact pairs matched independent absolute roots.",
+      "name": "AIT 冻结与重建",
+      "status": "functional_acceptance_evidence_verified",
+      "task": 11
+    },
+    {
+      "evidence_summary": "20 raw-data gates passed;66cases28attack38normal frozen; metadata boundary and CLI handoff corrected.",
+      "name": "统一集成与 DEDALE 准入",
+      "status": "functional_acceptance_evidence_verified",
+      "task": 12
+    }
+  ]
+}
