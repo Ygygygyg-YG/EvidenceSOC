@@ -47,6 +47,12 @@ class AttackKnowledgeRepository:
         limit: int,
         timeout_seconds: float | None = None,
     ) -> list[dict[str, str]]:
+        from evidencesoc.agents.capabilities import retrieval_mode
+
+        if retrieval_mode() != "hybrid":
+            raise PermissionError(
+                "legacy keyword repository is disabled by retrieval policy"
+            )
         if timeout_seconds is not None:
             _set_statement_timeout(self._session, timeout_seconds)
 

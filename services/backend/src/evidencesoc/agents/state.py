@@ -15,6 +15,10 @@ class InvestigationState(TypedDict, total=False):
     knowledge: list[dict[str, Any]]
     origin: dict[str, Any] | None
     classification: dict[str, Any] | None
+    diagnosis: dict[str, Any] | None
+    diagnostic_snapshot: dict[str, Any] | None
+    diagnostic_snapshot_sha256: str | None
+    diagnosis_execution_status: str
     attack_steps: list[dict[str, Any]]
     response_plan: dict[str, Any] | None
     approval: dict[str, Any] | None
@@ -25,6 +29,7 @@ class InvestigationState(TypedDict, total=False):
     fallback_used: bool
     collection_round: int
     collection_budget_used: int
+    collection_reserved_calls: int
     collection_round_used: int
     collection_ledger_ids: list[str]
     collection_tool_attempts: int
@@ -34,6 +39,9 @@ class InvestigationState(TypedDict, total=False):
     verification_call_count: int
     verification_attempts: int
     verification_duration_ms: int
+    verification_status: str
+    verification_namespace: str
+    verification_evidence: list[dict[str, Any]]
     errors: list[dict[str, Any]]
     events: Annotated[list[dict[str, Any]], add]
     stop_reason: str | None

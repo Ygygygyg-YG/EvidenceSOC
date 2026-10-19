@@ -51,3 +51,9 @@ pytest-cache-files-*/
 
 # DEDALE local source archives, scoring data and generated cases
 /data/dedale/
+
+# Task13 protected local attempts, credentials, reviews and scratch
+/data/task13/
+/.tmp/
+/.task13-*/
+/evals/.task13_test_tmp/

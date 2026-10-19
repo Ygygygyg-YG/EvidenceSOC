@@ -31,6 +31,7 @@ class DeepSeekStructuredModel:
                 "knowledge",
                 "origin",
                 "classification",
+                "diagnosis",
                 "attack_steps",
                 "response_plan",
                 "simulation",

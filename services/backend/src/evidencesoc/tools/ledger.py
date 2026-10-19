@@ -81,8 +81,34 @@ def query_fingerprint(tool_name: str, arguments: dict[str, Any]) -> str:
 
 
 class Ledger:
-    def __init__(self, session_factory: Callable[[], Session]) -> None:
+    def __init__(
+        self,
+        session_factory: Callable[[], Session],
+        *,
+        first_round_reserved_calls: int = 0,
+        total_reserved_calls: int = 0,
+    ) -> None:
         self._sessions = session_factory
+        if (
+            type(first_round_reserved_calls) is not int
+            or type(total_reserved_calls) is not int
+            or not 0 <= first_round_reserved_calls <= 3
+            or not 0 <= total_reserved_calls <= 6
+        ):
+            raise ValueError("reserved slots exceed the original collection budget")
+        self.first_round_reserved_calls = first_round_reserved_calls
+        self.total_reserved_calls = total_reserved_calls
+
+    def with_reservations(
+        self, *, first_round_reserved_calls: int, total_reserved_calls: int
+    ) -> Ledger:
+        return Ledger(
+            self._sessions,
+            first_round_reserved_calls=max(
+                self.first_round_reserved_calls, first_round_reserved_calls
+            ),
+            total_reserved_calls=max(self.total_reserved_calls, total_reserved_calls),
+        )
 
     @contextmanager
     def _write(self) -> Iterator[Session]:
@@ -196,11 +222,7 @@ class Ledger:
             )
             if existing is None:
                 existing = next(
-                    (
-                        row
-                        for row in same_round
-                        if row.status in reusable_statuses
-                    ),
+                    (row for row in same_round if row.status in reusable_statuses),
                     None,
                 )
             if existing is not None:
@@ -236,11 +258,17 @@ class Ledger:
             if unfinished is not None:
                 return self._snapshot(session, unfinished, reused=True)
             if purpose == "collection":
-                if self._count(session, incident_id, purpose, round_no) >= 3:
+                round_limit = 3 - (
+                    self.first_round_reserved_calls if round_no == 1 else 0
+                )
+                if self._count(session, incident_id, purpose, round_no) >= round_limit:
                     raise BudgetExceeded(
                         "collection round has used three logical calls"
                     )
-                if self._count(session, incident_id, purpose) >= 6:
+                if (
+                    self._count(session, incident_id, purpose)
+                    >= 6 - self.total_reserved_calls
+                ):
                     raise BudgetExceeded("investigation has used six logical calls")
             now = datetime.now(UTC)
             row = InvestigationToolCallTable(
@@ -362,8 +390,13 @@ class Ledger:
                 round_no=round_no,
                 round_used=round_used,
                 total_used=total_used,
-                round_remaining=max(0, 3 - round_used),
-                total_remaining=max(0, 6 - total_used),
+                round_remaining=max(
+                    0,
+                    3
+                    - round_used
+                    - (self.first_round_reserved_calls if round_no == 1 else 0),
+                ),
+                total_remaining=max(0, 6 - total_used - self.total_reserved_calls),
                 verification_calls=verification_calls,
                 verification_attempts=verification_attempts,
             )

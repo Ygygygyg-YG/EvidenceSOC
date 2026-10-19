@@ -1,0 +1,462 @@
+{
+  "$defs": {
+    "CallBudget": {
+      "additionalProperties": false,
+      "properties": {
+        "max_tool_calls_per_round": {
+          "const": 3,
+          "default": 3,
+          "title": "Max Tool Calls Per Round",
+          "type": "integer"
+        },
+        "max_tool_calls": {
+          "const": 6,
+          "default": 6,
+          "title": "Max Tool Calls",
+          "type": "integer"
+        },
+        "max_tool_attempts": {
+          "const": 3,
+          "default": 3,
+          "title": "Max Tool Attempts",
+          "type": "integer"
+        },
+        "max_model_attempts": {
+          "const": 3,
+          "default": 3,
+          "title": "Max Model Attempts",
+          "type": "integer"
+        },
+        "max_model_calls": {
+          "default": 16,
+          "maximum": 16,
+          "minimum": 1,
+          "title": "Max Model Calls",
+          "type": "integer"
+        }
+      },
+      "title": "CallBudget",
+      "type": "object"
+    },
+    "CapabilityPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_tools": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Allowed Tools",
+          "type": "array"
+        },
+        "rag_mode": {
+          "default": "hybrid",
+          "enum": [
+            "hybrid",
+            "semantic_only",
+            "disabled"
+          ],
+          "title": "Rag Mode",
+          "type": "string"
+        },
+        "verification_enabled": {
+          "default": true,
+          "title": "Verification Enabled",
+          "type": "boolean"
+        },
+        "first_round_reserved_calls": {
+          "default": 0,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "First Round Reserved Calls",
+          "type": "integer"
+        },
+        "total_reserved_calls": {
+          "default": 0,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Total Reserved Calls",
+          "type": "integer"
+        }
+      },
+      "title": "CapabilityPolicy",
+      "type": "object"
+    },
+    "ModelConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "requested_model": {
+          "const": "deepseek-flash",
+          "default": "deepseek-flash",
+          "title": "Requested Model",
+          "type": "string"
+        },
+        "published_version": {
+          "default": "DeepSeek-V4.1-Flash-1017",
+          "title": "Published Version",
+          "type": "string"
+        },
+        "version_checked_at": {
+          "default": "2026-10-18T13:02:05Z",
+          "title": "Version Checked At",
+          "type": "string"
+        },
+        "base_url": {
+          "const": "https://api.deepseek.com",
+          "default": "https://api.deepseek.com",
+          "title": "Base Url",
+          "type": "string"
+        },
+        "thinking": {
+          "const": "disabled",
+          "default": "disabled",
+          "title": "Thinking",
+          "type": "string"
+        },
+        "temperature": {
+          "const": 0,
+          "default": 0,
+          "title": "Temperature",
+          "type": "integer"
+        },
+        "max_tokens": {
+          "default": 4096,
+          "maximum": 8192,
+          "minimum": 128,
+          "title": "Max Tokens",
+          "type": "integer"
+        },
+        "max_context_bytes": {
+          "default": 65536,
+          "maximum": 262144,
+          "minimum": 4096,
+          "title": "Max Context Bytes",
+          "type": "integer"
+        },
+        "timeout_seconds": {
+          "default": 120,
+          "maximum": 300,
+          "minimum": 1,
+          "title": "Timeout Seconds",
+          "type": "integer"
+        },
+        "provider_seed_supported": {
+          "const": false,
+          "default": false,
+          "title": "Provider Seed Supported",
+          "type": "boolean"
+        },
+        "provider_seed": {
+          "default": null,
+          "title": "Provider Seed",
+          "type": "null"
+        }
+      },
+      "title": "ModelConfig",
+      "type": "object"
+    },
+    "PlanRow": {
+      "additionalProperties": false,
+      "properties": {
+        "row_id": {
+          "title": "Row Id",
+          "type": "string"
+        },
+        "case_id": {
+          "title": "Case Id",
+          "type": "string"
+        },
+        "group": {
+          "enum": [
+            "B0",
+            "B1",
+            "B2",
+            "B3",
+            "A1",
+            "A2",
+            "A3",
+            "A4"
+          ],
+          "title": "Group",
+          "type": "string"
+        },
+        "replicate": {
+          "const": 1,
+          "default": 1,
+          "title": "Replicate",
+          "type": "integer"
+        },
+        "worker_spec": {
+          "$ref": "#/$defs/WorkerRunSpec"
+        }
+      },
+      "required": [
+        "row_id",
+        "case_id",
+        "group",
+        "worker_spec"
+      ],
+      "title": "PlanRow",
+      "type": "object"
+    },
+    "SeedPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "const": "raw-events-v1",
+          "default": "raw-events-v1",
+          "title": "Version",
+          "type": "string"
+        },
+        "max_events": {
+          "default": 20,
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Max Events",
+          "type": "integer"
+        },
+        "max_event_bytes": {
+          "default": 2048,
+          "maximum": 4096,
+          "minimum": 128,
+          "title": "Max Event Bytes",
+          "type": "integer"
+        },
+        "max_total_bytes": {
+          "default": 24576,
+          "maximum": 32768,
+          "minimum": 1024,
+          "title": "Max Total Bytes",
+          "type": "integer"
+        },
+        "knowledge_top_k": {
+          "default": 5,
+          "maximum": 10,
+          "minimum": 1,
+          "title": "Knowledge Top K",
+          "type": "integer"
+        }
+      },
+      "title": "SeedPolicy",
+      "type": "object"
+    },
+    "WorkerRunSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {
+          "pattern": "^[A-Za-z0-9_-]{1,80}$",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "case_id": {
+          "pattern": "^[A-Za-z0-9_-]{1,80}$",
+          "title": "Case Id",
+          "type": "string"
+        },
+        "group": {
+          "enum": [
+            "B0",
+            "B1",
+            "B2",
+            "B3",
+            "A1",
+            "A2",
+            "A3",
+            "A4"
+          ],
+          "title": "Group",
+          "type": "string"
+        },
+        "config_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Config Sha256",
+          "type": "string"
+        },
+        "model": {
+          "$ref": "#/$defs/ModelConfig"
+        },
+        "capabilities": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CapabilityPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "seed": {
+          "$ref": "#/$defs/SeedPolicy"
+        },
+        "budget": {
+          "$ref": "#/$defs/CallBudget"
+        },
+        "orchestration_seed": {
+          "const": 42,
+          "default": 42,
+          "title": "Orchestration Seed",
+          "type": "integer"
+        },
+        "replicate": {
+          "const": 1,
+          "default": 1,
+          "title": "Replicate",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "run_id",
+        "case_id",
+        "group",
+        "config_sha256"
+      ],
+      "title": "WorkerRunSpec",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "task13-v1",
+      "default": "task13-v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "run_id": {
+      "pattern": "^[A-Za-z0-9_-]{1,80}$",
+      "title": "Run Id",
+      "type": "string"
+    },
+    "dataset": {
+      "enum": [
+        "ait",
+        "dedale"
+      ],
+      "title": "Dataset",
+      "type": "string"
+    },
+    "split": {
+      "default": "development",
+      "enum": [
+        "development",
+        "validation",
+        "test"
+      ],
+      "title": "Split",
+      "type": "string"
+    },
+    "case_root": {
+      "title": "Case Root",
+      "type": "string"
+    },
+    "selection_path": {
+      "title": "Selection Path",
+      "type": "string"
+    },
+    "selection_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Selection Sha256",
+      "type": "string"
+    },
+    "admission_paths": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Admission Paths",
+      "type": "array"
+    },
+    "freeze_manifest": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Freeze Manifest"
+    },
+    "freeze_sha256": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Freeze Sha256"
+    },
+    "source_commit": {
+      "pattern": "^[0-9a-f]{40}$",
+      "title": "Source Commit",
+      "type": "string"
+    },
+    "budget_cny": {
+      "default": 100,
+      "exclusiveMinimum": 0,
+      "maximum": 100,
+      "title": "Budget Cny",
+      "type": "number"
+    },
+    "dev_budget_cny": {
+      "default": 15,
+      "exclusiveMinimum": 0,
+      "maximum": 15,
+      "title": "Dev Budget Cny",
+      "type": "number"
+    },
+    "reviewer": {
+      "default": "user",
+      "minLength": 1,
+      "title": "Reviewer",
+      "type": "string"
+    },
+    "review_window": {
+      "default": "19:00-00:00 Asia/Shanghai",
+      "title": "Review Window",
+      "type": "string"
+    },
+    "max_attempts": {
+      "const": 2,
+      "default": 2,
+      "title": "Max Attempts",
+      "type": "integer"
+    },
+    "rerun_policy": {
+      "const": "infra_transport_only_v1",
+      "default": "infra_transport_only_v1",
+      "title": "Rerun Policy",
+      "type": "string"
+    },
+    "model": {
+      "$ref": "#/$defs/ModelConfig"
+    },
+    "seed": {
+      "$ref": "#/$defs/SeedPolicy"
+    },
+    "call_budget": {
+      "$ref": "#/$defs/CallBudget"
+    },
+    "rows": {
+      "items": {
+        "$ref": "#/$defs/PlanRow"
+      },
+      "title": "Rows",
+      "type": "array"
+    }
+  },
+  "required": [
+    "run_id",
+    "dataset",
+    "case_root",
+    "selection_path",
+    "selection_sha256",
+    "source_commit"
+  ],
+  "title": "ControllerRunSpec",
+  "type": "object"
+}

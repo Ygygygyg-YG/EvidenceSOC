@@ -14,7 +14,13 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from evidencesoc.agents.capabilities import (
+    InvestigationCapabilities,
+    capability_scope,
+    current_capabilities,
+)
 from evidencesoc.agents.collection import BoundedCollector
+from evidencesoc.agents.diagnosis import Diagnosis
 from evidencesoc.agents.fallback import matching_target
 from evidencesoc.agents.models import SimulatedAction
 from evidencesoc.config import BACKEND_ROOT, Settings
@@ -97,7 +103,12 @@ class PostgresWorkflowServices:
         settings: Settings,
         *,
         session_factory: Callable[[], Session] | None = None,
+        capabilities: InvestigationCapabilities | None = None,
+        verification_observer: Any | None = None,
+        model_timeout: float = 60.0,
     ) -> None:
+        if model_timeout <= 0:
+            raise ValueError("model_timeout must be positive")
         self.settings = settings
         self._engine = None
         if session_factory is None:
@@ -107,6 +118,9 @@ class PostgresWorkflowServices:
             session_factory = create_session_factory(self._engine)
         self._sessions = session_factory
         self.planner_model: Any | None = None
+        self.capabilities = capabilities
+        self.verification_observer = verification_observer
+        self.model_timeout = model_timeout
 
     async def aclose(self) -> None:
         await asyncio.to_thread(self.close)
@@ -153,6 +167,8 @@ class PostgresWorkflowServices:
             ]
             if state.get("plan_generation", 0):
                 identity_parts.append(state["plan_generation"])
+            if role == "validate" and state.get("verification_namespace"):
+                identity_parts.append(state["verification_namespace"])
             identity = json.dumps(identity_parts)
             run_id = "AR-" + sha256(identity.encode()).hexdigest()[:32]
         else:
@@ -210,6 +226,15 @@ class PostgresWorkflowServices:
                     references.extend(delta[key].get("evidence_ids", []))
             for step in delta.get("attack_steps", []):
                 references.extend(step.get("evidence_ids", []))
+            if delta.get("diagnosis") is not None:
+                diagnosis = Diagnosis.model_validate(delta["diagnosis"])
+                references.extend(diagnosis.evidence_ids)
+                for claim in diagnosis.claims:
+                    references.extend(claim.evidence_ids)
+                for stage in diagnosis.stage_instances:
+                    references.extend(stage.evidence_ids)
+                if diagnosis.origin:
+                    references.extend(diagnosis.origin.evidence_ids)
             evidence_ids = list(dict.fromkeys(references))
             self._check_evidence_scope(session, row.incident_id, evidence_ids)
             row.evidence_ids = evidence_ids
@@ -241,6 +266,20 @@ class PostgresWorkflowServices:
                     )
                     if key in delta
                 }
+            internal = {
+                key: deepcopy(delta[key])
+                for key in (
+                    "diagnosis",
+                    "diagnostic_snapshot",
+                    "diagnostic_snapshot_sha256",
+                    "diagnosis_execution_status",
+                    "verification_status",
+                    "collection_reserved_calls",
+                )
+                if key in delta
+            }
+            if internal:
+                row.output_summary = {**(row.output_summary or {}), **internal}
 
     def _scope(self, incident_id: str) -> dict[str, Any]:
         loaded = self._load_incident(incident_id)
@@ -307,10 +346,17 @@ class PostgresWorkflowServices:
 
     @staticmethod
     async def _call(
-        session: Any, name: str, arguments: dict[str, Any]
+        session: Any,
+        name: str,
+        arguments: dict[str, Any],
+        *,
+        capabilities: InvestigationCapabilities | None = None,
     ) -> list[dict[str, Any]]:
         if name not in ALLOWED_TOOLS:
             raise PermissionError("MCP tool is not allowed")
+        policy = capabilities if capabilities is not None else current_capabilities()
+        if policy is not None:
+            policy.require_tool(name)
         result = await session.call_tool(name, arguments)
         if result.isError:
             payload = result.structuredContent or {}
@@ -358,7 +404,12 @@ class PostgresWorkflowServices:
                 ) from exc
             try:
                 values = await asyncio.wait_for(
-                    self._call(session, "search_security_events", arguments),
+                    self._call(
+                        session,
+                        "search_security_events",
+                        arguments,
+                        capabilities=self.capabilities,
+                    ),
                     timeout=10.0,
                 )
             except TimeoutError:
@@ -450,6 +501,10 @@ class PostgresWorkflowServices:
         )
 
     async def collect(self, state: Mapping[str, Any], run_id: str) -> dict[str, Any]:
+        with capability_scope(self.capabilities):
+            return await self._collect(state, run_id)
+
+    async def _collect(self, state: Mapping[str, Any], run_id: str) -> dict[str, Any]:
         incident_id = state["incident_id"]
         scope = await asyncio.to_thread(self._scope, incident_id)
         context = RunContext(
@@ -472,7 +527,9 @@ class PostgresWorkflowServices:
             await self._check_tools(session)
             collector = BoundedCollector(
                 ledger=Ledger(self._sessions),
-                invoke=lambda name, arguments: self._call(session, name, arguments),
+                invoke=lambda name, arguments: self._call(
+                    session, name, arguments, capabilities=self.capabilities
+                ),
                 scope={
                     key: scope[key]
                     for key in ("alert_id", "time_from", "time_to", "filters", "limit")
@@ -481,6 +538,8 @@ class PostgresWorkflowServices:
                 run_id=run_id,
                 model=model,
                 llm_mode=self.settings.llm_mode,
+                capabilities=self.capabilities,
+                model_timeout=self.model_timeout,
             )
             collected = await collector.run()
         values = collected.pop("evidence_values")
@@ -490,6 +549,8 @@ class PostgresWorkflowServices:
         return {**collected, "evidence": evidence}
 
     async def verify(self, state: Mapping[str, Any], run_id: str) -> dict[str, Any]:
+        if self.capabilities is not None and not self.capabilities.verification_enabled:
+            raise PermissionError("verification disabled by investigation capabilities")
         started = monotonic()
         incident_id = state["incident_id"]
         scope = await asyncio.to_thread(self._scope, incident_id)
@@ -598,7 +659,7 @@ class PostgresWorkflowServices:
         evidence = await self.hydrate_evidence(incident_id, values)
         rows = await asyncio.to_thread(ledger.calls, incident_id, 1, "verification")
         own = [row for row in rows if row.run_id == run_id]
-        return {
+        result = {
             "evidence": evidence,
             "executed_checks": [
                 {
@@ -614,6 +675,19 @@ class PostgresWorkflowServices:
             "verification_attempts": sum(row.attempts for row in own),
             "verification_duration_ms": round((monotonic() - started) * 1000),
         }
+        if self.verification_observer is not None:
+            observed = await self.verification_observer(
+                dict(state), run_id, deepcopy(result)
+            )
+            if not isinstance(observed, dict) or set(observed) - {
+                "effect_observations",
+                "evidence",
+            }:
+                raise ValueError(
+                    "verification observer must return only observations and evidence"
+                )
+            result.update(observed)
+        return result
 
     @staticmethod
     def _check_evidence_scope(

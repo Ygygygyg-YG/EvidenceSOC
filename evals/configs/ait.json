@@ -1,0 +1,49 @@
+{
+  "admission_paths": [
+    "D:\\传智杯\\docs\\acceptance\\task12-ait-hashes.json"
+  ],
+  "budget_cny": 100.0,
+  "call_budget": {
+    "max_model_attempts": 3,
+    "max_model_calls": 16,
+    "max_tool_attempts": 3,
+    "max_tool_calls": 6,
+    "max_tool_calls_per_round": 3
+  },
+  "case_root": "D:\\传智杯\\.backups\\task12-readiness\\data\\ait\\cases\\test",
+  "dataset": "ait",
+  "dev_budget_cny": 15.0,
+  "freeze_manifest": null,
+  "freeze_sha256": null,
+  "max_attempts": 2,
+  "model": {
+    "base_url": "https://api.deepseek.com",
+    "max_context_bytes": 65536,
+    "max_tokens": 4096,
+    "provider_seed": null,
+    "provider_seed_supported": false,
+    "published_version": "DeepSeek-V4.1-Flash-1017",
+    "requested_model": "deepseek-flash",
+    "temperature": 0,
+    "thinking": "disabled",
+    "timeout_seconds": 120,
+    "version_checked_at": "2026-10-18T13:02:05Z"
+  },
+  "rerun_policy": "infra_transport_only_v1",
+  "review_window": "19:00-00:00 Asia/Shanghai",
+  "reviewer": "user",
+  "rows": [],
+  "run_id": "task13-campaign",
+  "schema_version": "task13-v1",
+  "seed": {
+    "knowledge_top_k": 5,
+    "max_event_bytes": 2048,
+    "max_events": 20,
+    "max_total_bytes": 24576,
+    "version": "raw-events-v1"
+  },
+  "selection_path": "D:\\传智杯\\.backups\\task12-readiness\\data\\manifests\\ait-task11-test-selection.json",
+  "selection_sha256": "bbabb8b072c29a770863c4a6a88537e446305ba7006ff40afa2cf1229fdbbd3b",
+  "source_commit": "1979cdd8eaed131aeb1d91b2fdd5ba6fc4ba0452",
+  "split": "test"
+}

@@ -7,15 +7,19 @@ from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Any, Protocol
 
+import httpx
 from pydantic import BaseModel, ValidationError
 
 from evidencesoc.agents import fallback
+from evidencesoc.agents.capabilities import InvestigationCapabilities
+from evidencesoc.agents.diagnosis import Diagnosis
 from evidencesoc.agents.models import (
     AnalysisOutput,
     ReconstructionOutput,
     ResponseOutput,
     SimulatedAction,
 )
+from evidencesoc.agents.verification import EffectObservation, evaluate_simulated_effect
 from evidencesoc.config import Settings
 from evidencesoc.domain.models import (
     ApprovalRecord,
@@ -26,6 +30,7 @@ from evidencesoc.domain.models import (
     ValidationResult,
 )
 from evidencesoc.evidence.citations import validate_citations
+from evidencesoc.ids import new_ulid
 
 
 class WorkflowServices(Protocol):
@@ -59,7 +64,9 @@ def validate_output_citations(output: BaseModel, state: dict[str, Any]) -> None:
 
     def visit(value: Any) -> None:
         if isinstance(value, dict):
-            if "evidence_ids" in value:
+            if "evidence_ids" in value and not (
+                "verdict" in value and not value["evidence_ids"]
+            ):
                 facts.append(
                     {
                         "claim_id": str(len(facts)),
@@ -79,8 +86,21 @@ def validate_output_citations(output: BaseModel, state: dict[str, Any]) -> None:
         for item in validate_citations(facts, allowed, knowledge)
     ):
         raise ValueError("invalid citation")
-    if isinstance(output, AnalysisOutput) and output.origin is not None:
-        origin = output.origin
+    diagnosis = (
+        output
+        if isinstance(output, Diagnosis)
+        else output.diagnosis
+        if isinstance(output, AnalysisOutput)
+        else None
+    )
+    origins = (
+        [output.origin]
+        if isinstance(output, AnalysisOutput) and output.origin is not None
+        else []
+    )
+    if diagnosis is not None and diagnosis.origin is not None:
+        origins.append(diagnosis.origin)
+    for origin in origins:
         items = [
             item
             for item in state.get("evidence", [])
@@ -116,6 +136,8 @@ def validate_output_citations(output: BaseModel, state: dict[str, Any]) -> None:
         and set(output.classification.technique_ids) - available_techniques
     ):
         raise ValueError("technique mapping has no retrieved knowledge")
+    if diagnosis is not None and set(diagnosis.technique_ids) - available_techniques:
+        raise ValueError("technique mapping has no retrieved knowledge")
     if isinstance(output, ReconstructionOutput) and any(
         step.technique_id is not None and step.technique_id not in available_techniques
         for step in output.attack_steps
@@ -148,6 +170,7 @@ class NodeHandlers:
         model: StructuredModel | None = None,
         *,
         model_timeout: float = 60.0,
+        capabilities: InvestigationCapabilities | None = None,
     ) -> None:
         if model_timeout <= 0:
             raise ValueError("model_timeout must be positive")
@@ -155,6 +178,7 @@ class NodeHandlers:
         self.settings = settings
         self.model = model
         self.model_timeout = model_timeout
+        self.capabilities = capabilities
 
     async def _structured(
         self, role: str, schema: type[BaseModel], state: dict[str, Any], rule: Any
@@ -175,9 +199,12 @@ class NodeHandlers:
                 validate_output_citations(result, state)
                 return result, True, errors
         code = "MODEL_UNAVAILABLE"
+        model_call_id = new_ulid()
+        attempt_categories: list[str] = []
         for _ in range(3):
             try:
                 model_state = deepcopy(state)
+                model_state["_model_call_id"] = model_call_id
                 model_state["evidence"] = [
                     {**item, "raw": fallback.observed_raw(item)}
                     for item in state.get("evidence", [])
@@ -187,15 +214,44 @@ class NodeHandlers:
                     timeout=self.model_timeout,
                 )
                 result = schema.model_validate(output)
+                if (
+                    self.capabilities is not None
+                    and role == "analyze"
+                    and isinstance(result, AnalysisOutput)
+                    and result.diagnosis is None
+                ):
+                    raise ValueError(
+                        "evaluation analysis requires an explicit diagnosis"
+                    )
                 validate_output_citations(result, state)
                 return result, bool(state.get("fallback_used")), errors
             except TimeoutError:
                 code = "MODEL_TIMEOUT"
+                category = "transport"
             except (ValueError, ValidationError):
                 code = "MODEL_INVALID_OUTPUT"
-            except Exception:  # noqa: BLE001 - Provider boundary must sanitize errors.
+                category = "schema"
+            except Exception as error:  # noqa: BLE001 - Provider boundary must sanitize errors.
                 code = "MODEL_UNAVAILABLE"
-        errors.append({"role": role, "code": code})
+                category = (
+                    "transport"
+                    if isinstance(error, httpx.TransportError)
+                    else "application"
+                )
+            if self.capabilities is not None:
+                attempt_categories.append(category)
+        terminal_error: dict[str, Any] = {"role": role, "code": code}
+        if self.capabilities is not None:
+            terminal_error["category"] = next(
+                (
+                    category
+                    for category in attempt_categories
+                    if category not in {"infrastructure", "transport"}
+                ),
+                "transport",
+            )
+            terminal_error["attempt_categories"] = attempt_categories
+        errors.append(terminal_error)
         result = rule(state)
         validate_output_citations(result, state)
         return result, True, errors
@@ -245,6 +301,7 @@ class NodeHandlers:
                     "collection_model_attempts",
                     "collection_observations",
                     "collection_stop_reason",
+                    "collection_reserved_calls",
                 )
                 if key in result
             },
@@ -258,12 +315,26 @@ class NodeHandlers:
             "analyze", AnalysisOutput, state, fallback.analyze
         )
         data = output.model_dump(mode="json")
-        unknown = not data["classification"] or data["classification"].get(
-            "primary_type"
-        ) in {None, "unknown"}
+        diagnosis = data.get("diagnosis")
+        unknown = (
+            diagnosis["verdict"] == "unknown"
+            if diagnosis
+            else not data["classification"]
+            or data["classification"].get("primary_type") in {None, "unknown"}
+        )
         return {
             **data,
-            "status": "analyzing",
+            "diagnosis_execution_status": "failed"
+            if any(
+                error.get("role") == "analyze"
+                for error in errors[len(state.get("errors", [])) :]
+            )
+            else "completed"
+            if diagnosis is not None
+            else "missing",
+            "status": "completed"
+            if diagnosis and diagnosis["verdict"] == "benign"
+            else "analyzing",
             "fallback_used": used,
             "errors": errors,
             "stop_reason": "insufficient_evidence" if unknown else None,
@@ -273,8 +344,58 @@ class NodeHandlers:
         output, used, errors = await self._structured(
             "reconstruct", ReconstructionOutput, state, fallback.reconstruct
         )
+        diagnosis_delta = {}
+        if state.get("diagnosis") is not None:
+            diagnosis = Diagnosis.model_validate(state["diagnosis"])
+            data = diagnosis.model_dump(mode="json")
+            data["stage_instances"] = [
+                {
+                    "instance_id": step.attack_step_id,
+                    "phase": step.phase or "unknown",
+                    "sequence": step.sequence,
+                    "evidence_ids": list(step.evidence_ids),
+                }
+                for step in output.attack_steps
+            ]
+            data["evidence_ids"] = list(
+                dict.fromkeys(
+                    [
+                        *diagnosis.evidence_ids,
+                        *(
+                            evidence_id
+                            for step in output.attack_steps
+                            for evidence_id in step.evidence_ids
+                        ),
+                    ]
+                )
+            )
+            data["technique_ids"] = list(
+                dict.fromkeys(
+                    [
+                        *diagnosis.technique_ids,
+                        *(
+                            step.technique_id
+                            for step in output.attack_steps
+                            if step.technique_id
+                        ),
+                    ]
+                )
+            )
+            diagnosis_delta["diagnosis"] = Diagnosis.model_validate(data).model_dump(
+                mode="json"
+            )
         return {
             **output.model_dump(mode="json"),
+            **diagnosis_delta,
+            "diagnosis_execution_status": "failed"
+            if any(
+                error.get("role") == "reconstruct"
+                for error in errors[len(state.get("errors", [])) :]
+            )
+            else state.get(
+                "diagnosis_execution_status",
+                "completed" if state.get("diagnosis") is not None else "missing",
+            ),
             "status": "reconstructing",
             "fallback_used": used,
             "errors": errors,
@@ -301,6 +422,15 @@ class NodeHandlers:
         }
 
     async def validate(self, state: dict[str, Any]) -> dict[str, Any]:
+        if self.capabilities is not None and not self.capabilities.verification_enabled:
+            return {
+                "status": "completed",
+                "validation_result": None,
+                "verification_status": "unverified",
+                "verification_call_count": 0,
+                "verification_attempts": 0,
+                "verification_duration_ms": 0,
+            }
         result = await self.services.verify(state, state["_run_id"])
         fresh = result.get("evidence", [])
         executed_checks = result.get("executed_checks", [])
@@ -316,6 +446,8 @@ class NodeHandlers:
         time_to = max(query_ends) if query_ends else None
         delta: dict[str, Any] = {
             "status": "validating",
+            "verification_status": "evaluated",
+            "verification_evidence": deepcopy(fresh),
             "evidence": merge_by_id(state.get("evidence", []), fresh, "evidence_id"),
             "fallback_used": self.settings.llm_mode == "fixture"
             or bool(state.get("fallback_used")),
@@ -341,7 +473,13 @@ class NodeHandlers:
             plan = ResponsePlan.model_validate(state.get("response_plan"))
             validation = ValidationResult(
                 validation_id="VR-"
-                + sha256(plan.response_plan_id.encode()).hexdigest()[:24],
+                + sha256(
+                    (
+                        plan.response_plan_id
+                        + "|"
+                        + state.get("verification_namespace", "")
+                    ).encode()
+                ).hexdigest()[:24],
                 response_plan_id=plan.response_plan_id,
                 outcome=ValidationOutcome.INSUFFICIENT_EVIDENCE,
                 summary="No fresh verification evidence was returned; prior investigation evidence cannot prove a simulated or real response succeeded.",
@@ -430,9 +568,25 @@ class NodeHandlers:
             )
             fresh_by_id = {item["evidence_id"]: item for item in fresh}
             for index, check in enumerate(executed_checks):
+                observations = result.get("effect_observations")
+                pair = (
+                    observations.get(check["check_id"])
+                    if isinstance(observations, dict)
+                    else None
+                )
+                try:
+                    before = EffectObservation.model_validate(pair["before"])
+                    after = EffectObservation.model_validate(pair["after"])
+                except (ValidationError, ValueError, TypeError, KeyError):
+                    before, after = None, None
                 cited = [
                     evidence_id
-                    for evidence_id in check["evidence_ids"]
+                    for evidence_id in dict.fromkeys(
+                        [
+                            *check["evidence_ids"],
+                            *(after.evidence_ids if after is not None else []),
+                        ]
+                    )
                     if evidence_id in fresh_by_id
                 ]
                 matched = index < len(actions) and any(
@@ -443,8 +597,34 @@ class NodeHandlers:
                     check_outcome = ValidationOutcome.FAILURE
                     explanation = "The approved simulated action did not complete for this plan version."
                 elif matched:
-                    check_outcome = ValidationOutcome.SUCCESS
-                    explanation = "The approved simulated action matched freshly queried target evidence; this does not prove a real-world effect."
+                    check_outcome = ValidationOutcome.INSUFFICIENT_EVIDENCE
+                    try:
+                        allowed_before = {
+                            item["evidence_id"] for item in state.get("evidence", [])
+                        } | set(fresh_by_id)
+                        if (
+                            before is not None
+                            and after is not None
+                            and before.namespace == state.get("verification_namespace")
+                            and before.action_id == actions[index].action_id
+                            and before.target == actions[index].target
+                            and set(before.evidence_ids) <= allowed_before
+                            and set(after.evidence_ids) <= set(cited)
+                        ):
+                            check_outcome = ValidationOutcome(
+                                evaluate_simulated_effect(
+                                    actions[index].action, before, after
+                                )
+                            )
+                    except (ValidationError, ValueError, TypeError, AttributeError):
+                        pass
+                    explanation = (
+                        "Typed before/after observations establish the simulated effect only."
+                        if check_outcome == ValidationOutcome.SUCCESS
+                        else "An explicit post-action observation reports failure."
+                        if check_outcome == ValidationOutcome.FAILURE
+                        else "Target presence alone cannot establish the simulated effect; observations are absent, unchanged, or incomplete."
+                    )
                 else:
                     check_outcome = ValidationOutcome.INSUFFICIENT_EVIDENCE
                     explanation = "The executed query returned no target evidence; the simulation effect remains unverified."
@@ -461,7 +641,12 @@ class NodeHandlers:
                     check["outcome"] == ValidationOutcome.SUCCESS for check in checks
                 ):
                     outcome = ValidationOutcome.SUCCESS
-                    summary = "Approved simulated actions match freshly queried target evidence. This verifies the simulation only, not real system changes or effective traffic blocking."
+                    summary = "Typed before/after observations establish all approved simulated effects. This does not prove real system changes or effective traffic blocking."
+                elif any(
+                    check["outcome"] == ValidationOutcome.FAILURE for check in checks
+                ):
+                    outcome = ValidationOutcome.FAILURE
+                    summary = "Post-action observations explicitly report a simulated effect failure."
                 else:
                     outcome = ValidationOutcome.INSUFFICIENT_EVIDENCE
                     summary = "Fresh evidence does not establish every simulated target; real effects remain unverified."
@@ -471,7 +656,12 @@ class NodeHandlers:
                 "response_plan_id", "RP-unavailable"
             )
         validation = ValidationResult(
-            validation_id="VR-" + sha256(response_plan_id.encode()).hexdigest()[:24],
+            validation_id="VR-"
+            + sha256(
+                (
+                    response_plan_id + "|" + state.get("verification_namespace", "")
+                ).encode()
+            ).hexdigest()[:24],
             response_plan_id=response_plan_id,
             outcome=outcome,
             summary=summary,

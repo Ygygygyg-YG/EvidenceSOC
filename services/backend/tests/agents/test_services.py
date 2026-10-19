@@ -31,6 +31,54 @@ from sqlalchemy.orm import sessionmaker
 NOW = datetime(2026, 9, 21, 10, 20, tzinfo=UTC)
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("timeout", [60.0, 120.0])
+async def test_collect_passes_frozen_model_timeout_to_planner(monkeypatch, timeout):
+    module = importlib.import_module("evidencesoc.agents.services")
+    options = {} if timeout == 60.0 else {"model_timeout": timeout}
+    api = module.PostgresWorkflowServices(
+        Settings(_env_file=None, llm_mode="fixture"),
+        session_factory=lambda: None,
+        **options,
+    )
+    captured = {}
+
+    class Collector:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        async def run(self):
+            return {"evidence_values": [], "knowledge": []}
+
+    @asynccontextmanager
+    async def open_session(*args, **kwargs):
+        yield object()
+
+    async def check_tools(_session):
+        pass
+
+    async def hydrate(_incident, values):
+        return values
+
+    monkeypatch.setattr(module, "BoundedCollector", Collector)
+    monkeypatch.setattr(module, "open_stdio_session", open_session)
+    monkeypatch.setattr(
+        api,
+        "_scope",
+        lambda _incident: {
+            "alert_id": "AL-1",
+            "time_from": NOW,
+            "time_to": NOW,
+            "filters": {},
+            "limit": 100,
+        },
+    )
+    monkeypatch.setattr(api, "_check_tools", check_tools)
+    monkeypatch.setattr(api, "hydrate_evidence", hydrate)
+    await api.collect({"incident_id": "IN-1"}, "AR-1")
+    assert captured["model_timeout"] == timeout
+
+
 @pytest.fixture
 def database(tmp_path: Any) -> Any:
     engine = create_engine(f"sqlite+pysqlite:///{tmp_path / 'workflow.db'}")
@@ -227,6 +275,19 @@ async def test_role_run_is_reused_after_restart_and_distinct_for_fallback_attemp
         ).all()
         assert len(rows) == 2
         assert session.get(AgentRunTable, original).status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_verification_namespaces_do_not_reuse_validation_run(database: Any):
+    api = service(database)
+    state = {"incident_id": "IN-1", "trace_id": "TRACE-paired", "fallback_count": 0}
+    first = await api.start_run(
+        {**state, "verification_namespace": "opaque-one"}, "validate"
+    )
+    second = await api.start_run(
+        {**state, "verification_namespace": "opaque-two"}, "validate"
+    )
+    assert first != second
 
 
 @pytest.mark.asyncio
@@ -908,3 +969,26 @@ async def test_save_result_is_idempotent_and_preserves_approval_scope(
     state["response_plan"]["incident_id"] = "IN-2"
     with pytest.raises(PermissionError):
         await api.save_result(state)
+
+
+@pytest.mark.asyncio
+async def test_static_mcp_call_compatibility_and_explicit_capability_guard():
+    from types import SimpleNamespace
+    from evidencesoc.agents.capabilities import InvestigationCapabilities
+    from evidencesoc.agents.services import PostgresWorkflowServices
+
+    class Session:
+        calls = 0
+
+        async def call_tool(self, name, arguments):
+            self.calls += 1
+            return SimpleNamespace(isError=False, structuredContent={"result": []})
+
+    session = Session()
+    assert await PostgresWorkflowServices._call(session, "get_alert_context", {}) == []
+    policy = InvestigationCapabilities(allowed_tools=frozenset())
+    with pytest.raises(PermissionError):
+        await PostgresWorkflowServices._call(
+            session, "get_alert_context", {}, capabilities=policy
+        )
+    assert session.calls == 1

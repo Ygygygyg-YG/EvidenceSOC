@@ -5,6 +5,7 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from evidencesoc.agents.diagnosis import Diagnosis
 from evidencesoc.domain.models import (
     AttackClassification,
     AttackOrigin,
@@ -29,13 +30,22 @@ class AttackStep(BaseModel):
 
 class AnalysisOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    origin: AttackOrigin | None
-    classification: AttackClassification | None
+    origin: AttackOrigin | None = None
+    classification: AttackClassification | None = None
+    diagnosis: Diagnosis | None = None
 
     @model_validator(mode="after")
     def no_evaluation_labels(self) -> Self:
         if self.classification is not None and self.classification.dataset_labels:
             raise ValueError("evaluation labels are unavailable to the investigation")
+        if (
+            self.diagnosis is not None
+            and self.diagnosis.verdict != "attack"
+            and self.classification is not None
+        ):
+            raise ValueError(
+                "non-attack diagnosis cannot contain an attack classification"
+            )
         return self
 
 

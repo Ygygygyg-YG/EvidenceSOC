@@ -24,13 +24,19 @@ def ledger():
         connect_args={"timeout": 30},
     )
     with engine.begin() as connection:
-        connection.execute(text("CREATE TABLE incidents (incident_id VARCHAR(64) PRIMARY KEY)"))
         connection.execute(
-            text("CREATE TABLE agent_runs (run_id VARCHAR(64) PRIMARY KEY, incident_id VARCHAR(64))")
+            text("CREATE TABLE incidents (incident_id VARCHAR(64) PRIMARY KEY)")
+        )
+        connection.execute(
+            text(
+                "CREATE TABLE agent_runs (run_id VARCHAR(64) PRIMARY KEY, incident_id VARCHAR(64))"
+            )
         )
         connection.execute(text("INSERT INTO incidents VALUES ('IN-1'), ('IN-2')"))
         connection.execute(
-            text("INSERT INTO agent_runs VALUES ('AR-1', 'IN-1'), ('AR-2', 'IN-1'), ('AR-OTHER', 'IN-2')")
+            text(
+                "INSERT INTO agent_runs VALUES ('AR-1', 'IN-1'), ('AR-2', 'IN-1'), ('AR-OTHER', 'IN-2')"
+            )
         )
     InvestigationToolCallTable.__table__.create(engine)
     yield Ledger(sessionmaker(engine, expire_on_commit=False))
@@ -93,7 +99,9 @@ def test_failed_and_empty_calls_spend_budget_but_verification_is_separate(ledger
     assert summary.verification_calls == 1
 
 
-def test_incomplete_query_resumes_same_record_and_attempt_limit_survives_restart(ledger):
+def test_incomplete_query_resumes_same_record_and_attempt_limit_survives_restart(
+    ledger,
+):
     first = reserve(ledger, 1)
     ledger.begin_attempt(first.call_id)
     recovered = reserve(ledger, 1, run_id="AR-2")
@@ -117,10 +125,45 @@ def test_concurrent_reservations_are_serialized_and_cannot_overspend(ledger):
     assert len({item.call_id for item in duplicates}) == 1
     with ThreadPoolExecutor(max_workers=8) as pool:
         futures = [pool.submit(reserve, ledger, number) for number in range(2, 10)]
-        outcomes = [future.result() if future.exception() is None else future.exception() for future in futures]
+        outcomes = [
+            future.result() if future.exception() is None else future.exception()
+            for future in futures
+        ]
     assert sum(not isinstance(item, Exception) for item in outcomes) == 2
-    assert all(isinstance(item, BudgetExceeded) for item in outcomes if isinstance(item, Exception))
+    assert all(
+        isinstance(item, BudgetExceeded)
+        for item in outcomes
+        if isinstance(item, Exception)
+    )
     assert ledger.summary("IN-1", 1).round_used == 3
+
+
+def test_concurrent_a1_reservations_preserve_both_nontransferable_slots(ledger):
+    protected = ledger.with_reservations(
+        first_round_reserved_calls=1,
+        total_reserved_calls=1,
+    )
+    for round_no, expected in ((1, 2), (2, 3)):
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            futures = [
+                pool.submit(
+                    reserve, protected, round_no * 10 + number, round_no=round_no
+                )
+                for number in range(8)
+            ]
+            outcomes = [
+                future.result() if future.exception() is None else future.exception()
+                for future in futures
+            ]
+        assert sum(not isinstance(item, Exception) for item in outcomes) == expected
+        assert all(
+            isinstance(item, BudgetExceeded)
+            for item in outcomes
+            if isinstance(item, Exception)
+        )
+    summary = protected.summary("IN-1", 2)
+    assert summary.total_used == 5
+    assert summary.total_remaining == 0
 
 
 @pytest.mark.parametrize("recovery_round", [1, 2])

@@ -59,6 +59,124 @@ def test_rule_lookup_uses_sql_exploitation_intent_for_sqli_alert() -> None:
     )
 
 
+@pytest.mark.asyncio
+async def test_planner_retries_keep_one_explicit_logical_call_identity():
+    seen = []
+
+    class Model:
+        async def structured(self, role, schema, current):
+            seen.append(current.get("_model_call_id"))
+            raise ValueError("invalid response")
+
+    planner = collector(model=Model())
+    await planner._plan(1)
+    await planner._plan(1)
+    assert len(seen) == 6
+    assert seen[0] and seen[:3] == [seen[0]] * 3
+    assert seen[3] and seen[3:] == [seen[3]] * 3
+    assert seen[0] != seen[3]
+
+
+@pytest.mark.asyncio
+async def test_a1_preserves_reserved_slot_and_never_calls_log_tools(memory_ledger):
+    from evidencesoc.agents.capabilities import InvestigationCapabilities
+
+    calls = []
+
+    class Model:
+        async def structured(self, role, schema, state):
+            assert state["collection_context"]["allowed_tools"] == [
+                "lookup_attack_technique"
+            ]
+            return {
+                "action": "call",
+                "tool_name": "lookup_attack_technique",
+                "arguments": {"query": f"query-{len(calls)}", "limit": 8},
+                "rationale": "Public knowledge lookup.",
+            }
+
+    async def invoke(name, arguments):
+        assert name == "lookup_attack_technique"
+        calls.append(arguments)
+        return [{"knowledge_chunk_id": f"KC-{len(calls)}"}]
+
+    policy = InvestigationCapabilities(
+        allowed_tools=frozenset({"lookup_attack_technique"}),
+        first_round_reserved_calls=1,
+        total_reserved_calls=1,
+    )
+    first = await BoundedCollector(
+        ledger=memory_ledger,
+        invoke=invoke,
+        scope=SCOPE,
+        state={"incident_id": "IN-1"},
+        run_id="AR-1",
+        model=Model(),
+        llm_mode="deepseek",
+        capabilities=policy,
+    ).run()
+    assert len(calls) == 2
+    assert first["collection_budget_used"] == 2
+    second = await BoundedCollector(
+        ledger=memory_ledger,
+        invoke=invoke,
+        scope=SCOPE,
+        state={"incident_id": "IN-1", "fallback_count": 1},
+        run_id="AR-1",
+        model=Model(),
+        llm_mode="deepseek",
+        capabilities=policy,
+    ).run()
+    assert len(calls) == 5
+    assert second["collection_budget_used"] == 5
+    assert second["collection_reserved_calls"] == 1
+
+
+def test_reserved_slots_are_enforced_by_atomic_ledger_reservation(memory_ledger):
+    protected = memory_ledger.with_reservations(
+        first_round_reserved_calls=1, total_reserved_calls=1
+    )
+    for index in range(2):
+        protected.reserve(
+            "IN-1",
+            "AR-1",
+            1,
+            "lookup_attack_technique",
+            {"query": f"query-{index}"},
+            "Knowledge.",
+        )
+    with pytest.raises(BudgetExceeded):
+        protected.reserve(
+            "IN-1",
+            "AR-1",
+            1,
+            "lookup_attack_technique",
+            {"query": "denied"},
+            "Knowledge.",
+        )
+    for index in range(3):
+        protected.reserve(
+            "IN-1",
+            "AR-1",
+            2,
+            "lookup_attack_technique",
+            {"query": f"round2-{index}"},
+            "Knowledge.",
+        )
+    with pytest.raises(BudgetExceeded):
+        protected.reserve(
+            "IN-1",
+            "AR-1",
+            3,
+            "lookup_attack_technique",
+            {"query": "denied-total"},
+            "Knowledge.",
+        )
+    assert protected.summary("IN-1", 1).round_remaining == 0
+    assert protected.summary("IN-1", 3).total_remaining == 0
+    assert protected.summary("IN-1", 3).total_used == 5
+
+
 @pytest.fixture
 def memory_ledger() -> Ledger:
     engine = create_engine(

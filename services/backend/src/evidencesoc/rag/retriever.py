@@ -10,6 +10,7 @@ from sqlalchemy import func, literal, literal_column, or_, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
+from evidencesoc.agents.capabilities import RetrievalMode, retrieval_mode
 from evidencesoc.execution import check_execution
 from evidencesoc.persistence.tables import KnowledgeChunkTable
 from evidencesoc.rag.ingest_attack import PINNED_STIX_SHA256
@@ -65,12 +66,20 @@ def reciprocal_rank_fusion(
 
 class HybridRetriever:
     def __init__(
-        self, repository: RetrievalRepository, embedder: QueryEmbedder
+        self,
+        repository: RetrievalRepository,
+        embedder: QueryEmbedder,
+        *,
+        mode: RetrievalMode | None = None,
     ) -> None:
         self._repository = repository
         self._embedder = embedder
+        self._mode = mode
 
     def retrieve_knowledge(self, query: str, top_k: int = 8) -> list[KnowledgeResult]:
+        mode = retrieval_mode(self._mode)
+        if mode == "disabled":
+            raise PermissionError("knowledge retrieval is disabled")
         if type(top_k) is not int or not 1 <= top_k <= 50:
             raise ValueError("top_k must be an integer between 1 and 50")
         if not isinstance(query, str) or len(query) > 4096:
@@ -79,10 +88,12 @@ class HybridRetriever:
         if "\x00" in query or not any(character.isalnum() for character in query):
             return []
         check_execution()
-        if TECHNIQUE_ID_PATTERN.fullmatch(query):
+        if mode == "hybrid" and TECHNIQUE_ID_PATTERN.fullmatch(query):
             return self._repository.exact(query.upper(), top_k)
         candidates = min(100, max(32, top_k * 4))
-        keywords = self._repository.keyword(query, candidates)
+        keywords = (
+            self._repository.keyword(query, candidates) if mode == "hybrid" else []
+        )
         check_execution()
         vector = self._embedder.embed_query(query)
         check_execution()
@@ -144,6 +155,8 @@ class PostgresKnowledgeRepository:
     def _rows(
         self, filters: list[Any], order: list[Any], limit: int
     ) -> list[KnowledgeResult]:
+        if retrieval_mode() == "disabled":
+            raise PermissionError("knowledge retrieval is disabled")
         remaining = check_execution()
         if remaining is not None:
             _set_statement_timeout(self._session, remaining)
@@ -178,6 +191,8 @@ class PostgresKnowledgeRepository:
         return results
 
     def exact(self, technique_id: str, limit: int) -> list[KnowledgeResult]:
+        if retrieval_mode() != "hybrid":
+            raise PermissionError("exact retrieval is disabled")
         return self._rows(
             [
                 self._metadata("object_type") == "attack-pattern",
@@ -188,6 +203,8 @@ class PostgresKnowledgeRepository:
         )
 
     def keyword(self, query: str, limit: int) -> list[KnowledgeResult]:
+        if retrieval_mode() != "hybrid":
+            raise PermissionError("keyword retrieval is disabled")
         # Domain terms let the lexical channel retain the intent of mixed
         # Chinese/English SOC queries as well as entities such as DNS or SSH.
         translations = {
@@ -248,8 +265,15 @@ class PostgresKnowledgeRepository:
 class HybridAttackKnowledgeRepository:
     """Preserve the audited MCP work contract while using hybrid retrieval."""
 
-    def __init__(self, session: Session, embedder: QueryEmbedder) -> None:
+    def __init__(
+        self,
+        session: Session,
+        embedder: QueryEmbedder,
+        *,
+        mode: RetrievalMode | None = None,
+    ) -> None:
         self._session = session
+        self._mode = mode
         self._retriever = HybridRetriever(
             PostgresKnowledgeRepository(
                 session,
@@ -257,6 +281,7 @@ class HybridAttackKnowledgeRepository:
                 attack_only=True,
             ),
             embedder,
+            mode=mode,
         )
 
     def lookup(
@@ -266,6 +291,8 @@ class HybridAttackKnowledgeRepository:
         limit: int,
         timeout_seconds: float | None = None,
     ) -> list[KnowledgeResult]:
+        if retrieval_mode(self._mode) == "disabled":
+            raise PermissionError("knowledge retrieval is disabled")
         if timeout_seconds is not None:
             _set_statement_timeout(self._session, timeout_seconds)
         return self._retriever.retrieve_knowledge(query, limit)
@@ -278,8 +305,13 @@ def _embedding_provider(model_path: Path) -> QueryEmbedder:
     return LocalEmbeddingProvider(model_path=model_path)
 
 
-def retrieve_knowledge(query: str, top_k: int = 8) -> list[KnowledgeResult]:
+def retrieve_knowledge(
+    query: str, top_k: int = 8, *, mode: RetrievalMode | None = None
+) -> list[KnowledgeResult]:
     """Retrieve pinned local knowledge. Runtime never downloads data or models."""
+    mode = retrieval_mode(mode)
+    if mode == "disabled":
+        raise PermissionError("knowledge retrieval is disabled")
     from evidencesoc.config import Settings
     from evidencesoc.persistence.database import (
         create_database_engine,
@@ -299,6 +331,7 @@ def retrieve_knowledge(query: str, top_k: int = 8) -> list[KnowledgeResult]:
                     embedding_model=embedder.model_id,
                 ),
                 embedder,
+                mode=mode,
             ).retrieve_knowledge(query, top_k)
     finally:
         engine.dispose()

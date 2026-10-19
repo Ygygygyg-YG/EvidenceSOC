@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Callable
 from datetime import datetime
@@ -66,6 +67,7 @@ def create_server(
         limit: int = 100,
     ) -> list[EvidenceItem]:
         """Search bounded security events and persist verified evidence."""
+        _require_capability("search_security_events")
         server.mark_business_invoked()
         return await event_tools.search_security_events(
             time_from=time_from,
@@ -81,6 +83,7 @@ def create_server(
         after_seconds: int = 900,
     ) -> list[EvidenceItem]:
         """Return verified events scoped to the current incident alert."""
+        _require_capability("get_alert_context")
         server.mark_business_invoked()
         return await alert_tools.get_alert_context(
             alert_id=alert_id,
@@ -94,10 +97,19 @@ def create_server(
         limit: int = 10,
     ) -> list[dict[str, str]]:
         """Look up local ATT&CK knowledge without network access."""
+        _require_capability("lookup_attack_technique")
         server.mark_business_invoked()
         return await attack_tools.lookup_attack_technique(query=query, limit=limit)
 
     return server
+
+
+def _require_capability(name: str) -> None:
+    from evidencesoc.agents.capabilities import current_capabilities
+
+    policy = current_capabilities()
+    if policy is not None:
+        policy.require_tool(name)
 
 
 def build_server(
@@ -149,19 +161,36 @@ def build_server(
 
 
 def main() -> None:
+    from evidencesoc.agents.capabilities import (
+        InvestigationCapabilities,
+        capability_scope,
+    )
+    from evidencesoc.tools.policy import ALLOWED_TOOLS
+
     context = load_run_context(os.environ)
-    settings = Settings()
+    settings = Settings(_env_file=None)
     engine = create_database_engine(
         settings.database_url, bounded_tool_connections=True
     )
     try:
-        server = build_server(
-            context=context,
-            settings=settings,
-            session_factory=create_session_factory(engine),
-            max_attempts=tool_attempt_limit(os.environ),
+        policy = InvestigationCapabilities(
+            allowed_tools=frozenset(
+                json.loads(
+                    os.environ.get(
+                        "EVIDENCESOC_ALLOWED_TOOLS", json.dumps(sorted(ALLOWED_TOOLS))
+                    )
+                )
+            ),
+            rag_mode=os.environ.get("EVIDENCESOC_RAG_MODE", "hybrid"),
         )
-        server.run(transport="stdio")
+        with capability_scope(policy):
+            server = build_server(
+                context=context,
+                settings=settings,
+                session_factory=create_session_factory(engine),
+                max_attempts=tool_attempt_limit(os.environ),
+            )
+            server.run(transport="stdio")
     finally:
         engine.dispose()
 

@@ -5,6 +5,7 @@ import hashlib
 import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Any
 
@@ -13,6 +14,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 from psycopg import Connection
 
+from evidencesoc.agents.capabilities import capability_scope
 from evidencesoc.agents.checkpoint import open_checkpointer, psycopg_url
 from evidencesoc.agents.fallback import matching_target
 from evidencesoc.agents.models import SimulatedAction
@@ -81,6 +83,30 @@ def _validate_output(state, delta):
     claims.extend(
         FactualClaim.model_validate(claim) for claim in delta.get("claims", [])
     )
+    diagnosis = delta.get("diagnosis")
+    if diagnosis is not None:
+        from evidencesoc.agents.diagnosis import Diagnosis
+
+        parsed = Diagnosis.model_validate(diagnosis)
+        claims.extend(
+            FactualClaim.model_validate(claim.model_dump()) for claim in parsed.claims
+        )
+        if parsed.evidence_ids:
+            claims.append(
+                FactualClaim(
+                    claim_id="diagnosis",
+                    text="Diagnosis",
+                    evidence_ids=parsed.evidence_ids,
+                )
+            )
+        for stage in parsed.stage_instances:
+            claims.append(
+                FactualClaim(
+                    claim_id=stage.instance_id,
+                    text=stage.phase,
+                    evidence_ids=stage.evidence_ids,
+                )
+            )
     if any(
         claim.status == "unsupported"
         for claim in validate_citations(claims, evidence_ids, knowledge_ids)
@@ -114,6 +140,28 @@ def _plan_hash(plan):
     ).hexdigest()
 
 
+def _seal_diagnosis(state, role):
+    if state.get("diagnostic_snapshot") is not None or state.get("diagnosis") is None:
+        return {}
+    snapshot = {
+        key: deepcopy(state.get(key))
+        for key in (
+            "diagnosis",
+            "origin",
+            "classification",
+            "attack_steps",
+            "claims",
+            "evidence",
+            "knowledge",
+        )
+    }
+    snapshot.update({"sealed_after": role, "sealed_at": _now()})
+    return {
+        "diagnostic_snapshot": snapshot,
+        "diagnostic_snapshot_sha256": _plan_hash(snapshot),
+    }
+
+
 def _persisted_plan_version(plan: dict[str, Any]) -> str:
     """Match the canonical version of the persisted ResponsePlanTable row."""
     document = ResponsePlan.model_validate(plan).model_dump(mode="python")
@@ -131,6 +179,14 @@ def _persisted_plan_version(plan: dict[str, Any]) -> str:
 def _analysis_route(state):
     if state.get("status") in {"failed", "manual_review"}:
         return "review" if state["status"] == "manual_review" else END
+    diagnosis = state.get("diagnosis")
+    if diagnosis is not None:
+        verdict = diagnosis["verdict"]
+        if verdict == "benign":
+            return END
+        if verdict == "attack":
+            return "reconstruct"
+        return "retry" if state.get("fallback_count", 0) == 0 else "review"
     classification = state.get("classification") or {}
     if (
         not classification.get("primary_type")
@@ -149,7 +205,7 @@ def _role_route(next_node):
     return route
 
 
-def build_graph(nodes, services, checkpointer):
+def build_graph(nodes, services, checkpointer, *, capabilities=None):
     builder = StateGraph(InvestigationState)
 
     def wrap(role):
@@ -159,8 +215,24 @@ def build_graph(nodes, services, checkpointer):
             writer = get_stream_writer()
             writer(started)
             try:
-                delta = await getattr(nodes, role)({**state, "_run_id": run_id})
+                with capability_scope(capabilities):
+                    delta = await getattr(nodes, role)({**state, "_run_id": run_id})
                 _validate_output(state, delta)
+                combined = {**state, **delta}
+                if (
+                    role in {"analyze", "reconstruct"}
+                    and combined.get("diagnosis") is not None
+                ):
+                    delta.setdefault("diagnosis_execution_status", "completed")
+                    verdict = combined["diagnosis"]["verdict"]
+                    if delta["diagnosis_execution_status"] == "failed":
+                        delta.update(_seal_diagnosis(state, "last_legal_analysis"))
+                    elif (
+                        role == "reconstruct"
+                        or verdict == "benign"
+                        or (verdict == "unknown" and combined.get("fallback_count", 0))
+                    ):
+                        delta.update(_seal_diagnosis(combined, role))
                 await services.finish_run(run_id, delta, "completed")
                 failed = False
             except Exception as error:  # noqa: BLE001 -- convert dependency failures without leaking exception text
@@ -176,6 +248,9 @@ def build_graph(nodes, services, checkpointer):
                     "stop_reason": code.lower(),
                     "errors": [*state.get("errors", []), {"node": role, "code": code}],
                 }
+                if role in {"analyze", "reconstruct"}:
+                    delta["diagnosis_execution_status"] = "failed"
+                    delta.update(_seal_diagnosis(state, "last_legal_analysis"))
                 await services.finish_run(run_id, delta, "failed")
                 failed = True
             if role == "validate" and delta.get("validation_result"):
@@ -205,6 +280,7 @@ def build_graph(nodes, services, checkpointer):
             "status": "manual_review",
             "stop_reason": state.get("stop_reason") or "insufficient_evidence",
         }
+        delta.update(_seal_diagnosis(state, "analyze"))
         await services.save_result({**state, **delta})
         return delta
 
@@ -422,13 +498,29 @@ class InvestigationWorkflow:
         nodes=None,
         model=None,
         database_url=None,
+        capabilities=None,
+        initial_state=None,
     ):
         self.services = services
         self.settings = settings
         self.checkpointer = checkpointer
         self.database_url = database_url
+        self.capabilities = capabilities
+        self.initial_state = deepcopy(initial_state or {})
+        if set(self.initial_state) - {
+            "alerts",
+            "evidence",
+            "knowledge",
+            "verification_namespace",
+        }:
+            raise ValueError(
+                "initial state may contain only trusted seed inputs and verification namespace"
+            )
         self.graph = build_graph(
-            nodes or NodeHandlers(services, settings, model), services, checkpointer
+            nodes or NodeHandlers(services, settings, model, capabilities=capabilities),
+            services,
+            checkpointer,
+            capabilities=capabilities,
         )
         if not hasattr(checkpointer, "_investigation_locks"):
             checkpointer._investigation_locks = {}
@@ -509,6 +601,10 @@ class InvestigationWorkflow:
                     "knowledge": [],
                     "origin": None,
                     "classification": None,
+                    "diagnosis": None,
+                    "diagnostic_snapshot": None,
+                    "diagnostic_snapshot_sha256": None,
+                    "diagnosis_execution_status": "missing",
                     "attack_steps": [],
                     "response_plan": None,
                     "approval": None,
@@ -531,6 +627,7 @@ class InvestigationWorkflow:
                     "errors": [],
                     "events": [],
                     "stop_reason": None,
+                    **deepcopy(self.initial_state),
                 }
             async for mode, chunk in self.graph.astream(
                 initial, config, stream_mode=["custom", "updates"]

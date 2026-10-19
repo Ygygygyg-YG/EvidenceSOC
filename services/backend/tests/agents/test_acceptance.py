@@ -168,19 +168,23 @@ async def test_real_mcp_six_roles_and_postgres_resume_in_fresh_process(live_inci
         assert not before["simulation"] and before["approval"] is None
         assert before["origin"]["observed_source_ip"] == "203.0.113.42"
         assert before["classification"]["primary_type"] == "sql_injection"
-        # This isolated acceptance fixture imports events but no ATT&CK
-        # knowledge; an ungrounded technique mapping must stay absent.
-        assert before["classification"]["technique_ids"] == []
+        # The fixture imports no knowledge, while a preloaded frozen corpus may
+        # exist. Every mapping must still be grounded in this run's retrieval.
+        assert set(before["classification"]["technique_ids"]) <= {
+            item["technique_id"]
+            for item in before["knowledge"]
+            if item.get("knowledge_chunk_id") and item.get("source_uri")
+        }
         assert before["attack_steps"] and all(
             step["evidence_ids"] for step in before["attack_steps"]
         )
         assert "forbidden-truth" not in json.dumps(before)
         after = await child(incident_id, settings.opensearch_index, "approve")
-        assert after["status"] == "completed", after.get("errors")
+        assert after["status"] == "manual_review", after.get("errors")
         assert after["trace_id"] == before["trace_id"]
         assert after["response_plan"] == before["response_plan"]
-        assert after["validation_result"]["outcome"] == "success"
-        assert "simulation only" in after["validation_result"]["summary"]
+        assert after["validation_result"]["outcome"] == "insufficient_evidence"
+        assert "unverified" in after["validation_result"]["summary"]
         async with open_workflow(settings) as recovered:
             replay = await recovered.run_investigation(incident_id)
             assert replay["simulation"] == after["simulation"]
@@ -209,7 +213,7 @@ async def test_real_mcp_six_roles_and_postgres_resume_in_fresh_process(live_inci
             }
             assert all(call.success for call in calls)
             plan_id = after["response_plan"]["response_plan_id"]
-            assert session.get(IncidentTable, incident_id).status == "completed"
+            assert session.get(IncidentTable, incident_id).status == "manual_review"
             assert session.get(ResponsePlanTable, plan_id) is not None
             assert (
                 len(
@@ -292,8 +296,8 @@ async def test_all_three_simulated_actions_validate_with_real_scoped_queries(
                     reason="reviewed all three previews",
                     decided_by="reviewer",
                 )
-                assert after["status"] == "completed", after.get("errors")
-                assert after["validation_result"]["outcome"] == "success"
+                assert after["status"] == "manual_review", after.get("errors")
+                assert after["validation_result"]["outcome"] == "insufficient_evidence"
                 assert len(after["simulation"]) == 3
                 assert all(action["simulated"] for action in after["simulation"])
             finally:

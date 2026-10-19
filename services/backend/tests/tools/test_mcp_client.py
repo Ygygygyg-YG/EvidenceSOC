@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import os
 import sqlite3
 import sys
@@ -25,7 +26,8 @@ def _settings(database_url: str) -> Settings:
     )
 
 
-def test_stdio_parameters_bind_context_and_local_dependencies() -> None:
+def test_stdio_parameters_bind_context_and_local_dependencies(monkeypatch) -> None:
+    monkeypatch.delenv("PYTHONPATH", raising=False)
     client = importlib.import_module("evidencesoc.mcp_server.client")
     context = RunContext("AR-42", "IN-42", "TRACE-42")
     settings = _settings("sqlite+pysqlite:///example.db")
@@ -51,6 +53,23 @@ def test_stdio_parameters_bind_context_and_local_dependencies() -> None:
     }
 
 
+def test_stdio_parameters_preserve_explicit_worker_import_path_without_model_secrets(
+    monkeypatch,
+):
+    client = importlib.import_module("evidencesoc.mcp_server.client")
+    worker_path = "/app/source:/app/source/services/backend/src:/opt/task13-deps"
+    monkeypatch.setenv("PYTHONPATH", worker_path)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "synthetic-secret-not-for-mcp")
+    parameters = client.build_stdio_parameters(
+        RunContext("AR-42", "IN-42", "TRACE-42"),
+        settings=_settings("sqlite+pysqlite:///example.db"),
+        backend_dir=BACKEND_DIR,
+    )
+    assert parameters.env["PYTHONPATH"] == worker_path
+    assert "DEEPSEEK_API_KEY" not in parameters.env
+    assert "synthetic-secret" not in json.dumps(parameters.env)
+
+
 def test_managed_stdio_session_sets_single_worker_attempt() -> None:
     client = importlib.import_module("evidencesoc.mcp_server.client")
     parameters = client.build_stdio_parameters(
@@ -68,7 +87,8 @@ def test_stdio_parameters_preserve_custom_knowledge_directory(tmp_path: Path) ->
     settings.rag_data_directory = tmp_path / "custom-knowledge"
     parameters = client.build_stdio_parameters(
         RunContext("AR-42", "IN-42", "TRACE-42"),
-        settings=settings, backend_dir=BACKEND_DIR,
+        settings=settings,
+        backend_dir=BACKEND_DIR,
     )
     assert parameters.env["RAG_DATA_DIRECTORY"] == str(settings.rag_data_directory)
 
@@ -152,7 +172,9 @@ async def test_stdio_process_initializes_and_discovers_exactly_three_tools(
     assert denial.structuredContent["error"]["code"] == "POLICY_DENIED"
     assert denial.structuredContent["error"]["trace_id"] == "TRACE-42"
     assert all(
-        not ({"run_id", "incident_id", "trace_id"} & set(tool.inputSchema["properties"]))
+        not (
+            {"run_id", "incident_id", "trace_id"} & set(tool.inputSchema["properties"])
+        )
         for tool in first.tools
     )
 

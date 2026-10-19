@@ -8,10 +8,12 @@ from typing import Any, Literal
 
 from pydantic import ValidationError
 
+from evidencesoc.agents.capabilities import InvestigationCapabilities
 from evidencesoc.agents.collect_policy import (
     CollectionDecision,
     validate_collection_call,
 )
+from evidencesoc.ids import new_ulid
 from evidencesoc.tools.ledger import (
     AttemptLimitExceeded,
     BudgetExceeded,
@@ -34,6 +36,7 @@ class BoundedCollector:
         model: Any | None,
         llm_mode: str,
         model_timeout: float = 60.0,
+        capabilities: InvestigationCapabilities | None = None,
     ) -> None:
         self.ledger = ledger
         self.invoke = invoke
@@ -43,6 +46,12 @@ class BoundedCollector:
         self.model = model
         self.llm_mode = llm_mode
         self.model_timeout = model_timeout
+        self.capabilities = capabilities
+        if capabilities is not None and isinstance(ledger, Ledger):
+            self.ledger = ledger.with_reservations(
+                first_round_reserved_calls=capabilities.first_round_reserved_calls,
+                total_reserved_calls=capabilities.total_reserved_calls,
+            )
         self.incident_id = str(state["incident_id"])
         self.round_no = int(state.get("fallback_count", 0)) + 1
         self.values: list[dict[str, Any]] = []
@@ -121,10 +130,12 @@ class BoundedCollector:
         self, row: LedgerReservation, *, count_streak: bool = True
     ) -> LedgerReservation:
         try:
+            if self.capabilities is not None:
+                self.capabilities.require_tool(row.tool_name)
             arguments = validate_collection_call(
                 row.tool_name, row.arguments, self.scope
             )
-        except (PolicyDeniedError, ValueError, TypeError, KeyError):
+        except (PermissionError, ValueError, TypeError, KeyError):
             failed = await self._ledger("fail", row.call_id, "POLICY_DENIED")
             self._record_result(failed, count_streak=count_streak)
             return failed
@@ -169,7 +180,18 @@ class BoundedCollector:
 
     async def _call(
         self, tool_name: str, arguments: dict[str, Any], rationale: str
-    ) -> Literal["called", "duplicate_query", "budget_exhausted"]:
+    ) -> Literal["called", "duplicate_query", "budget_exhausted", "capability_denied"]:
+        if self.capabilities is not None:
+            try:
+                self.capabilities.require_tool(tool_name)
+            except PermissionError:
+                self.observations.append(
+                    {"tool_name": tool_name, "status": "capability_denied"}
+                )
+                return "capability_denied"
+            summary = await self._ledger("summary", self.incident_id, self.round_no)
+            if self._remaining(summary) == 0:
+                return "budget_exhausted"
         try:
             canonical = validate_collection_call(tool_name, arguments, self.scope)
         except (PolicyDeniedError, ValueError, TypeError, KeyError):
@@ -205,7 +227,12 @@ class BoundedCollector:
             for item in self.observations
             if item.get("tool_name") is not None
         }
-        if self.scope["filters"] and "search_security_events" not in prior_tools:
+        allowed = self._allowed_tools()
+        if (
+            self.scope["filters"]
+            and "search_security_events" in allowed
+            and "search_security_events" not in prior_tools
+        ):
             return CollectionDecision(
                 action="call",
                 tool_name="search_security_events",
@@ -215,7 +242,10 @@ class BoundedCollector:
                 },
                 rationale="Search only the incident's observed entities and time window.",
             )
-        if "lookup_attack_technique" not in prior_tools:
+        if (
+            "lookup_attack_technique" in allowed
+            and "lookup_attack_technique" not in prior_tools
+        ):
             summaries = [str(item.get("summary", "")) for item in self.values[:3]]
             title = str((self.state.get("alerts") or [{}])[0].get("title", ""))
             query = (
@@ -235,6 +265,38 @@ class BoundedCollector:
             action="stop", rationale="No further evidence gap in the rule plan."
         )
 
+    def _allowed_tools(self) -> list[str]:
+        names = [
+            "get_alert_context",
+            "search_security_events",
+            "lookup_attack_technique",
+        ]
+        if self.capabilities is None:
+            return names
+        return [
+            name
+            for name in names
+            if name in self.capabilities.allowed_tools
+            and not (
+                name == "lookup_attack_technique"
+                and self.capabilities.rag_mode == "disabled"
+            )
+        ]
+
+    def _remaining(self, summary: Any) -> int:
+        if self.capabilities is None:
+            return min(summary.round_remaining, summary.total_remaining)
+        reserved = (
+            self.capabilities.first_round_reserved_calls if self.round_no == 1 else 0
+        )
+        return max(
+            0,
+            min(
+                3 - summary.round_used - reserved,
+                6 - summary.total_used - self.capabilities.total_reserved_calls,
+            ),
+        )
+
     async def _plan(self, remaining: int) -> CollectionDecision:
         if self.llm_mode == "fixture":
             return self._rule()
@@ -242,14 +304,11 @@ class BoundedCollector:
             self.fallback_used = True
             return self._rule()
         context = {
+            "_model_call_id": new_ulid(),
             "incident_id": self.incident_id,
             "alerts": self.state.get("alerts", []),
             "collection_context": {
-                "allowed_tools": [
-                    "get_alert_context",
-                    "search_security_events",
-                    "lookup_attack_technique",
-                ],
+                "allowed_tools": self._allowed_tools(),
                 "scope": self.scope,
                 "remaining_logical_calls": remaining,
                 "observations": self.observations,
@@ -307,6 +366,9 @@ class BoundedCollector:
             "collection_observations": self.observations,
             "collection_stop_reason": stop_reason,
             "fallback_used": self.fallback_used,
+            "collection_reserved_calls": self.capabilities.total_reserved_calls
+            if self.capabilities
+            else 0,
         }
 
     async def run(self) -> dict[str, Any]:
@@ -334,15 +396,19 @@ class BoundedCollector:
             "before_seconds": 900,
             "after_seconds": 900,
         }
-        seed_outcome = await self._call(
-            "get_alert_context", seed, "Read the fixed incident alert context."
+        seed_outcome = (
+            await self._call(
+                "get_alert_context", seed, "Read the fixed incident alert context."
+            )
+            if "get_alert_context" in self._allowed_tools()
+            else "capability_denied"
         )
         if seed_outcome == "budget_exhausted":
             return await self._report("budget_exhausted")
         stop_reason = "completed"
         for _ in range(3):
             summary = await self._ledger("summary", self.incident_id, self.round_no)
-            remaining = min(summary.round_remaining, summary.total_remaining)
+            remaining = self._remaining(summary)
             if remaining == 0:
                 stop_reason = "budget_exhausted"
                 break

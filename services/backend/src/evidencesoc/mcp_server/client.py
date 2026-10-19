@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import os
 import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -31,8 +33,20 @@ def build_stdio_parameters(
         "OPENSEARCH_INDEX": settings.opensearch_index,
         "RAG_DATA_DIRECTORY": str(settings.rag_data_directory),
     }
+    # MCP's default child environment omits PYTHONPATH. Exported workers load
+    # both backend source and locked dependencies through this explicit path.
+    if "PYTHONPATH" in os.environ:
+        environment["PYTHONPATH"] = os.environ["PYTHONPATH"]
     if managed_attempts:
         environment["EVIDENCESOC_MAX_TOOL_ATTEMPTS"] = "1"
+    from evidencesoc.agents.capabilities import current_capabilities
+
+    policy = current_capabilities()
+    if policy is not None:
+        environment["EVIDENCESOC_RAG_MODE"] = policy.rag_mode
+        environment["EVIDENCESOC_ALLOWED_TOOLS"] = json.dumps(
+            sorted(policy.allowed_tools)
+        )
     return StdioServerParameters(
         command=python_executable,
         args=["-m", "evidencesoc.mcp_server.main"],

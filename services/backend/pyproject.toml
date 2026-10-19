@@ -18,6 +18,7 @@ dependencies = [
     "langchain-postgres==0.0.18",
     "langgraph==1.2.11",
     "langgraph-checkpoint-postgres==3.1.2",
+    "matplotlib==3.10.8",
     "mcp==1.30.0",
     "opensearch-py==3.2.0",
     "pgvector==0.3.6",

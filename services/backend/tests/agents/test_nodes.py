@@ -373,6 +373,108 @@ async def test_unavailable_model_has_three_bounded_attempts_and_sanitized_errors
     assert "very-secret" not in encoded
     assert "Authorization" not in encoded
     assert result["errors"][-1]["code"] in {"MODEL_UNAVAILABLE", "MODEL_TIMEOUT"}
+    assert result["diagnosis_execution_status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_evaluation_analysis_without_explicit_diagnosis_uses_schema_retry_budget():
+    from evidencesoc.agents.capabilities import InvestigationCapabilities
+
+    class LegacyModel:
+        calls = 0
+
+        async def structured(self, role, schema, current):
+            self.calls += 1
+            return {"origin": None, "classification": None}
+
+    model = LegacyModel()
+    nodes = importlib.import_module("evidencesoc.agents.nodes").NodeHandlers(
+        Services(),
+        Settings(_env_file=None, llm_mode="deepseek"),
+        model=model,
+        capabilities=InvestigationCapabilities(),
+    )
+    result = await nodes.analyze(state())
+    assert model.calls == 3
+    assert result["diagnosis_execution_status"] == "failed"
+    assert result["errors"][-1]["code"] == "MODEL_INVALID_OUTPUT"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "kinds,expected",
+    [
+        (["schema", "transport", "transport"], "schema"),
+        (["transport", "transport", "transport"], "transport"),
+        (["transport", "application", "transport"], "application"),
+    ],
+)
+async def test_evaluation_structured_failure_category_preserves_all_physical_attempts(
+    kinds, expected
+):
+    import httpx
+    from evidencesoc.agents.capabilities import InvestigationCapabilities
+
+    class Model:
+        calls = 0
+
+        async def structured(self, role, schema, current):
+            kind = kinds[self.calls]
+            self.calls += 1
+            if kind == "schema":
+                raise ValueError("secret schema payload")
+            if kind == "transport":
+                if self.calls == 2:
+                    raise TimeoutError("secret endpoint")
+                raise httpx.ConnectError("secret credential")
+            raise RuntimeError("secret application payload")
+
+    model = Model()
+    nodes = importlib.import_module("evidencesoc.agents.nodes").NodeHandlers(
+        Services(),
+        Settings(_env_file=None, llm_mode="deepseek"),
+        model=model,
+        capabilities=InvestigationCapabilities(),
+    )
+    result = await nodes.analyze(state())
+    assert model.calls == 3
+    assert result["diagnosis_execution_status"] == "failed"
+    error = result["errors"][-1]
+    assert error["category"] == expected
+    assert error["attempt_categories"] == kinds
+    assert "secret" not in json.dumps(error)
+
+
+@pytest.mark.asyncio
+async def test_product_structured_error_contract_has_no_evaluation_metadata():
+    model = BrokenModel()
+    nodes = importlib.import_module("evidencesoc.agents.nodes").NodeHandlers(
+        Services(), Settings(_env_file=None, llm_mode="deepseek"), model=model
+    )
+    result = await nodes.analyze(state())
+    assert result["errors"][-1] == {"role": "analyze", "code": "MODEL_UNAVAILABLE"}
+
+
+@pytest.mark.asyncio
+async def test_analysis_retries_keep_one_explicit_logical_call_identity():
+    seen = []
+
+    class Model:
+        async def structured(self, role, schema, current):
+            seen.append(current.get("_model_call_id"))
+            raise ValueError("invalid response")
+
+    nodes = importlib.import_module("evidencesoc.agents.nodes").NodeHandlers(
+        Services(),
+        Settings(_env_file=None, llm_mode="deepseek"),
+        model=Model(),
+    )
+    await nodes.analyze(state())
+    await nodes.analyze(state())
+    assert len(seen) == 6
+    assert seen[0] and seen[:3] == [seen[0]] * 3
+    assert seen[3] and seen[3:] == [seen[3]] * 3
+    assert seen[0] != seen[3]
 
 
 @pytest.mark.asyncio
@@ -473,9 +575,7 @@ async def response_state() -> dict[str, Any]:
 
 
 @pytest.mark.asyncio
-async def test_validation_requeries_and_explicitly_limits_success_to_simulation() -> (
-    None
-):
+async def test_validation_requeries_without_claiming_static_logs_prove_effect() -> None:
     current = await response_state()
     check_id = current["response_plan"]["validation_checks"][0]["check_id"]
     condition = {
@@ -491,7 +591,7 @@ async def test_validation_requeries_and_explicitly_limits_success_to_simulation(
     )
     result = await handlers(services).validate(current)
     assert services.calls == [("verify", "RUN-1")]
-    assert result["validation_result"]["outcome"] == "success"
+    assert result["validation_result"]["outcome"] == "insufficient_evidence"
     assert result["validation_result"]["evidence_ids"] == [EV2]
     assert "simulat" in result["validation_result"]["summary"].lower()
     assert datetime.fromisoformat(
@@ -504,9 +604,9 @@ async def test_validation_requeries_and_explicitly_limits_success_to_simulation(
         {
             "check_id": check_id,
             "condition": condition,
-            "outcome": "success",
+            "outcome": "insufficient_evidence",
             "evidence_ids": [EV2],
-            "explanation": "The approved simulated action matched freshly queried target evidence; this does not prove a real-world effect.",
+            "explanation": "Target presence alone cannot establish the simulated effect; observations are absent, unchanged, or incomplete.",
         }
     ]
 
@@ -567,6 +667,107 @@ async def test_validation_matches_target_in_new_evidence() -> None:
     result = await handlers(
         Services(verified=[evidence(EV2, source_ip="203.0.113.9")])
     ).validate(await response_state())
+    assert result["validation_result"]["outcome"] == "insufficient_evidence"
+
+
+@pytest.mark.asyncio
+async def test_static_same_target_evidence_does_not_establish_effect():
+    result = await handlers().validate(await response_state())
+    assert result["validation_result"]["outcome"] == "insufficient_evidence"
+
+
+@pytest.mark.asyncio
+async def test_empty_verification_results_keep_independent_namespace_identifiers():
+    current = await response_state()
+    first = await handlers(Services(verified=[])).validate(
+        {**current, "verification_namespace": "opaque-one"}
+    )
+    second = await handlers(Services(verified=[])).validate(
+        {**current, "verification_namespace": "opaque-two"}
+    )
+    assert (
+        first["validation_result"]["validation_id"]
+        != second["validation_result"]["validation_id"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_reconstruction_updates_canonical_stage_instances_before_snapshot():
+    current = {**state(), **await handlers().analyze(state())}
+    current["diagnosis"] = {
+        "verdict": "attack",
+        "taxonomy_status": "out_of_taxonomy",
+        "evidence_ids": [EV],
+    }
+    result = await handlers().reconstruct(current)
+    assert result["diagnosis"]["verdict"] == "attack"
+    assert (
+        result["diagnosis"]["stage_instances"][0]["instance_id"]
+        == result["attack_steps"][0]["attack_step_id"]
+    )
+    assert result["diagnosis"]["stage_instances"][0]["evidence_ids"] == [EV]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "changed,error,expected",
+    [
+        (True, None, "success"),
+        (False, None, "insufficient_evidence"),
+        (False, "ACTION_REJECTED", "failure"),
+    ],
+)
+async def test_validation_computes_effect_from_separate_cited_observations(
+    changed, error, expected
+):
+    current = await response_state()
+    current["verification_namespace"] = "opaque-1"
+    action = current["response_plan"]["actions"][0]
+
+    class ObservedServices(Services):
+        async def verify(self, state, run_id):
+            result = await super().verify(state, run_id)
+            common = {
+                "namespace": "opaque-1",
+                "action_id": action["action_id"],
+                "target": action["target"],
+            }
+            check_id = state["response_plan"]["validation_checks"][0]["check_id"]
+            result["effect_observations"] = {
+                check_id: {
+                    "before": {
+                        **common,
+                        "observed_at": "2026-09-26T00:00:00Z",
+                        "evidence_ids": [EV],
+                        "network_blocked": False,
+                    },
+                    "after": {
+                        **common,
+                        "observed_at": "2026-09-26T00:00:01Z",
+                        "evidence_ids": [EV2],
+                        "network_blocked": changed,
+                        "error_code": error,
+                    },
+                }
+            }
+            return result
+
+    result = await handlers(ObservedServices()).validate(current)
+    assert result["validation_result"]["outcome"] == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("observations", [[], None, {"bad": None}])
+async def test_malformed_effect_observations_remain_insufficient(observations):
+    current = await response_state()
+
+    class ObservedServices(Services):
+        async def verify(self, state, run_id):
+            result = await super().verify(state, run_id)
+            result["effect_observations"] = observations
+            return result
+
+    result = await handlers(ObservedServices()).validate(current)
     assert result["validation_result"]["outcome"] == "insufficient_evidence"
 
 

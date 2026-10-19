@@ -155,8 +155,8 @@ async def test_fixture_pauses_before_actions_and_finishes_six_roles_after_approv
     )
     assert services.saved[-1]["response_plan"] == state["response_plan"]
     final = await approve(flow)
-    assert final["status"] == "completed"
-    assert final["validation_result"]["outcome"] == "success"
+    assert final["status"] == "manual_review"
+    assert final["validation_result"]["outcome"] == "insufficient_evidence"
     assert final["simulation"] and all(
         action["simulated"] for action in final["simulation"]
     )
@@ -401,7 +401,7 @@ async def test_two_concurrent_approvals_execute_one_simulation_and_validation():
     assert sum(isinstance(result, ValueError) for result in results) == 1
     assert (
         sum(
-            isinstance(result, dict) and result["status"] == "completed"
+            isinstance(result, dict) and result["status"] == "manual_review"
             for result in results
         )
         == 1
@@ -424,7 +424,7 @@ async def test_restart_after_simulation_resumes_validation_without_resimulation(
     assert intermediate["status"] == "validating"
     recovered = workflow(MemoryServices(), saver)
     result = await recovered.run_investigation("IN-demo")
-    assert result["status"] == "completed"
+    assert result["status"] == "manual_review"
     assert result["simulation"] == intermediate["simulation"]
     assert result["simulation_execution"] == intermediate["simulation_execution"]
     assert (
@@ -505,7 +505,7 @@ async def test_restart_during_approval_record_save_recovers_submitted_decision()
         await approve(crashed)
     recovered = workflow(MemoryServices(), saver)
     result = await recovered.run_investigation("IN-demo")
-    assert result["status"] == "completed"
+    assert result["status"] == "manual_review"
     assert result["approval"]["reason"] == "Reviewed demonstration"
     assert (
         sum(event["event"] == "simulation.completed" for event in result["events"]) == 1
