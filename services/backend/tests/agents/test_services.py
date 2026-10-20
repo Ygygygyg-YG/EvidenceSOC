@@ -22,6 +22,7 @@ from evidencesoc.persistence.tables import (
     InvestigationToolCallTable,
     ResponsePlanTable,
     SecurityEventTable,
+    ToolCallTable,
     ValidationResultTable,
 )
 from sqlalchemy import JSON, CheckConstraint, MetaData, create_engine, func, select
@@ -87,6 +88,7 @@ def database(tmp_path: Any) -> Any:
         AlertTable,
         IncidentTable,
         SecurityEventTable,
+        ToolCallTable,
         EvidenceItemTable,
         AgentRunTable,
         InvestigationToolCallTable,
@@ -173,6 +175,126 @@ def service(database: Any) -> Any:
         Settings(_env_file=None),
         session_factory=database[0],
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "escape", ["before", "after", "anchor", "dataset", "unanchored", "limit"]
+)
+async def test_real_mcp_entry_rejects_db_bound_search_scope_and_audits(
+    database: Any, monkeypatch: Any, escape: str
+) -> None:
+    from datetime import timedelta
+
+    from evidencesoc.mcp_server import main
+    from evidencesoc.mcp_server.context import RunContext
+    from mcp.types import CallToolResult
+
+    calls = []
+    monkeypatch.setattr(
+        main,
+        "build_event_search_work",
+        lambda **_kw: lambda **kw: calls.append(kw) or [],
+    )
+    api = service(database)
+    run = await api.start_run({"incident_id": "IN-1"}, "collect")
+    server = main.build_server(
+        context=RunContext(run, "IN-1", "TRACE-scope"),
+        settings=api.settings,
+        session_factory=database[0],
+        max_attempts=1,
+    )
+    scope = api._scope("IN-1")
+    arguments = {
+        key: scope[key] for key in ("time_from", "time_to", "filters", "limit")
+    }
+    arguments["filters"] = dict(arguments["filters"])
+    if escape == "before":
+        arguments["time_from"] = (
+            datetime.fromisoformat(scope["time_from"]) - timedelta(seconds=1)
+        ).isoformat()
+    elif escape == "after":
+        arguments["time_to"] = (
+            datetime.fromisoformat(scope["time_to"]) + timedelta(seconds=1)
+        ).isoformat()
+    elif escape == "anchor":
+        arguments["filters"]["source_ip"] = "198.51.100.255"
+    elif escape == "dataset":
+        arguments["filters"]["dataset_id"] = "another-case"
+    elif escape == "unanchored":
+        arguments["filters"] = {}
+    else:
+        arguments["limit"] = 101
+    result = await server.call_tool("search_security_events", arguments)
+    assert isinstance(result, CallToolResult), (
+        "MCP must reject rather than return an empty successful search"
+    )
+    assert (
+        result.isError and result.structuredContent["error"]["code"] == "POLICY_DENIED"
+    )
+    assert calls == []
+    with database[0]() as session:
+        audit = session.scalars(
+            select(ToolCallTable).where(ToolCallTable.run_id == run)
+        ).all()
+        assert len(audit) == 1 and not audit[0].success
+        assert audit[0].error_code == "POLICY_DENIED"
+        assert audit[0].arguments == arguments
+
+
+@pytest.mark.asyncio
+async def test_real_mcp_search_accepts_second_db_source_and_default_limit(
+    database: Any, monkeypatch: Any
+) -> None:
+    from evidencesoc.mcp_server import main
+    from evidencesoc.mcp_server.context import RunContext
+
+    other_raw = {
+        "source_ip": "203.0.113.43",
+        "host": "second.example.test",
+        "service": "mail",
+    }
+    with database[0].begin() as session:
+        session.get(AlertTable, "AL-1").event_ids = ["SE-1", "SE-second"]
+        session.add(
+            SecurityEventTable(
+                event_id="SE-second",
+                source="mail",
+                external_id="second",
+                deduplication_key="id:second",
+                observed_at=NOW,
+                ingested_at=NOW,
+                severity="info",
+                event_type="mail.send",
+                raw=other_raw,
+                content_sha256=calculate_content_sha256(other_raw),
+                index_status="indexed",
+            )
+        )
+    calls = []
+    monkeypatch.setattr(
+        main,
+        "build_event_search_work",
+        lambda **_kw: lambda **kw: calls.append(kw) or [],
+    )
+    api = service(database)
+    run = await api.start_run({"incident_id": "IN-1"}, "validate")
+    server = main.build_server(
+        context=RunContext(run, "IN-1", "TRACE-second"),
+        settings=api.settings,
+        session_factory=database[0],
+    )
+    scope = api._scope("IN-1")
+    _content, structured = await server.call_tool(
+        "search_security_events",
+        {
+            "time_from": scope["time_from"],
+            "time_to": scope["time_to"],
+            "filters": other_raw,
+        },
+    )
+    assert structured == {"result": []}
+    assert calls[0]["filters"] == other_raw and calls[0]["limit"] == 100
 
 
 def test_collection_scope_keeps_ait_scenario_inside_a_shared_index(
@@ -974,6 +1096,7 @@ async def test_save_result_is_idempotent_and_preserves_approval_scope(
 @pytest.mark.asyncio
 async def test_static_mcp_call_compatibility_and_explicit_capability_guard():
     from types import SimpleNamespace
+
     from evidencesoc.agents.capabilities import InvestigationCapabilities
     from evidencesoc.agents.services import PostgresWorkflowServices
 

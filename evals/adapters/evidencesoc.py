@@ -21,6 +21,7 @@ from evidencesoc.tools.ledger import Ledger
 
 from evals.adapters.diagnosis import Diagnosis, validate_diagnosis
 from evals.adapters.environment import case_environment
+from evals.adapters.isolation_probe import run_service_probe
 from evals.adapters.model_client import BudgetAccount, BudgetLimit, TrackedModel
 from evals.adapters.seed import load_seed
 from evals.adapters.worker_errors import exception_category
@@ -249,6 +250,7 @@ async def run_case(spec: WorkerRunSpec, agent_dir: Path) -> AdapterResult:
         )
     start = time.monotonic()
     model = None
+    service_probe = None
     result = {}
     tool_ledger_complete = True
     try:
@@ -280,6 +282,19 @@ async def run_case(spec: WorkerRunSpec, agent_dir: Path) -> AdapterResult:
             )
             try:
                 tool_ledger_complete = False
+                if phase == "development" and spec.group == "B3":
+                    before_probe = canonical_hash(model.ledger)
+                    service_probe = await run_service_probe(spec, environment, seed)
+                    after_probe = canonical_hash(model.ledger)
+                    service_probe.update(
+                        model_ledger_before_sha256=before_probe,
+                        model_ledger_after_sha256=after_probe,
+                    )
+                    if (
+                        before_probe != after_probe
+                        or service_probe.get("status") != "passed"
+                    ):
+                        raise ValueError("independent service isolation probe failed")
                 async with open_checkpointer(settings.database_url) as checkpointer:
                     result = await run_with_services(
                         spec, seed, services, settings, model, checkpointer, incident_id
@@ -347,12 +362,18 @@ async def run_case(spec: WorkerRunSpec, agent_dir: Path) -> AdapterResult:
 
         ledger = model.ledger if model else []
         result["model_ledger"] = ledger
+        if service_probe is not None:
+            result.setdefault("isolation_evidence", {})["service_probe"] = service_probe
         usage_complete = _complete_usage(ledger)
         cost_complete = bool(ledger) and all(
             item.get("cost_cny") is not None for item in ledger
         )
+        total_latency = round((time.monotonic() - start) * 1000)
+        probe_latency = service_probe["latency_ms"] if service_probe is not None else 0
         result["resources"] = {
-            "latency_ms": round((time.monotonic() - start) * 1000),
+            "latency_ms": max(0, total_latency - probe_latency),
+            "worker_total_latency_ms": total_latency,
+            "isolation_probe_latency_ms": probe_latency,
             "input_tokens": sum(item["usage"]["prompt_tokens"] for item in ledger)
             if usage_complete
             else None,

@@ -284,7 +284,7 @@ async def test_retained_workflow_binds_actual_stores_and_tracked_renewal_model(
     from evals.adapters.model_client import BudgetAccount, TrackedModel
     from evals.contracts import ModelConfig
 
-    module = import_module("evals.verification")
+    module = import_module("evals.adapters.retained_workflow")
     source = fixture_source()
     reference = {
         **source["resources"],

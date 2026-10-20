@@ -14,7 +14,7 @@ import threading
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -529,6 +529,99 @@ async def test_live_cross_case_scenario_and_time_expansion_are_denied(
         assert not isinstance(error.value, (OSError, TimeoutError))
     print(
         "task12_live scope_denials=3 foreign_run=1 foreign_evidence=1 foreign_alert=1 invalid_mcp_context=1"
+    )
+
+
+@pytest.mark.asyncio
+async def test_live_mcp_search_enforces_scope_and_accepts_second_observed_source(
+    live_scope, tmp_path
+):
+    """Real MCP must reject valid-shaped escapes itself, before search/evidence."""
+    live = live_scope
+    with live.sessions() as session:
+        original = session.get(SecurityEventTable, live.events[0])
+        raw = dict(original.raw)
+    raw.update(
+        external_id="second-observed-source",
+        host="second.example.test",
+        source_ip="198.51.100.17",
+    )
+    path = tmp_path / "second-source.jsonl"
+    path.write_text(json.dumps(raw) + "\n", encoding="utf-8")
+    with live.sessions() as session:
+        importer = IngestionService(
+            EventRepository(session),
+            OpenSearchEventStore(
+                live.search, index_name=live.settings.opensearch_index
+            ),
+        )
+        imported = importer.import_file(path)
+    assert imported.inserted == imported.indexed == 1
+    live.events.extend(imported.event_ids)
+    with live.sessions.begin() as session:
+        alert = session.get(AlertTable, live.alerts[0])
+        alert.event_ids = [*alert.event_ids, *imported.event_ids]
+    live.search.indices.refresh(index=live.settings.opensearch_index)
+    services = PostgresWorkflowServices(live.settings, session_factory=live.sessions)
+    scope = services._scope(live.incidents[0])
+    base = {key: scope[key] for key in ("time_from", "time_to", "filters", "limit")}
+    escapes = [
+        {
+            **base,
+            "time_from": (
+                datetime.fromisoformat(scope["time_from"]) - timedelta(seconds=1)
+            ).isoformat(),
+        },
+        {
+            **base,
+            "time_to": (
+                datetime.fromisoformat(scope["time_to"]) + timedelta(seconds=1)
+            ).isoformat(),
+        },
+        {**base, "filters": {**scope["filters"], "dataset_id": "unrelated-case"}},
+        {**base, "filters": {**scope["filters"], "host": "unrelated.example.test"}},
+        {**base, "filters": {}},
+        {**base, "index": "security-events-v1"},
+        {**base, "index_name": "security-events-v1"},
+    ]
+    async with open_stdio_session(
+        live.context,
+        settings=live.settings,
+        backend_dir=BACKEND_ROOT,
+        managed_attempts=True,
+    ) as session:
+        for request in escapes:
+            denied = await session.call_tool("search_security_events", request)
+            assert (
+                denied.isError
+                and denied.structuredContent["error"]["code"] == "POLICY_DENIED"
+            )
+        second = next(
+            source
+            for source in scope["source_scopes"]
+            if source["filters"].get("host") == raw["host"]
+        )
+        values = await PostgresWorkflowServices._call(
+            session,
+            "search_security_events",
+            {
+                "time_from": scope["time_from"],
+                "time_to": scope["time_to"],
+                "filters": second["filters"],
+            },
+        )
+    assert {value["event_id"] for value in values} == set(imported.event_ids)
+    with live.sessions() as session:
+        audits = session.scalars(
+            select(ToolCallTable).where(ToolCallTable.run_id == live.runs[0])
+        ).all()
+        assert len(audits) == len(escapes) + 1
+        assert sum(row.success for row in audits) == 1
+        assert all(
+            row.error_code == "POLICY_DENIED" for row in audits if not row.success
+        )
+    print(
+        "task13_mcp direct_scope_denials=7 actual_second_source_query=1 default_limit=100"
     )
 
 

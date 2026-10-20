@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 from typing import Any
 
+from evals.adapters.artifacts import (
+    write_immutable_json,  # noqa: F401 -- Public compatibility re-export.
+)
 from evals.contracts import GROUPS, ControllerRunSpec, WorkerRunSpec, canonical_hash
 from evals.datasets.dedale.common import read_json, safe_file
 from evals.freeze import (
@@ -24,27 +26,6 @@ def file_hash(path: Path) -> str:
         import hashlib
 
         return hashlib.file_digest(stream, "sha256").hexdigest()
-
-
-def write_immutable_json(path: Path, value: Any) -> None:
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = (
-        json.dumps(
-            value,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        )
-        + "\n"
-    )
-    with path.open("x", encoding="utf-8", newline="\n") as stream:
-        stream.write(payload)
-        stream.flush()
-        import os
-
-        os.fsync(stream.fileno())
 
 
 def agent_input(case_root: Path, case_id: str) -> tuple[Path, dict[str, str]]:

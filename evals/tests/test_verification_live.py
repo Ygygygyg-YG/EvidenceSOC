@@ -38,7 +38,7 @@ async def test_synthetic_original_approval_and_live_verification_resource_copies
     from sqlalchemy import text
 
     from evals import verification as controller
-    from evals.adapters import model_client
+    from evals.adapters import model_client, retained_workflow
     from evals.adapters import verification_worker as worker
     from evals.adapters.environment import case_environment
     from evals.adapters.seed import load_seed
@@ -145,7 +145,9 @@ async def test_synthetic_original_approval_and_live_verification_resource_copies
             worker, "os", SimpleNamespace(environ=os.environ, getpid=lambda: 1)
         )
         monkeypatch.setattr(
-            controller, "os", SimpleNamespace(environ=os.environ, getpid=lambda: 1)
+            retained_workflow,
+            "os",
+            SimpleNamespace(environ=os.environ, getpid=lambda: 1),
         )
         # Original renewal calls the real TrackedModel with an HTTP mock and an
         # isolated synthetic account. No paid request or real campaign charge.

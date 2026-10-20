@@ -19,6 +19,37 @@ class Answer(BaseModel):
     verdict: str
 
 
+@pytest.mark.asyncio
+async def test_provider_credit_rejection_halts_without_repeating_paid_requests(
+    tmp_path,
+):
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        return httpx.Response(
+            402, json={"error": {"message": "synthetic credit rejection"}}
+        )
+
+    account = BudgetAccount(tmp_path / "campaign.sqlite")
+    model = TrackedModel(
+        ModelConfig(),
+        api_key="synthetic",
+        account=account,
+        phase="development",
+        transport=httpx.MockTransport(respond),
+    )
+    with pytest.raises(httpx.HTTPStatusError):
+        await model.structured("analyze", Answer, {})
+    assert account.summary()["halted"] is True
+    assert "402" in account.summary()["halt_reason"]
+    with pytest.raises(RuntimeError, match="campaign halted"):
+        await model.structured("analyze", Answer, {})
+    assert len(requests) == 1
+    assert len(model.ledger) == 1
+    assert account.summary()["unknown_count"] == 1
+
+
 def test_budget_reservation_is_atomic_and_unknown_cost_never_becomes_zero(tmp_path):
     account = BudgetAccount(tmp_path / "budget.sqlite", total_cny=1, dev_cny=0.5)
 
@@ -206,8 +237,26 @@ def test_context_projection_keeps_seed_and_new_tool_evidence_within_frozen_limit
 
 
 def test_context_projection_exposes_only_public_query_scope():
-    state={'collection_context':{'allowed_tools':['lookup_attack_technique'],
-            'scope':{'alert_id':'AL-case','time_from':'start','time_to':'end','filters':{'host':'h'},'limit':100,
-                     'source_scopes':[{'raw':{'message':'unqueried event must remain private'}}]}}}
-    projected,_=project_context(state,ModelConfig())
-    assert set(projected['collection_context']['scope'])=={'alert_id','time_from','time_to','filters','limit'}
+    state = {
+        "collection_context": {
+            "allowed_tools": ["lookup_attack_technique"],
+            "scope": {
+                "alert_id": "AL-case",
+                "time_from": "start",
+                "time_to": "end",
+                "filters": {"host": "h"},
+                "limit": 100,
+                "source_scopes": [
+                    {"raw": {"message": "unqueried event must remain private"}}
+                ],
+            },
+        }
+    }
+    projected, _ = project_context(state, ModelConfig())
+    assert set(projected["collection_context"]["scope"]) == {
+        "alert_id",
+        "time_from",
+        "time_to",
+        "filters",
+        "limit",
+    }

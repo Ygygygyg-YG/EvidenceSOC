@@ -210,8 +210,17 @@ async def test_baseline_preserves_each_failure_category_for_rerun_policy():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "group,phase,tamper",
+    [
+        ("B3", "development", False),
+        ("B3", "formal", False),
+        ("B0", "development", False),
+        ("B3", "development", True),
+    ],
+)
 async def test_worker_failure_exports_charged_tool_ledger_before_case_cleanup(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, group, phase, tamper
 ):
     import sys
     from contextlib import asynccontextmanager, contextmanager
@@ -221,12 +230,12 @@ async def test_worker_failure_exports_charged_tool_ledger_before_case_cleanup(
     from evals.adapters import evidencesoc as adapter
 
     spec = WorkerRunSpec(
-        run_id="run", case_id="case1", group="B3", config_sha256="a" * 64
+        run_id="run", case_id="case1", group=group, config_sha256="a" * 64
     )
     agent = write_case(tmp_path)
     monkeypatch.setattr(adapter.os, "getpid", lambda: 1)
     monkeypatch.setenv("TASK13_WORKER_NONCE", "test-nonce")
-    monkeypatch.setenv("TASK13_PHASE", "development")
+    monkeypatch.setenv("TASK13_PHASE", phase)
     monkeypatch.setenv("TASK13_BUDGET_DB", str(tmp_path / "budget.sqlite"))
     monkeypatch.setenv("DEEPSEEK_API_KEY", "test-no-http")
     monkeypatch.setitem(
@@ -271,16 +280,50 @@ async def test_worker_failure_exports_charged_tool_ledger_before_case_cleanup(
     async def fail_after_tool(*args):
         raise RuntimeError("synthetic failure after logical tool")
 
+    probes = []
+    models = []
+    tracked = adapter.TrackedModel
+
+    def capture_model(*args, **kwargs):
+        model = tracked(*args, **kwargs)
+        models.append(model)
+        return model
+
+    async def probe(*args):
+        probes.append(True)
+        if tamper:
+            models[0].ledger.append(
+                {
+                    "logical_call_id": "synthetic-probe-mutation",
+                    "usage": None,
+                    "cost_cny": None,
+                }
+            )
+        return {"status": "passed", "latency_ms": 7, "physical_audit_sha256": "c" * 64}
+
     monkeypatch.setattr(adapter, "case_environment", environment)
     monkeypatch.setattr(adapter, "open_checkpointer", checkpointer)
     monkeypatch.setattr(adapter, "PostgresWorkflowServices", Services)
     monkeypatch.setattr(adapter, "Ledger", Ledger)
     monkeypatch.setattr(adapter, "run_with_services", fail_after_tool)
+    monkeypatch.setattr(adapter, "run_service_probe", probe, raising=False)
+    monkeypatch.setattr(adapter, "TrackedModel", capture_model)
     result = await adapter.run_case(spec, agent)
     assert result.execution_status == "failed"
     assert result.errors[-1]["category"] == "application"
     assert result.tool_ledger[0]["attempts"] == 2
     assert closed == [True]
+    assert probes == ([True] if group == "B3" and phase == "development" else [])
+    if probes:
+        preserved = result.isolation_evidence["service_probe"]
+        assert preserved["physical_audit_sha256"] == "c" * 64
+        assert (
+            preserved["model_ledger_before_sha256"]
+            == preserved["model_ledger_after_sha256"]
+        ) is not tamper
+        assert result.resources["isolation_probe_latency_ms"] == 7
+        if tamper:
+            assert result.errors[-1]["type"] == "ValueError"
 
 
 @pytest.mark.asyncio

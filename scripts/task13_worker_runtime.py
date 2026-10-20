@@ -236,6 +236,171 @@ def validate_worker_binding(
         raise ValueError("same worker PID and every read boundary must be verified")
 
 
+def validate_service_probe_binding(
+    evidence: dict, *, probe: dict, spec: dict, source_commit: str, output: Path
+) -> None:
+    """Bind the independently audited service proof to the inspected worker."""
+    from evals.contracts import canonical_hash
+    from evals.datasets.dedale.common import read_json, safe_file
+    from evals.runners.manifest import file_hash
+
+    if (
+        not isinstance(evidence, dict)
+        or any(
+            not isinstance(evidence.get(key), dict)
+            for key in ("provenance", "cleanup", "unchanged", "artifact")
+        )
+        or any(
+            not isinstance(evidence.get(key), list)
+            or any(not isinstance(row, dict) for row in evidence[key])
+            for key in ("checks", "physical_audit")
+        )
+    ):
+        raise ValueError("service isolation evidence structure is invalid")
+    provenance = evidence.get("provenance", {})
+    expected = {
+        "worker_pid": probe["pid"],
+        "worker_nonce": probe["nonce"],
+        "container_hostname": probe["hostname"],
+        "source_commit": source_commit,
+        "input_sha256": probe["agent_sha256"],
+        "phase": "development",
+        **{key: spec[key] for key in ("run_id", "case_id", "group")},
+    }
+    names = {
+        "positive_alert_context",
+        "existing_foreign_alert",
+        "forbidden_case_filter",
+        "top_level_index",
+        "top_level_index_name",
+        "window_from_minus_one_second",
+        "window_to_plus_one_second",
+        "anchor_replacement",
+        "dataset_replacement",
+    }
+    checks = evidence.get("checks", [])
+    audit = evidence.get("physical_audit", [])
+    before = evidence.get("model_ledger_before_sha256")
+    if (
+        spec["group"] != "B3"
+        or evidence.get("status") != "passed"
+        or evidence.get("passed") is not True
+        or any(provenance.get(key) != value for key, value in expected.items())
+        or provenance.get("database_backend") != "postgresql"
+        or provenance.get("actual_database_name") != provenance.get("database_name")
+        or not re.fullmatch(r"task13_[0-9a-f]{32}", provenance.get("database_name", ""))
+        or not re.fullmatch(
+            r"security-events-task13-[0-9a-f]{32}", provenance.get("index_name", "")
+        )
+        or evidence.get("cleanup", {}).get("verified") is not True
+        or evidence.get("unchanged", {}).get("verified") is not True
+        or evidence.get("model_calls_made") != 0
+        or evidence.get("logical_tool_calls_made") != 0
+        or not isinstance(before, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", before)
+        or before != evidence.get("model_ledger_after_sha256")
+        or len(checks) != len(names)
+        or {check.get("name") for check in checks} != names
+        or any(check.get("passed") is not True for check in checks)
+        or len(audit) != 9
+        or canonical_hash(audit) != evidence.get("physical_audit_sha256")
+        or sum(row.get("success") is True for row in audit) != 1
+        or sum(row.get("error_code") == "NOT_FOUND" for row in audit) != 1
+        or sum(row.get("error_code") == "POLICY_DENIED" for row in audit) != 7
+    ):
+        raise ValueError(
+            "service isolation evidence is incomplete or belongs to a different worker"
+        )
+    artifact = evidence.get("artifact", {})
+    if artifact.get("path") != "service-isolation-probe.json":
+        raise ValueError("service probe artifact path differs")
+    path = safe_file(output, "service-isolation-probe.json")
+    if not path.is_file() or file_hash(path) != artifact.get("sha256"):
+        raise ValueError("service probe artifact hash differs")
+    payload = {
+        key: value
+        for key, value in evidence.items()
+        if key
+        not in {
+            "artifact",
+            "model_ledger_before_sha256",
+            "model_ledger_after_sha256",
+        }
+    }
+    if canonical_hash(read_json(path)) != canonical_hash(payload):
+        raise ValueError(
+            "service probe artifact content differs from returned evidence"
+        )
+
+
+def observed_model_invocations(ledger: list[dict]) -> int:
+    """Count observed provider replies, preserving failed dispatches separately."""
+    count = 0
+    for call in ledger:
+        raw = call.get("raw_response")
+        status = call.get("http_status")
+        if (
+            type(status) is int
+            and 200 <= status < 300
+            and isinstance(raw, dict)
+            and isinstance(call.get("request_id"), str)
+            and bool(call["request_id"])
+            and isinstance(call.get("response_model"), str)
+            and bool(call["response_model"])
+            and raw.get("id") == call["request_id"]
+            and raw.get("model") == call["response_model"]
+        ):
+            count += 1
+    return count
+
+
+def preserve_worker_stdout(output: Path, payload: bytes) -> dict:
+    """Seal exact worker bytes in a controller-only sibling before validation."""
+    capture = Path(output).parent / (Path(output).name + ".controller")
+    capture.mkdir(exist_ok=False)
+    path = capture / "worker-stdout.bin"
+    with path.open("xb") as stream:
+        stream.write(payload)
+        stream.flush()
+        os.fsync(stream.fileno())
+    receipt = {
+        "schema_version": "task13-worker-stdout-v1",
+        "path": str(path.resolve()),
+        "sha256": sha256(payload).hexdigest(),
+        "bytes": len(payload),
+    }
+    with (capture / "receipt.json").open("x", encoding="utf-8", newline="\n") as stream:
+        json.dump(receipt, stream, sort_keys=True)
+        stream.write("\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    return receipt
+
+
+def quarantine_isolation_failure(value: dict, raw_stdout: dict, stage: str) -> dict:
+    """Exclude unsafe diagnosis while retaining every response and charged ledger."""
+    return {
+        **value,
+        **({"status": "failed"} if "status" in value else {}),
+        "execution_status": "failed",
+        "diagnosis_status": "failed",
+        "diagnostic_snapshot": None,
+        "product_status": "isolation_failed",
+        "errors": [
+            *value.get("errors", []),
+            {
+                "category": "application",
+                "error_type": "WorkerIsolationBindingError",
+                "stage": stage,
+            },
+        ],
+        "artifact_hashes": {
+            **value.get("artifact_hashes", {}),
+            "worker_raw_stdout": raw_stdout["sha256"],
+        },
+    }
+
+
 def validate_worker_inspection(
     info: dict, expected_mounts: dict[str, str], network: str
 ) -> dict:
@@ -676,31 +841,93 @@ async def run_container(spec: dict, agent_dir: Path, options: dict) -> dict:
             stdout, _ = await asyncio.wait_for(
                 process.communicate(), timeout=options.get("case_timeout_seconds", 1800)
             )
+            raw_stdout = preserve_worker_stdout(output, stdout)
             if process.returncode:
                 raise WorkerInfrastructureError(
                     "real worker failed; sanitized result was not completed"
                 )
             value = json.loads(stdout)
-            if not model_allowed and value.get("model_ledger"):
-                raise ValueError("model-free worker operation emitted a model ledger")
+            model_binding_failed = bool(not model_allowed and value.get("model_ledger"))
             for call in value.get("model_ledger", []):
                 if (
                     call.get("worker_pid") != probe["pid"]
                     or call.get("worker_nonce") != nonce
                     or call.get("container_hostname") != probe["hostname"]
                 ):
-                    raise ValueError(
-                        "model request ledger belongs to a different worker process"
+                    model_binding_failed = True
+            worker_evidence = value.get("isolation_evidence") or {}
+            service_probe = (
+                worker_evidence.get("service_probe")
+                if isinstance(worker_evidence, dict)
+                else worker_evidence
+            )
+            service_accepted = False
+            service_binding = None
+            if service_probe is not None:
+                try:
+                    validate_service_probe_binding(
+                        service_probe,
+                        probe=probe,
+                        spec=spec,
+                        source_commit=options["source_commit"],
+                        output=output,
                     )
+                    service_accepted = True
+                    service_binding = {"status": "passed"}
+                except (ValueError, OSError, KeyError, TypeError) as error:
+                    # Preserve every paid result and failure artifact; reject G4.
+                    service_binding = {
+                        "status": "failed",
+                        "error_type": type(error).__name__,
+                    }
+            service_probe_required = (
+                not verification
+                and not source_review
+                and options["phase"] == "development"
+                and spec.get("group") == "B3"
+            )
+            isolation_failed = (
+                model_binding_failed
+                or (service_probe is not None and not service_accepted)
+                or (service_probe_required and service_probe is None)
+            )
+            if isolation_failed:
+                value = quarantine_isolation_failure(
+                    value,
+                    raw_stdout,
+                    "model_binding"
+                    if model_binding_failed
+                    else "service_probe_binding",
+                )
             value["isolation_evidence"] = {
-                "status": "passed",
+                "status": "failed" if isolation_failed else "passed",
                 "probe": probe,
                 "container": accepted,
                 "source_commit": options["source_commit"],
-                "real_model_invocations": len(value.get("model_ledger", [])),
+                "real_model_invocations": observed_model_invocations(
+                    value.get("model_ledger", [])
+                ),
+                "model_physical_attempts": len(value.get("model_ledger", [])),
+                "raw_stdout": raw_stdout,
                 "canary_hashes": {
                     key: file_hash(Path(paths[0])) for key, paths in canaries.items()
                 },
+                **(
+                    {
+                        "service_probe": service_probe,
+                        "service_probe_binding": service_binding,
+                    }
+                    if service_probe is not None
+                    else {}
+                ),
+                **(
+                    {
+                        "cross_case_denied": service_accepted,
+                        "critical_skips": 0 if service_accepted else 1,
+                    }
+                    if service_probe is not None or service_probe_required
+                    else {}
+                ),
             }
             return value
         except (ConnectionError, TimeoutError) as error:

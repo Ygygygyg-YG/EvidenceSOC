@@ -28,9 +28,10 @@ def runtime():
         ("process", "read_packet"),
         ("process", "decision"),
         ("process", "renew_plan"),
+        ("binding", None),
     ],
 )
-def test_docker_failures_cross_runtime_boundary_as_infrastructure(
+def test_docker_failures_keep_typed_errors_and_quarantine_paid_binding_failure(
     tmp_path, monkeypatch, failure, review_operation
 ):
     module = runtime()
@@ -95,13 +96,41 @@ def test_docker_failures_cross_runtime_boundary_as_infrastructure(
             if failure == "probe":
                 return b"Docker startup failed"
             return (
-                module.PROBE_PREFIX + json.dumps({"python_version": "3.12.14"})
+                module.PROBE_PREFIX
+                + json.dumps(
+                    {
+                        "python_version": "3.12.14",
+                        "pid": 1,
+                        "nonce": "inspected",
+                        "hostname": "inspected",
+                        "agent_sha256": "a" * 64,
+                    }
+                )
             ).encode()
 
         async def communicate(self):
             if self.inspect:
                 self.returncode = 0
                 return b"[{}]", b""
+            if failure == "binding":
+                self.returncode = 0
+                return json.dumps(
+                    {
+                        "execution_status": "completed",
+                        "diagnosis_status": "succeeded",
+                        "diagnostic_snapshot": {"diagnosis": {"verdict": "attack"}},
+                        "model_ledger": [
+                            {
+                                "worker_pid": 999,
+                                "worker_nonce": "foreign",
+                                "container_hostname": "foreign",
+                                "cost_cny": 0.05,
+                                "raw_response": {"id": "paid"},
+                            }
+                        ],
+                        "resources": {"cost": 0.05},
+                    }
+                ).encode(), b""
             return b"", b"private error with secret credential"
 
         def write(self, data):
@@ -138,8 +167,29 @@ def test_docker_failures_cross_runtime_boundary_as_infrastructure(
         spec.update(
             schema_version="task13-source-review-worker-v1", request_id="f" * 32
         )
-    with pytest.raises(errors.WorkerInfrastructureError):
-        asyncio.run(module.run_container(spec, agent, options))
+    if failure == "binding":
+        from evals.contracts import AdapterResult
+
+        result = AdapterResult.model_validate(
+            asyncio.run(module.run_container(spec, agent, options))
+        )
+        assert result.execution_status == result.diagnosis_status == "failed"
+        assert result.diagnostic_snapshot is None
+        assert result.model_ledger[0]["cost_cny"] == 0.05
+        assert result.resources["cost"] == 0.05
+        assert result.isolation_evidence["status"] == "failed"
+        raw = Path(result.isolation_evidence["raw_stdout"]["path"])
+        assert (
+            json.loads(raw.read_bytes())["diagnostic_snapshot"]["diagnosis"]["verdict"]
+            == "attack"
+        )
+        assert (
+            result.artifact_hashes["worker_raw_stdout"]
+            == sha256(raw.read_bytes()).hexdigest()
+        )
+    else:
+        with pytest.raises(errors.WorkerInfrastructureError):
+            asyncio.run(module.run_container(spec, agent, options))
     if review_operation:
         assert child_environments
         assert ("DEEPSEEK_API_KEY" in child_environments[0]) == (
@@ -273,6 +323,206 @@ def test_binding_requires_same_worker_pid():
         )
     probe["pid"] = 1
     module.validate_worker_binding(probe, info, nonce="nonce", agent_sha256="b" * 64)
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        None,
+        "nonce",
+        "source",
+        "input",
+        "audit",
+        "cleanup",
+        "changed_model",
+        "fixture_backend",
+        "artifact",
+        "malformed_provenance",
+        "malformed_checks",
+        "malformed_audit",
+    ],
+)
+def test_service_probe_requires_real_worker_binding_and_intact_artifact(
+    tmp_path, tamper
+):
+    from evals.contracts import canonical_hash
+
+    module = runtime()
+    assert hasattr(module, "validate_service_probe_binding"), (
+        "controller must validate service proof rather than overwrite or trust a boolean"
+    )
+    filesystem = {
+        "pid": 1,
+        "nonce": "real-nonce",
+        "hostname": "container-host",
+        "agent_sha256": "b" * 64,
+    }
+    spec = {"run_id": "run", "case_id": "ait-" + "0" * 24, "group": "B3"}
+    evidence = {
+        "status": "passed",
+        "passed": True,
+        "cleanup": {"verified": True},
+        "unchanged": {"verified": True},
+        "model_calls_made": 0,
+        "logical_tool_calls_made": 0,
+        "provenance": {
+            "worker_pid": 1,
+            "worker_nonce": "real-nonce",
+            "container_hostname": "container-host",
+            "source_commit": "a" * 40,
+            "input_sha256": "b" * 64,
+            "phase": "development",
+            **spec,
+            "database_backend": "postgresql",
+            "database_name": "task13_" + "c" * 32,
+            "actual_database_name": "task13_" + "c" * 32,
+            "index_name": "security-events-task13-" + "c" * 32,
+        },
+        "physical_audit": [
+            {
+                "success": number == 0,
+                "error_code": None
+                if number == 0
+                else "NOT_FOUND"
+                if number == 1
+                else "POLICY_DENIED",
+            }
+            for number in range(9)
+        ],
+        "checks": [
+            {"name": name, "passed": True}
+            for name in (
+                "positive_alert_context",
+                "existing_foreign_alert",
+                "forbidden_case_filter",
+                "top_level_index",
+                "top_level_index_name",
+                "window_from_minus_one_second",
+                "window_to_plus_one_second",
+                "anchor_replacement",
+                "dataset_replacement",
+            )
+        ],
+    }
+    evidence["physical_audit_sha256"] = canonical_hash(evidence["physical_audit"])
+    path = tmp_path / "service-isolation-probe.json"
+    path.write_text(json.dumps(evidence), encoding="utf-8")
+    evidence["artifact"] = {
+        "path": path.name,
+        "sha256": sha256(path.read_bytes()).hexdigest(),
+    }
+    evidence["model_ledger_before_sha256"] = canonical_hash([])
+    evidence["model_ledger_after_sha256"] = canonical_hash([])
+    if tamper == "nonce":
+        evidence["provenance"]["worker_nonce"] = "foreign"
+    elif tamper == "source":
+        evidence["provenance"]["source_commit"] = "d" * 40
+    elif tamper == "input":
+        evidence["provenance"]["input_sha256"] = "d" * 64
+    elif tamper == "audit":
+        evidence["physical_audit"] = []
+    elif tamper == "cleanup":
+        evidence["cleanup"]["verified"] = False
+    elif tamper == "changed_model":
+        evidence["model_ledger_after_sha256"] = "d" * 64
+    elif tamper == "fixture_backend":
+        evidence["provenance"]["database_backend"] = "sqlite"
+    elif tamper == "artifact":
+        path.write_text("{}", encoding="utf-8")
+    elif tamper == "malformed_provenance":
+        evidence["provenance"] = []
+    elif tamper == "malformed_checks":
+        evidence["checks"] = [None] * 9
+    elif tamper == "malformed_audit":
+        evidence["physical_audit"] = [None] * 9
+    arguments = {
+        "probe": filesystem,
+        "spec": spec,
+        "source_commit": "a" * 40,
+        "output": tmp_path,
+    }
+    if tamper is None:
+        module.validate_service_probe_binding(evidence, **arguments)
+    else:
+        with pytest.raises(ValueError):
+            module.validate_service_probe_binding(evidence, **arguments)
+
+
+def test_real_model_invocations_require_observed_provider_response():
+    module = runtime()
+    assert hasattr(module, "observed_model_invocations"), (
+        "pre-HTTP reservations cannot establish model-worker acceptance"
+    )
+    real = {
+        "http_status": 200,
+        "raw_response": {"id": "actual-request", "model": "actual-model"},
+        "request_id": "actual-request",
+        "response_model": "actual-model",
+        "parse_status": "schema_error",
+    }
+    assert (
+        module.observed_model_invocations(
+            [{"parse_status": "not_received"}, {"http_status": 401}, real]
+        )
+        == 1
+    )
+    for mutation in (
+        {"http_status": 503},
+        {"request_id": "different"},
+        {"response_model": None},
+        {"raw_response": {}},
+        {"raw_response": []},
+    ):
+        assert module.observed_model_invocations([{**real, **mutation}]) == 0
+
+
+def test_binding_failure_keeps_immutable_raw_stdout_and_all_charged_ledgers(tmp_path):
+    module = runtime()
+    assert hasattr(module, "preserve_worker_stdout"), (
+        "worker output must be sealed before boundary checks"
+    )
+    assert hasattr(module, "quarantine_isolation_failure")
+    output = tmp_path / "worker-mounted"
+    output.mkdir()
+    value = {
+        "execution_status": "completed",
+        "diagnosis_status": "succeeded",
+        "diagnostic_snapshot": {"diagnosis": {"verdict": "attack"}},
+        "model_ledger": [
+            {
+                "worker_pid": 999,
+                "raw_response": {"id": "paid-response"},
+                "cost_cny": 0.01,
+            }
+        ],
+        "tool_ledger": [{"charged": True, "attempts": 1}],
+        "resources": {"cost": 0.01},
+        "errors": [],
+    }
+    raw = json.dumps(value).encode()
+    receipt = module.preserve_worker_stdout(output, raw)
+    capture = Path(receipt["path"])
+    assert not capture.is_relative_to(output)
+    assert capture.read_bytes() == raw and receipt["sha256"] == sha256(raw).hexdigest()
+    with pytest.raises(FileExistsError):
+        module.preserve_worker_stdout(output, b"must not replace the paid response")
+    quarantined = module.quarantine_isolation_failure(value, receipt, "model_binding")
+    assert (
+        quarantined["execution_status"] == quarantined["diagnosis_status"] == "failed"
+    )
+    assert quarantined["diagnostic_snapshot"] is None
+    assert quarantined["model_ledger"] == value["model_ledger"]
+    assert quarantined["tool_ledger"] == value["tool_ledger"]
+    assert quarantined["resources"] == value["resources"]
+    assert quarantined["errors"][-1]["category"] == "application"
+    assert quarantined["artifact_hashes"]["worker_raw_stdout"] == receipt["sha256"]
+    assert capture.read_bytes() == raw
+    assert (
+        module.quarantine_isolation_failure(
+            {**value, "status": "completed"}, receipt, "model_binding"
+        )["status"]
+        == "failed"
+    )
 
 
 def test_dependency_install_commands_use_frozen_lock_and_explicit_linux_abi(tmp_path):

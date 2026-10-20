@@ -221,6 +221,18 @@ class BudgetAccount:
                     raise RuntimeError("observable model version changed")
                 db.execute("INSERT OR IGNORE INTO config VALUES (?,?)", (key, value))
 
+    def halt_provider(self, status: int) -> None:
+        if status not in {401, 402, 403}:
+            raise ValueError(
+                "provider halt requires a known authentication or credit rejection"
+            )
+        with self._db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            db.execute(
+                "INSERT OR REPLACE INTO config VALUES ('halt',?)",
+                (f"provider HTTP {status}: authentication or credit rejected",),
+            )
+
     def summary(self) -> dict[str, Any]:
         with self._db() as db:
             amount, unknown, in_flight = db.execute(
@@ -370,6 +382,14 @@ class TrackedModel:
         )
         if role == "respond":
             instruction += (
+                '\nEach verification_query must be bounded event search: {"filters": {...}, "limit": 100}, '
+                "optionally with both time_from and time_to. Its only top-level keys are filters, limit, time_from, time_to. "
+                "Allowed filter keys are source, dataset_id, event_type, severity, source_ip, destination_ip, host, service. "
+                "Use observed field values in filters; do not add after, window_minutes, path_prefix or isolation_state. "
+                'Action parameters must equal exactly {"source_ip": target} for block_ip_simulated, '
+                '{"host": target} for isolate_host_simulated, or {"account": target} for disable_account_simulated. '
+                "affected_assets, rollback_steps targets and validation_checks targets must each cover every action target. "
+                "Each validation check must copy the corresponding action target and verification_query exactly. "
                 "\nCurrent UTC time: "
                 + datetime.now(UTC).isoformat()
                 + ". Use this time for a new response plan created_at and an expires_at "
@@ -429,6 +449,8 @@ class TrackedModel:
                     headers={"Authorization": "Bearer " + self._key},
                 )
             record["http_status"] = response.status_code
+            if response.status_code in {401, 402, 403}:
+                self.account.halt_provider(response.status_code)
             response.raise_for_status()
             data = response.json()
             record.update(

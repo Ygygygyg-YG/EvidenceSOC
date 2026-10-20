@@ -183,9 +183,9 @@ class SourceReviewRequest(BaseModel):
 
 async def run_source_review(request: SourceReviewRequest, agent_dir: Path) -> dict:
     """Read, explicitly decide, or renew the retained original product workflow."""
-    from evals import verification as controller
+    from evals.adapters import retained_workflow
+    from evals.adapters.artifacts import write_immutable_json
     from evals.adapters.model_client import BudgetAccount, TrackedModel
-    from evals.runners.manifest import write_immutable_json
 
     if (
         not os.environ.get("TASK13_WORKER_NONCE")
@@ -221,7 +221,7 @@ async def run_source_review(request: SourceReviewRequest, agent_dir: Path) -> di
                 max_calls=3,
                 max_logical_calls=1,
             )
-        async with controller.open_retained_workflow(
+        async with retained_workflow.open_retained_workflow(
             reference, model=model
         ) as workflow:
             sessions = workflow.services._sessions
@@ -233,7 +233,7 @@ async def run_source_review(request: SourceReviewRequest, agent_dir: Path) -> di
             }
             try:
                 if request.operation == "decision":
-                    state = await controller.apply_human_decision(
+                    state = await retained_workflow.apply_human_decision(
                         workflow,
                         request.packet,
                         decision=request.decision,
@@ -245,7 +245,7 @@ async def run_source_review(request: SourceReviewRequest, agent_dir: Path) -> di
                 elif request.operation == "renew_plan":
                     pending = await workflow.get_state(request.incident_id)
                     previous_errors = len(pending.get("errors", []))
-                    state = await controller.renew_expired_plan(
+                    state = await retained_workflow.renew_expired_plan(
                         workflow,
                         request.packet,
                         requested_by=request.reviewer,
@@ -264,7 +264,7 @@ async def run_source_review(request: SourceReviewRequest, agent_dir: Path) -> di
                         )
                 else:
                     state = await workflow.get_state(request.incident_id)
-                packet = controller.build_approval_packet(
+                packet = retained_workflow.build_approval_packet(
                     {"case_id": request.case_id, "dataset": request.dataset}, state
                 )
             finally:

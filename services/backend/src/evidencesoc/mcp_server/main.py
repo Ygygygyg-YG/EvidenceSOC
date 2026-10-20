@@ -28,6 +28,7 @@ from evidencesoc.tools.attack_work import build_attack_lookup_work
 from evidencesoc.tools.audit import AuditWriter
 from evidencesoc.tools.audit_sql import SqlAuditWriter
 from evidencesoc.tools.event_work import build_event_search_work
+from evidencesoc.tools.incident_scope import load_incident_scope
 from evidencesoc.tools.security_events import SecurityEventTools
 
 
@@ -131,6 +132,9 @@ def build_server(
         context=context,
         work=event_work,
         audit=audit,
+        incident_scope=lambda: load_incident_scope(
+            session_factory, context.incident_id
+        ),
     )
     alert_tools = AlertContextTools(
         context=context,

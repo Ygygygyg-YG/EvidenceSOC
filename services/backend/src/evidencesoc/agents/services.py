@@ -6,7 +6,7 @@ import asyncio
 import json
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from hashlib import sha256
 from time import monotonic
 from typing import Any
@@ -53,27 +53,10 @@ from evidencesoc.persistence.tables import (
     ValidationResultTable,
 )
 from evidencesoc.tools.attack import validate_attack_results
+from evidencesoc.tools.incident_scope import load_incident_scope
+from evidencesoc.tools.incident_scope import observations as _observations
 from evidencesoc.tools.ledger import AttemptLimitExceeded, Ledger
 from evidencesoc.tools.policy import ALLOWED_TOOLS, validate_event_search
-
-OBSERVATION_FIELDS = frozenset(
-    {
-        "source_ip",
-        "destination_ip",
-        "source_port",
-        "destination_port",
-        "host",
-        "service",
-        "message",
-        "event_type",
-        "source",
-        "observed_at",
-        "severity",
-        "user",
-        "username",
-        "account",
-    }
-)
 
 
 def _utc(value: datetime | str) -> datetime:
@@ -81,20 +64,6 @@ def _utc(value: datetime | str) -> datetime:
     return (
         parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
     )
-
-
-def _observations(raw: Mapping[str, Any]) -> dict[str, Any]:
-    result = {
-        key: deepcopy(value) for key, value in raw.items() if key in OBSERVATION_FIELDS
-    }
-    http = raw.get("http")
-    if isinstance(http, dict):
-        result["http"] = {
-            key: deepcopy(value)
-            for key, value in http.items()
-            if key in {"method", "path", "status_code"}
-        }
-    return result
 
 
 class PostgresWorkflowServices:
@@ -282,60 +251,7 @@ class PostgresWorkflowServices:
                 row.output_summary = {**(row.output_summary or {}), **internal}
 
     def _scope(self, incident_id: str) -> dict[str, Any]:
-        loaded = self._load_incident(incident_id)
-        alert = loaded["alerts"][0]
-        at = _utc(alert["created_at"])
-        filters: dict[str, str] = {}
-        source_scopes: list[dict[str, Any]] = []
-        dataset_ids: list[object] = []
-        with self._sessions() as session:
-            events = (
-                session.execute(
-                    select(SecurityEventTable)
-                    .where(
-                        SecurityEventTable.event_id.in_(alert["event_ids"]),
-                    )
-                    .order_by(
-                        SecurityEventTable.observed_at, SecurityEventTable.event_id
-                    )
-                )
-                .scalars()
-                .all()
-            )
-            for event in events:
-                if calculate_content_sha256(event.raw) != event.content_sha256:
-                    raise ValueError("alert source event integrity check failed")
-                dataset_ids.append(event.raw.get("dataset_id"))
-                raw = _observations(event.raw)
-                source_filters = {
-                    key: raw[key]
-                    for key in ("source_ip", "host", "service")
-                    if isinstance(raw.get(key), str) and raw[key].strip()
-                }
-                source_scopes.append({"filters": source_filters, "raw": raw})
-                if not filters and source_filters:
-                    filters = source_filters
-        if any(value is not None for value in dataset_ids):
-            dataset_id = dataset_ids[0]
-            if (
-                not isinstance(dataset_id, str)
-                or not dataset_id.strip()
-                or any(value != dataset_id for value in dataset_ids)
-            ):
-                raise PermissionError("alert mixes dataset scenarios")
-            if filters:
-                filters["dataset_id"] = dataset_id
-            for source in source_scopes:
-                if source["filters"]:
-                    source["filters"]["dataset_id"] = dataset_id
-        return {
-            "alert_id": alert["alert_id"],
-            "time_from": (at - timedelta(seconds=900)).isoformat(),
-            "time_to": (at + timedelta(seconds=900)).isoformat(),
-            "filters": filters,
-            "source_scopes": source_scopes,
-            "limit": 100,
-        }
+        return load_incident_scope(self._sessions, incident_id)
 
     @staticmethod
     async def _check_tools(session: Any) -> None:
