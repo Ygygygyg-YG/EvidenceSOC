@@ -181,7 +181,9 @@ class SourceReviewRequest(BaseModel):
         return self
 
 
-async def run_source_review(request: SourceReviewRequest, agent_dir: Path) -> dict:
+async def run_source_review(
+    request: SourceReviewRequest, agent_dir: Path, *, model_factory=None
+) -> dict:
     """Read, explicitly decide, or renew the retained original product workflow."""
     from evals.adapters import retained_workflow
     from evals.adapters.artifacts import write_immutable_json
@@ -213,13 +215,17 @@ async def run_source_review(request: SourceReviewRequest, agent_dir: Path) -> di
                 raise PermissionError(
                     "the existing shared campaign account is required"
                 )
-            model = TrackedModel(
-                request.model,
-                api_key=os.environ.get("DEEPSEEK_API_KEY", ""),
-                account=BudgetAccount(budget_path, total_cny=100, dev_cny=15),
-                phase="verification",
-                max_calls=3,
-                max_logical_calls=1,
+            model = (
+                TrackedModel(
+                    request.model,
+                    api_key=os.environ.get("DEEPSEEK_API_KEY", ""),
+                    account=BudgetAccount(budget_path, total_cny=100, dev_cny=15),
+                    phase="verification",
+                    max_calls=3,
+                    max_logical_calls=1,
+                )
+                if model_factory is None
+                else model_factory(request)
             )
         async with retained_workflow.open_retained_workflow(
             reference, model=model

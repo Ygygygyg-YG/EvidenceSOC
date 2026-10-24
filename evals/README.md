@@ -66,3 +66,15 @@ F8 使用 `build_verification_plan` / `run_verification_plan`，保留全部 264
 ```
 
 图表输出为 15 张 PNG/SVG，附 CSV、说明和哈希 manifest。缺失/N/A 不填零；空图不能完成实验交付。G6 仍需完整真实终态、必要人审和最低 F8 覆盖，G7 仍需核对数据并逐图检查。
+
+## Task13 v2 整改补充
+
+补充活动为 `task13-repair-202610-v2`，见 [补充协议](../docs/evaluations/task13-remediation-protocol.md) 和 [进展报告](../docs/evaluations/task13-remediation-report.md)。原活动、原 704 行及审批终态保持原位；以上 v1 正式运行命令不用于派发 v2。
+
+`evals.remediation.prepare_bundle` 将独立登记投影成36项开发分析或176行B2/B3配对请求；`execute_bundle` 要求逐次验证实际出站确认、冻结源码/配置、R1/R2及预算的可信 admission verifier。登记或 `executable=false` 字段均不构成授权。派发标记先持久化，状态未知不自动重放，已完成槽不择优重跑。注入的离线 worker 只生成 `offline_contract_test` 范围结果。
+
+模型 worker 使用 `RemediationRequest` 和 `run_remediation_container`，保持原 Docker 只读挂载、PID/nonce 与服务探针。原 SQLite 的3350条历史前缀必须匹配，控制侧配置还绑定原 active 路径，防止误用空库或副本。开发6元、回归16元、F8/续期6元均同时受原总额100元与累计开发15元限制；2元机动额度保持占用，不自动转移。
+
+R1/R2 可用 `python -m evals.rag_gates --project-root <主项目根>` 在真实本地隔离服务上执行，最终模型 HTTP 由强制录制 transport 拦截，付费调用为0。每次写新 attempt，历史失败与早期 canonical 回执保留；当前有效索引由进展报告指向。
+
+F8 v2 使用 `VerificationCampaign` 维护264对/528分支完整状态，并要求实际产品审批验证及至少三次开发六分支耗时证据。新续期入口为 `RemediationReviewRequest` / `run_remediation_review_container`：读取与决定不创建模型，合法续期使用稳定调用标识及补充预算。开发续期的实际模型计费阶段为development，F8为verification；它们都保留真实逐计划审批、封存诊断与30分钟TTL约束。合成审批和回放结果不计入正式覆盖。

@@ -79,8 +79,8 @@ if crash_stage == 'after_reservation':
     Ledger.reserve = interrupted_reserve
 elif crash_stage == 'before_result_confirmation':
     original_call = PostgresWorkflowServices._call
-    async def interrupted_call(session, name, arguments):
-        values = await original_call(session, name, arguments)
+    async def interrupted_call(session, name, arguments, *, capabilities=None):
+        values = await original_call(session, name, arguments, capabilities=capabilities)
         if name == 'get_alert_context':
             crash_if('before_result_confirmation', arguments.get('alert_id'))
         return values
@@ -442,10 +442,25 @@ def read_sse(
                     data_lines.append(value.lstrip(" "))
                 elif key in {"id", "event"}:
                     frame[key] = value.lstrip(" ")
-    pytest.fail(f"TCP SSE ended before {until}")
+    final = client.get(f"{API}/incidents/{metadata['incident_id']}").json()
+    diagnostic = {
+        key: final.get(key)
+        for key in ("status", "stop_reason", "errors", "validation_result")
+    }
+    pytest.fail(
+        f"TCP SSE ended before {until}; terminal={json.dumps(diagnostic)}; "
+        f"last_events={json.dumps(frames[-2:])}"
+    )
 
 
-def assert_completed(result: dict[str, Any], metadata: dict[str, Any]) -> None:
+def assert_reviewed_unverified(
+    result: dict[str, Any], metadata: dict[str, Any]
+) -> None:
+    # Real read-only target queries do not establish a simulated effect. These
+    # fixtures intentionally supply no before/after effect observations.
+    assert result["status"] == "manual_review"
+    assert result["stop_reason"] == "insufficient_evidence"
+    assert result["errors"] == []
     assert result["trace_id"] == metadata["trace_id"]
     assert result["classification"]["primary_type"] == "sql_injection"
     assert result["origin"]["observed_source_ip"] == "203.0.113.42"
@@ -455,8 +470,15 @@ def assert_completed(result: dict[str, Any], metadata: dict[str, Any]) -> None:
     assert all(run["status"] == "completed" for run in result["runs"])
     assert result["approval"]["decision"] == "approved"
     assert result["approval"]["decided_by"] == "demo-reviewer"
-    assert result["validation_result"]["outcome"] == "success"
-    assert "simulation only" in result["validation_result"]["summary"]
+    assert result["simulation_execution"]["status"] == "completed"
+    assert result["validation_result"]["outcome"] == "insufficient_evidence"
+    assert "unverified" in result["validation_result"]["summary"]
+    assert result["validation_result"]["checks"]
+    assert all(
+        check["outcome"] == "insufficient_evidence"
+        and "Target presence alone" in check["explanation"]
+        for check in result["validation_result"]["checks"]
+    )
     assert "forbidden-truth" not in json.dumps(result)
 
 
@@ -512,7 +534,7 @@ def test_live_tcp_approval_stream_performance_and_secret_redaction(live_api):
         tail = read_sse(
             client,
             metadata,
-            until="investigation.completed",
+            until="investigation.failed",
             cursor=int(initial[-1]["id"]),
         )
         assert {frame["event"] for frame in tail} >= {
@@ -524,8 +546,8 @@ def test_live_tcp_approval_stream_performance_and_secret_redaction(live_api):
             for frame in [*initial, *tail]
             if frame["event"] == "agent.completed"
         } == set(ROLE_NAMES)
-        after = wait_status(client, metadata, "completed")
-        assert_completed(after, metadata)
+        after = wait_status(client, metadata, "manual_review")
+        assert_reviewed_unverified(after, metadata)
         completed_budget = Ledger(sessions).summary(metadata["incident_id"], 1)
         assert (
             completed_budget.total_used,
@@ -646,11 +668,13 @@ def test_live_tcp_restart_replays_cursor_and_rejection_without_subscription(live
         tail = read_sse(
             client,
             metadata,
-            until="investigation.completed",
+            until="investigation.failed",
             cursor=int(initial[-1]["id"]),
         )
-        assert tail[-1]["data"]["status"] == "completed"
-        assert_completed(wait_status(client, metadata, "completed"), metadata)
+        assert tail[-1]["data"]["status"] == "manual_review"
+        assert_reviewed_unverified(
+            wait_status(client, metadata, "manual_review"), metadata
+        )
 
         rejected_metadata = server.investigate(client, server.create_alert(client))
         pending = wait_status(client, rejected_metadata, "awaiting_approval")
@@ -746,16 +770,18 @@ def test_live_tcp_two_processes_accept_only_one_approval(live_api, tmp_path):
                 response for response in responses if response.status_code == 202
             )
             assert accepted.json()["trace_id"] == metadata["trace_id"]
-            frames = read_sse(client, metadata, until="investigation.completed")
-            assert frames[-1]["data"]["status"] == "completed"
+            frames = read_sse(client, metadata, until="investigation.failed")
+            assert frames[-1]["data"]["status"] == "manual_review"
             assert sum(frame["event"] == "decision.recorded" for frame in frames) == 1
             assert (
                 sum(frame["event"] == "validation.completed" for frame in frames) == 1
             )
-            assert_completed(wait_status(client, metadata, "completed"), metadata)
+            assert_reviewed_unverified(
+                wait_status(client, metadata, "manual_review"), metadata
+            )
             with peer.client() as other_client:
-                assert_completed(
-                    wait_status(other_client, metadata, "completed"), metadata
+                assert_reviewed_unverified(
+                    wait_status(other_client, metadata, "manual_review"), metadata
                 )
             with sessions() as session:
                 assert (
@@ -846,12 +872,14 @@ def test_live_tcp_collect_interruption_resumes_without_event_loss(live_api):
         tail = read_sse(
             client,
             metadata,
-            until="investigation.completed",
+            until="investigation.failed",
             cursor=int(recovered[-1]["id"]),
         )
         all_ids = [int(frame["id"]) for frame in [*initial, *recovered, *tail]]
         assert all_ids == list(range(1, all_ids[-1] + 1))
-        assert_completed(wait_status(client, metadata, "completed"), metadata)
+        assert_reviewed_unverified(
+            wait_status(client, metadata, "manual_review"), metadata
+        )
 
 
 @pytest.mark.parametrize(
@@ -955,12 +983,14 @@ def test_live_tcp_collect_internal_crash_keeps_budget_and_recovers(
         tail = read_sse(
             client,
             metadata,
-            until="investigation.completed",
+            until="investigation.failed",
             cursor=int(initial[-1]["id"]),
         )
         all_ids = [int(frame["id"]) for frame in [*initial, *tail]]
         assert all_ids == list(range(1, all_ids[-1] + 1))
-        assert_completed(wait_status(client, metadata, "completed"), metadata)
+        assert_reviewed_unverified(
+            wait_status(client, metadata, "manual_review"), metadata
+        )
 
     with sessions() as session:
         rows = session.scalars(

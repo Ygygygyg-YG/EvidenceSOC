@@ -653,8 +653,9 @@ def test_complete_flow_durable_order_reconnect_trace_and_duplicate_approval(
         headers=decision_headers("different-decision-request"),
     )
     assert duplicate.status_code == 409
-    final = wait_status(client, incident_id, "completed")
-    assert final["validation_result"]["outcome"] == "success"
+    # This fixture supplies target presence but no before/after effect observations.
+    final = wait_status(client, incident_id, "manual_review")
+    assert final["validation_result"]["outcome"] == "insufficient_evidence"
     assert final["fallback_used"] is True
     assert final["simulation"] and all(
         action["simulated"] for action in final["simulation"]
@@ -667,7 +668,7 @@ def test_complete_flow_durable_order_reconnect_trace_and_duplicate_approval(
     assert len([item for item in frames if item["event"] == "agent.started"]) == 6
     assert len([item for item in frames if item["event"] == "agent.completed"]) == 6
     assert frames[-2]["event"] == "validation.completed"
-    assert frames[-1]["event"] == "investigation.completed"
+    assert frames[-1]["event"] == "investigation.failed"
     assert all(item["data"]["trace_id"] == created["trace_id"] for item in frames)
     cursor = events[-1]["id"]
     replay = client.get(
@@ -976,7 +977,7 @@ def test_decision_requires_a_valid_local_demo_session(api_environment, monkeypat
 
 @pytest.mark.parametrize(
     ("action", "terminal_status"),
-    [("approve", "completed"), ("reject", "rejected")],
+    [("approve", "manual_review"), ("reject", "rejected")],
 )
 def test_decision_key_replays_original_response_after_terminal_without_rescheduling(
     api_environment, monkeypatch, action, terminal_status
@@ -995,7 +996,9 @@ def test_decision_key_replays_original_response_after_terminal_without_reschedul
     headers = decision_headers(key)
     first = client.post(path, json=body, headers=headers)
     assert first.status_code == 202, first.text
-    wait_status(client, created["incident_id"], terminal_status)
+    terminal = wait_status(client, created["incident_id"], terminal_status)
+    if action == "approve":
+        assert terminal["validation_result"]["outcome"] == "insufficient_evidence"
     before = app.state.runner.store.list_events(created["investigation_id"], 0)
     scheduled = []
     monkeypatch.setattr(

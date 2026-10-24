@@ -16,6 +16,16 @@ from evidencesoc.tools.policy import (
     validate_tool_name,
 )
 
+SEARCH_ARGUMENTS = ("time_from", "time_to", "filters", "limit")
+
+
+class CollectionPolicyDenied(PolicyDeniedError):
+    """A stable denial code without exposing argument values or raw exceptions."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
 
 class CollectionDecision(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -44,19 +54,27 @@ class CollectionDecision(BaseModel):
 
 def _timestamp(value: object) -> datetime:
     if not isinstance(value, str):
-        raise PolicyDeniedError("time bound must be a string")
+        raise CollectionPolicyDenied(
+            "POLICY_ARGUMENTS_INVALID", "time bound must be a string"
+        )
     try:
         parsed = datetime.fromisoformat(value)
     except ValueError as exc:
-        raise PolicyDeniedError("invalid time bound") from exc
+        raise CollectionPolicyDenied(
+            "POLICY_ARGUMENTS_INVALID", "invalid time bound"
+        ) from exc
     if parsed.tzinfo is None or parsed.utcoffset() is None:
-        raise PolicyDeniedError("time bound must have a timezone")
+        raise CollectionPolicyDenied(
+            "POLICY_ARGUMENTS_INVALID", "time bound must have a timezone"
+        )
     return parsed.astimezone(UTC)
 
 
 def _integer(value: object, name: str) -> int:
     if type(value) is not int:
-        raise PolicyDeniedError(f"{name} must be an integer")
+        raise CollectionPolicyDenied(
+            "POLICY_ARGUMENTS_INVALID", f"{name} must be an integer"
+        )
     return value
 
 
@@ -64,52 +82,94 @@ def validate_collection_call(
     tool_name: str, arguments: dict[str, Any], scope: dict[str, Any]
 ) -> dict[str, Any]:
     """Return canonical arguments, rejecting cross incident or broader queries."""
-    validate_tool_name(tool_name)
+    try:
+        validate_tool_name(tool_name)
+    except PolicyDeniedError as exc:
+        raise CollectionPolicyDenied(
+            "POLICY_TOOL_DENIED", "tool is not allowed"
+        ) from exc
     if not isinstance(arguments, dict):
-        raise PolicyDeniedError("arguments must be an object")
+        raise CollectionPolicyDenied(
+            "POLICY_ARGUMENTS_INVALID", "arguments must be an object"
+        )
     if tool_name == "get_alert_context":
         if set(arguments) - {"alert_id", "before_seconds", "after_seconds"}:
-            raise PolicyDeniedError("unexpected alert context argument")
+            raise CollectionPolicyDenied(
+                "POLICY_ARGUMENTS_INVALID", "unexpected alert context argument"
+            )
         alert_id = arguments.get("alert_id")
         if alert_id != scope["alert_id"]:
-            raise PolicyDeniedError("alert belongs to another incident")
+            raise CollectionPolicyDenied(
+                "POLICY_INCIDENT_DENIED", "alert belongs to another incident"
+            )
         before = _integer(arguments.get("before_seconds", 900), "before_seconds")
         after = _integer(arguments.get("after_seconds", 900), "after_seconds")
-        validate_alert_context(alert_id, before, after)
+        try:
+            validate_alert_context(alert_id, before, after)
+        except PolicyDeniedError as exc:
+            raise CollectionPolicyDenied("POLICY_LIMIT_DENIED", str(exc)) from exc
         return {"alert_id": alert_id, "before_seconds": before, "after_seconds": after}
 
     if tool_name == "lookup_attack_technique":
         if set(arguments) - {"query", "limit"}:
-            raise PolicyDeniedError("unexpected knowledge lookup argument")
+            raise CollectionPolicyDenied(
+                "POLICY_ARGUMENTS_INVALID", "unexpected knowledge lookup argument"
+            )
         query = arguments.get("query")
         limit = _integer(arguments.get("limit", 10), "limit")
         if not isinstance(query, str):
-            raise PolicyDeniedError("query must be a string")
+            raise CollectionPolicyDenied(
+                "POLICY_ARGUMENTS_INVALID", "query must be a string"
+            )
         query = " ".join(query.split())
-        validate_attack_lookup(query, limit)
+        if not query:
+            raise CollectionPolicyDenied(
+                "POLICY_ARGUMENTS_INVALID", "query must not be blank"
+            )
+        try:
+            validate_attack_lookup(query, limit)
+        except PolicyDeniedError as exc:
+            raise CollectionPolicyDenied("POLICY_LIMIT_DENIED", str(exc)) from exc
         return {"query": query, "limit": limit}
 
-    if set(arguments) != {"time_from", "time_to", "filters", "limit"}:
-        raise PolicyDeniedError("event search requires scoped arguments")
+    if set(arguments) != set(SEARCH_ARGUMENTS):
+        raise CollectionPolicyDenied(
+            "POLICY_ARGUMENTS_INVALID", "event search requires scoped arguments"
+        )
     start = _timestamp(arguments["time_from"])
     end = _timestamp(arguments["time_to"])
     lower = _timestamp(scope["time_from"])
     upper = _timestamp(scope["time_to"])
     if start < lower or end > upper:
-        raise PolicyDeniedError("event search exceeds incident time window")
+        raise CollectionPolicyDenied(
+            "POLICY_TIME_SCOPE_DENIED", "event search exceeds incident time window"
+        )
     filters = arguments["filters"]
     if not isinstance(filters, dict):
-        raise PolicyDeniedError("filters must be an object")
+        raise CollectionPolicyDenied(
+            "POLICY_ARGUMENTS_INVALID", "filters must be an object"
+        )
     if "dataset_id" in filters and "dataset_id" not in scope["filters"]:
-        raise PolicyDeniedError("dataset filter is not anchored to incident")
+        raise CollectionPolicyDenied(
+            "POLICY_TARGET_SCOPE_DENIED", "dataset filter is not anchored to incident"
+        )
     if not scope["filters"]:
-        raise PolicyDeniedError("incident has no safe event search anchor")
+        raise CollectionPolicyDenied(
+            "POLICY_TARGET_SCOPE_DENIED", "incident has no safe event search anchor"
+        )
     if any(filters.get(key) != value for key, value in scope["filters"].items()):
-        raise PolicyDeniedError("event search must retain incident filters")
+        raise CollectionPolicyDenied(
+            "POLICY_TARGET_SCOPE_DENIED", "event search must retain incident filters"
+        )
     limit = _integer(arguments["limit"], "limit")
-    if limit > scope["limit"]:
-        raise PolicyDeniedError("event search limit exceeds incident scope")
-    validate_event_search(start, end, filters, limit)
+    if not 1 <= limit <= scope["limit"]:
+        raise CollectionPolicyDenied(
+            "POLICY_LIMIT_DENIED", "event search limit exceeds incident scope"
+        )
+    try:
+        validate_event_search(start, end, filters, limit)
+    except PolicyDeniedError as exc:
+        raise CollectionPolicyDenied("POLICY_ARGUMENTS_INVALID", str(exc)) from exc
     return {
         "time_from": start.isoformat(),
         "time_to": end.isoformat(),

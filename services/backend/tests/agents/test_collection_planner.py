@@ -677,3 +677,183 @@ async def test_second_round_rule_can_retry_a_failed_prior_query(
     )
     await planner.run()
     assert invoked[0] == "search_security_events"
+
+
+@pytest.mark.asyncio
+async def test_model_receives_actual_server_tool_schemas_and_search_contract() -> None:
+    from evidencesoc.agents.capabilities import InvestigationCapabilities
+    from evidencesoc.mcp_server.context import RunContext
+    from evidencesoc.mcp_server.main import create_server
+
+    seen: list[dict[str, Any]] = []
+
+    class InspectModel:
+        async def structured(self, _role: str, schema: Any, state: dict) -> Any:
+            seen.append(state["collection_context"])
+            return schema(action="stop", rationale="Recorded stop.")
+
+    planner = collector(model=InspectModel())
+    planner.capabilities = InvestigationCapabilities(
+        allowed_tools=frozenset({"search_security_events"}), rag_mode="disabled"
+    )
+    await planner._plan(2)
+    # Metadata discovery must not require business dependencies or execute a tool.
+    server = create_server(
+        context=RunContext("AR-1", "IN-1", "TRACE-schema"),
+        boundary_audit=SimpleNamespace(
+            record=lambda _row: pytest.fail("audit invoked")
+        ),
+        event_tools=SimpleNamespace(),
+        alert_tools=SimpleNamespace(),
+        attack_tools=SimpleNamespace(),
+    )
+    actual = {tool.name: tool for tool in await server.list_tools()}
+    assert "tool_schemas" in seen[0]
+    supplied = seen[0]["tool_schemas"]
+    assert [tool["name"] for tool in supplied] == ["search_security_events"]
+    assert supplied[0]["inputSchema"] == actual["search_security_events"].inputSchema
+    assert seen[0]["required_search_arguments"] == [
+        "time_from",
+        "time_to",
+        "filters",
+        "limit",
+    ]
+    assert seen[0]["scope"] == SCOPE
+    assert seen[0]["remaining_logical_calls"] == 2
+
+
+# Recorded request 3127051e-066f-4d1f-934f-fe7bce27b45a from the immutable
+# dedale/row-0be1c35fa8f8c957a3276881/attempt-001/result.json, SHA256
+# 402728df481117965bdaa3218f83749e802d86546d57bf0823001b3d8d4bdffc.
+# Identifiers/host/dataset are replaced; the original extra alert_id, timestamps,
+# argument structure, and limit are retained. No endpoint or model is used.
+RECORDED_SEARCH_SCOPE = {
+    "alert_id": "AL-1",
+    "time_from": "2025-01-06T09:47:25.097000+00:00",
+    "time_to": "2025-01-06T10:17:25.097000+00:00",
+    "filters": {"host": "client.example.test", "dataset_id": "dedale-v2.1:recorded"},
+    "limit": 100,
+}
+
+
+@pytest.mark.asyncio
+async def test_recorded_extra_alert_id_is_rejected_before_any_physical_call(
+    memory_ledger: Ledger,
+) -> None:
+    planner = collector(ledger=memory_ledger)
+    planner.scope = RECORDED_SEARCH_SCOPE
+    outcome = await planner._call(
+        "search_security_events", dict(RECORDED_SEARCH_SCOPE), "Recorded search gap."
+    )
+    assert outcome == "policy_denied"
+    row = memory_ledger.calls("IN-1", 1)[0]
+    assert row.status == "failed"
+    assert row.error_code == "POLICY_ARGUMENTS_INVALID"
+    assert row.attempts == 0
+    assert row.charged is True
+
+
+@pytest.mark.asyncio
+async def test_recorded_search_can_be_legally_replayed_using_supplied_contract(
+    memory_ledger: Ledger,
+) -> None:
+    contexts: list[dict] = []
+    invoked: list[tuple[str, dict]] = []
+
+    class RecordedModel:
+        async def structured(self, _role: str, schema: Any, state: dict) -> Any:
+            context = state["collection_context"]
+            contexts.append(context)
+            if len(contexts) > 1:
+                return schema(
+                    action="stop", rationale="Recorded evidence gap resolved."
+                )
+            search = next(
+                tool
+                for tool in context.get("tool_schemas", [])
+                if tool["name"] == "search_security_events"
+            )
+            keys = context["required_search_arguments"]
+            assert set(keys) == set(search["inputSchema"]["properties"])
+            return schema(
+                action="call",
+                tool_name="search_security_events",
+                arguments={key: context["scope"][key] for key in keys},
+                rationale="Recorded search gap with the published tool contract.",
+            )
+
+    async def invoke(name: str, arguments: dict) -> list[dict]:
+        invoked.append((name, arguments))
+        return [{"evidence_id": f"EV-{len(invoked)}"}]
+
+    planner = collector(ledger=memory_ledger, model=RecordedModel())
+    planner.scope = RECORDED_SEARCH_SCOPE
+    planner.invoke = invoke
+    result = await planner.run()
+    assert result["fallback_used"] is False
+    assert [name for name, _args in invoked] == [
+        "get_alert_context",
+        "search_security_events",
+    ]
+    assert invoked[1][1] == {
+        key: value for key, value in RECORDED_SEARCH_SCOPE.items() if key != "alert_id"
+    }
+    assert result["collection_stop_reason"] == "planner_stopped"
+    assert result["collection_refusal_codes"] == []
+    assert result["collection_round_used"] == 2
+    assert result["collection_tool_attempts"] == 2
+    assert result["collection_model_attempts"] == 2
+
+
+@pytest.mark.asyncio
+async def test_report_keeps_refusal_separate_from_later_planner_stop(
+    memory_ledger: Ledger,
+) -> None:
+    class StopModel:
+        async def structured(self, _role: str, schema: Any, _state: dict) -> Any:
+            return schema(action="stop", rationale="Recorded reason for stopping.")
+
+    async def invoke(_name: str, _arguments: dict) -> list[dict]:
+        return [{"evidence_id": "EV-1"}]
+
+    planner = collector(ledger=memory_ledger, model=StopModel())
+    planner.invoke = invoke
+    await planner._call(
+        "search_security_events", dict(SCOPE), "Malformed recorded call."
+    )
+    result = await planner.run()
+    assert result["collection_stop_reason"] == "planner_stopped"
+    assert result.get("collection_refusal_codes") == ["POLICY_ARGUMENTS_INVALID"]
+    assert result["collection_observations"][-1] == {
+        "status": "planner_stopped",
+        "rationale": "Recorded reason for stopping.",
+    }
+
+
+@pytest.mark.asyncio
+async def test_empty_seed_then_denied_arguments_can_be_corrected_in_original_budget(memory_ledger):
+    calls, plans = [], []
+
+    class CorrectingModel:
+        async def structured(self, _role, schema, state):
+            plans.append(state)
+            scope = state["collection_context"]["scope"]
+            arguments = dict(scope) if len(plans) == 1 else {
+                key: scope[key] for key in ("time_from", "time_to", "filters", "limit")
+            }
+            return schema(action="call", tool_name="search_security_events",
+                          arguments=arguments, rationale="Correct the bounded query.")
+
+    async def invoke(name, arguments):
+        calls.append((name, arguments))
+        return [] if name == "get_alert_context" else [{"evidence_id": "EV-corrected"}]
+
+    planner = collector(ledger=memory_ledger, model=CorrectingModel())
+    planner.invoke = invoke
+    result = await planner.run()
+    assert len(plans) == 2
+    assert [name for name, _ in calls] == ["get_alert_context", "search_security_events"]
+    assert result["collection_round_used"] == 3
+    assert result["collection_refusal_codes"] == ["POLICY_ARGUMENTS_INVALID"]
+    assert result["collection_stop_reason"] == "budget_exhausted"
+    assert result["evidence_values"] == [{"evidence_id": "EV-corrected"}]

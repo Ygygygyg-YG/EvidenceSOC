@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import sqlite3
 import time
 import uuid
 from datetime import UTC, datetime, timedelta, timezone
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -108,11 +110,28 @@ class BudgetLimit(RuntimeError):
     pass
 
 
+def _finite_money(value: Any) -> bool:
+    try:
+        return (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(value)
+            and value >= 0
+        )
+    except OverflowError:
+        return False
+
+
 class BudgetAccount:
     """SQLite BEGIN IMMEDIATE serializes reservations across workers and resumes."""
 
     def __init__(self, path: Path, *, total_cny: float = 100, dev_cny: float = 15):
-        if not 0 < dev_cny <= min(total_cny, 15) or not 0 < total_cny <= 100:
+        if (
+            not _finite_money(total_cny)
+            or not _finite_money(dev_cny)
+            or not 0 < dev_cny <= min(total_cny, 15)
+            or not 0 < total_cny <= 100
+        ):
             raise ValueError("budget exceeds user authorization")
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -139,9 +158,49 @@ class BudgetAccount:
         db.execute("PRAGMA busy_timeout=30000")
         return db
 
-    def reserve(self, request_key: str, upper_cny: float, phase: str) -> str:
+    def physical_request_key(
+        self, logical_key: str, physical_attempt: int, *, explicit_call_id: Any
+    ) -> str:
+        """v1 retains its random physical identities; bound accounts may refuse replay."""
+        return uuid.uuid4().hex
+
+    def request_binding(self) -> dict[str, Any]:
+        return {}
+
+    def _reserve_in_transaction(
+        self, db, reservation, request_key, upper_cny, phase, metadata
+    ) -> None:
+        """Extension point inside the original global/development transaction."""
+
+    def _settle_in_transaction(self, db, reservation, actual, metadata) -> None:
+        """Extension point before either normal or over-bound settlement commits."""
+        # Original v1 databases have no supplement table. A legacy account may
+        # still coexist in the same DB, but cannot bypass a new request's binding.
         if (
-            phase not in {"development", "formal", "verification"}
+            db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='supplement_requests'"
+            ).fetchone()
+            and db.execute(
+                "SELECT 1 FROM supplement_requests WHERE reservation_id=?",
+                (reservation,),
+            ).fetchone()
+        ):
+            raise ValueError("settlement requires the bound supplement account")
+
+    def reserve(
+        self,
+        request_key: str,
+        upper_cny: float,
+        phase: str,
+        *,
+        metadata: dict | None = None,
+    ) -> str:
+        if (
+            not isinstance(request_key, str)
+            or not request_key.strip()
+            or not isinstance(phase, str)
+            or phase not in {"development", "formal", "verification"}
+            or not _finite_money(upper_cny)
             or not 0 < upper_cny < 100
         ):
             raise ValueError("invalid reservation")
@@ -150,6 +209,10 @@ class BudgetAccount:
             halt = db.execute("SELECT value FROM config WHERE key='halt'").fetchone()
             if halt:
                 raise RuntimeError("campaign halted: " + halt[0])
+            if db.execute(
+                "SELECT 1 FROM reservations WHERE request_key=?", (request_key,)
+            ).fetchone():
+                raise BudgetLimit("request already reserved; automatic replay refused")
             total = db.execute(
                 "SELECT COALESCE(SUM(COALESCE(actual,upper)),0) FROM reservations"
             ).fetchone()[0]
@@ -174,10 +237,15 @@ class BudgetAccount:
                 "INSERT INTO reservations (id,request_key,phase,upper) VALUES (?,?,?,?)",
                 (reservation, request_key, phase, upper_cny),
             )
+            self._reserve_in_transaction(
+                db, reservation, request_key, upper_cny, phase, metadata
+            )
             return reservation
 
-    def settle(self, reservation: str, actual: float | None):
-        if actual is not None and (actual < 0 or not actual < float("inf")):
+    def settle(
+        self, reservation: str, actual: float | None, *, metadata: dict | None = None
+    ):
+        if actual is not None and not _finite_money(actual):
             raise ValueError("invalid actual charge")
         with self._db() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -194,12 +262,14 @@ class BudgetAccount:
                     "UPDATE reservations SET actual=?,settled=1 WHERE id=?",
                     (actual, reservation),
                 )
+                self._settle_in_transaction(db, reservation, actual, metadata)
                 db.commit()
                 raise BudgetLimit("actual usage exceeded conservative reservation")
             db.execute(
                 "UPDATE reservations SET actual=?,settled=1 WHERE id=?",
                 (actual, reservation),
             )
+            self._settle_in_transaction(db, reservation, actual, metadata)
 
     def bind_model(self, response_model: str, fingerprint: str | None):
         with self._db() as db:
@@ -294,6 +364,8 @@ class TrackedModel:
         transport=None,
         max_calls: int = 48,
         max_logical_calls: int = 16,
+        entry_prompt: str | None = None,
+        payload_sink=None,
     ):
         if not api_key:
             raise ValueError("explicit API credential required")
@@ -302,6 +374,12 @@ class TrackedModel:
         self.ledger: list[dict[str, Any]] = []
         self.max_calls = max_calls
         self.max_logical_calls = max_logical_calls
+        if entry_prompt is not None and (
+            not isinstance(entry_prompt, str) or not entry_prompt.strip()
+        ):
+            raise ValueError("trusted entry prompt must be nonempty text")
+        self.entry_prompt = entry_prompt
+        self.payload_sink = payload_sink
         self._logical: dict[str, tuple[str, int]] = {}
 
     async def structured(
@@ -407,14 +485,36 @@ class TrackedModel:
             "response_format": {"type": "json_object"},
             "stream": False,
         }
+        if self.entry_prompt is not None:
+            payload["messages"].insert(
+                0, {"role": "system", "content": self.entry_prompt}
+            )
         encoded = json.dumps(payload, ensure_ascii=False).encode()
         # Input tokens cannot exceed encoded UTF-8 bytes plus conservative protocol
         # overhead. Peak non-cache rates bound both pricing windows/cache states.
         upper = ((len(encoded) + 4096) * 2 + self.config.max_tokens * 8) / 1_000_000
-        reservation = self.account.reserve(uuid.uuid4().hex, upper, self.phase)
         start = datetime.now(UTC)
         tick = time.monotonic()
+        physical_request_id = self.account.physical_request_key(
+            logical_key, physical, explicit_call_id=hint
+        )
+        request_sha256 = canonical_hash(payload)
+        reservation = self.account.reserve(
+            physical_request_id,
+            upper,
+            self.phase,
+            metadata={
+                "role": role,
+                "request_id": physical_request_id,
+                "requested_at": start.isoformat(),
+                "logical_call_id": logical_id,
+                "physical_attempt": physical,
+                "request_sha256": request_sha256,
+            },
+        )
         record = {
+            **self.account.request_binding(),
+            "physical_request_id": physical_request_id,
             "physical_attempt": physical,
             "request_ordinal": len(self.ledger) + 1,
             "logical_call_id": logical_id,
@@ -426,7 +526,7 @@ class TrackedModel:
             "thinking": "disabled",
             "temperature": 0,
             "max_tokens": self.config.max_tokens,
-            "request_sha256": canonical_hash(payload),
+            "request_sha256": request_sha256,
             "reservation_id": reservation,
             "context_projection": projection,
             "reserved_cny": upper,
@@ -439,9 +539,27 @@ class TrackedModel:
         }
         self.ledger.append(record)
         actual = None
+
+        async def record_http_request(request: httpx.Request) -> None:
+            if self.payload_sink is not None:
+                # Only the serialized body is recorded. Headers, credentials and
+                # provider connection settings never enter the payload artifact.
+                self.payload_sink(
+                    {
+                        "physical_request_id": physical_request_id,
+                        "payload": json.loads(request.content),
+                        "http_body": request.content,
+                        "http_body_sha256": sha256(request.content).hexdigest(),
+                    }
+                )
+
         try:
             async with httpx.AsyncClient(
-                transport=self.transport, timeout=self.config.timeout_seconds
+                transport=self.transport,
+                timeout=self.config.timeout_seconds,
+                event_hooks={"request": [record_http_request]}
+                if self.payload_sink is not None
+                else None,
             ) as client:
                 response = await client.post(
                     self.config.base_url + "/chat/completions",
@@ -487,4 +605,17 @@ class TrackedModel:
             record["duration_ms"] = round((time.monotonic() - tick) * 1000)
             if actual is None:
                 record["usage_missing_reason"] = "request_or_response_usage_unavailable"
-            self.account.settle(reservation, actual)
+            self.account.settle(
+                reservation,
+                actual,
+                metadata={
+                    "request_id": physical_request_id,
+                    "finished_at": record["finished_at"],
+                    "usage": record.get("usage"),
+                    "provider_request_id": record.get("request_id"),
+                    "parse_status": record["parse_status"],
+                    "error_type": record.get("error_type"),
+                    "usage_missing_reason": record.get("usage_missing_reason"),
+                    "duration_ms": record["duration_ms"],
+                },
+            )

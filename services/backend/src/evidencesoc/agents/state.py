@@ -21,6 +21,9 @@ class InvestigationState(TypedDict, total=False):
     diagnosis_execution_status: str
     attack_steps: list[dict[str, Any]]
     response_plan: dict[str, Any] | None
+    plan_source: str | None
+    response_reason: str | None
+    response_attempts: list[dict[str, Any]]
     approval: dict[str, Any] | None
     validation_result: dict[str, Any] | None
     simulation: list[dict[str, Any]]
@@ -36,6 +39,7 @@ class InvestigationState(TypedDict, total=False):
     collection_model_attempts: int
     collection_observations: list[dict[str, Any]]
     collection_stop_reason: str | None
+    collection_refusal_codes: list[str]
     verification_call_count: int
     verification_attempts: int
     verification_duration_ms: int

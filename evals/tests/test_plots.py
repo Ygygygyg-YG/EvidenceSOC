@@ -139,6 +139,34 @@ def test_cli_repeated_scores_passes_both_frozen_inputs(monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out)["figures"] == 15
 
 
+def test_resource_time_display_uses_seconds_and_exports_original_milliseconds():
+    from copy import deepcopy
+
+    from matplotlib import pyplot as plt
+
+    from evals.plots.resources import build
+
+    groups = {"B3": {"coverage": {"planned_n": 22}, "resources": {
+        "latency_p50_ms": 1500, "latency_p95_ms": 3250,
+        "latency_observed_n": 20, "latency_missing_n": 2,
+    }}}
+    original = deepcopy(groups)
+    figure, rows, caption = build("ait", groups)
+    try:
+        values = {row["metric"]: row for row in rows if row["group"] == "B3"}
+        assert values["latency_p50_s"]["value"] == 1.5
+        assert values["latency_p95_s"]["value"] == 3.25
+        assert values["latency_p50_ms"]["value"] == 1500
+        assert values["latency_p50_s"]["unit"] == "秒"
+        assert values["latency_p50_s"]["denominator"] == 20
+        assert "计划 n=22" in values["latency_p50_s"]["note"]
+        assert "缺测 n=2" in values["latency_p50_s"]["note"]
+        assert "控制器" in caption
+        assert groups == original
+    finally:
+        plt.close(figure)
+
+
 def test_long_chinese_footer_stays_within_export_canvas():
     from matplotlib import pyplot as plt
 

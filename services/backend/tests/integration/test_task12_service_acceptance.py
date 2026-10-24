@@ -306,7 +306,10 @@ async def test_live_failed_empty_duplicate_budget_and_separate_verification(live
             await collector._call("search_security_events", empty, "Empty valid query")
             == "called"
         )
-        assert await collector._call("run_shell", {}, "Denied invalid tool") == "called"
+        assert (
+            await collector._call("run_shell", {}, "Denied invalid tool")
+            == "policy_denied"
+        )
         assert (
             await collector._call("get_alert_context", seed, "Duplicate fingerprint")
             == "duplicate_query"
@@ -317,7 +320,7 @@ async def test_live_failed_empty_duplicate_budget_and_separate_verification(live
             row.status == "completed" and row.result == {"values": []} for row in first
         )
         assert any(
-            row.status == "failed" and row.error_code == "POLICY_DENIED"
+            row.status == "failed" and row.error_code == "POLICY_TOOL_DENIED"
             for row in first
         )
         with pytest.raises(BudgetExceeded):
@@ -476,16 +479,25 @@ async def test_live_cross_case_scenario_and_time_expansion_are_denied(
         ):
             assert (
                 await collector._call(name, arguments, "Attempt scope expansion")
-                == "called"
+                == "policy_denied"
             )
         rows = collector.ledger.calls(live.incidents[0], 1)
         assert len(rows) == 3
         assert all(
             row.status == "failed"
-            and row.error_code == "POLICY_DENIED"
+            and row.error_code in {
+                "POLICY_INCIDENT_DENIED",
+                "POLICY_TARGET_SCOPE_DENIED",
+                "POLICY_TIME_SCOPE_DENIED",
+            }
             and row.attempts == 0
             for row in rows
         )
+        assert {row.error_code for row in rows} == {
+            "POLICY_INCIDENT_DENIED",
+            "POLICY_TARGET_SCOPE_DENIED",
+            "POLICY_TIME_SCOPE_DENIED",
+        }
         # Real bound MCP independently refuses a different incident's alert.
         result = await session.call_tool(
             "get_alert_context", {"alert_id": live.alerts[1]}

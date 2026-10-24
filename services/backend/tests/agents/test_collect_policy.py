@@ -147,3 +147,47 @@ def test_model_decision_rejects_unpersistable_values(
             arguments=arguments,
             rationale="inspect the incident",
         )
+
+
+@pytest.mark.parametrize(
+    ("tool", "arguments", "code"),
+    [
+        ("shell", {}, "POLICY_TOOL_DENIED"),
+        ("get_alert_context", {"alert_id": "AL-other"}, "POLICY_INCIDENT_DENIED"),
+        (
+            "search_security_events",
+            dict(SCOPE),
+            "POLICY_ARGUMENTS_INVALID",
+        ),
+        (
+            "search_security_events",
+            {
+                **{key: value for key, value in SCOPE.items() if key != "alert_id"},
+                "time_from": "2026-09-21T09:00:00Z",
+            },
+            "POLICY_TIME_SCOPE_DENIED",
+        ),
+        (
+            "search_security_events",
+            {
+                **{key: value for key, value in SCOPE.items() if key != "alert_id"},
+                "filters": {"host": "another.example.test"},
+            },
+            "POLICY_TARGET_SCOPE_DENIED",
+        ),
+        (
+            "search_security_events",
+            {
+                **{key: value for key, value in SCOPE.items() if key != "alert_id"},
+                "limit": 101,
+            },
+            "POLICY_LIMIT_DENIED",
+        ),
+    ],
+)
+def test_policy_denials_preserve_the_rejected_boundary(
+    tool: str, arguments: dict[str, object], code: str
+) -> None:
+    with pytest.raises(ValueError) as caught:
+        validate_collection_call(tool, arguments, SCOPE)
+    assert getattr(caught.value, "code", None) == code

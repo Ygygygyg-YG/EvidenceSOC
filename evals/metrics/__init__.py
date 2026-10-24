@@ -1,6 +1,6 @@
 """Controller/scoring-only Task13 metrics over normalized immutable rows."""
 from collections import Counter
-from math import ceil, floor
+from math import ceil, floor, isfinite
 
 from .attack_chain import score_attack_chain
 from .classification import prediction, ratio, score_classification
@@ -24,10 +24,35 @@ def score_resources(rows):
         if key == "known_subtotals":
             continue
         values = [(row.get("usage") or {}).get(key) for row in rows]
-        known = [value for value in values if isinstance(value, (float, int)) and not isinstance(value, bool)]
+        def valid(value, *, tokens=key != "cost"):
+            return (isinstance(value, int if tokens else (int, float))
+                    and not isinstance(value, bool) and value >= 0
+                    and (not isinstance(value, float) or isfinite(value)))
+        known = [value for value in values if valid(value)]
+        subtotals = [
+            (row["resource_coverage"].get("known_subtotals") or {}).get(key)
+            if row.get("resource_coverage") is not None
+            else (row.get("usage") or {}).get(key)
+            for row in rows
+        ]
+        observed = [value for value in subtotals if valid(value)]
         result[key] = sum(known) if len(known) == len(rows) and rows else None
-        result["known_subtotals"][key] = sum(known) if known else None
+        subtotal = sum(observed) if observed else None
+        result["known_subtotals"][key] = subtotal if valid(subtotal) else None
         result[key + "_missing_count"] = len(rows) - len(known)
+    coverage = [row["resource_coverage"] for row in rows if row.get("resource_coverage") is not None]
+    result["physical_usage_coverage"] = {
+        key: sum(item.get(key, 0) for item in coverage)
+        for key in ("physical_requests_n", "legacy_summaries_n", "missing_attempts_n")
+    }
+    result["physical_usage_coverage"].update({
+        "physical_missing_counts": {
+            key: sum(item.get("physical_missing_counts", {}).get(key, 0) for item in coverage)
+            for key in ("input_tokens", "output_tokens", "cost")
+        },
+        "observed_rows_n": len(coverage),
+        "unobserved_rows_n": len(rows) - len(coverage),
+    })
     latencies = [row["latency_ms"] for row in rows if isinstance(row.get("latency_ms"), (int, float))]
     tool_complete = [row.get("tool_ledger_complete", isinstance(row.get("tool_calls"), list)) is True
                      for row in rows]

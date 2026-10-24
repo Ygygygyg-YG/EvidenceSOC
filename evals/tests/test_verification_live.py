@@ -9,7 +9,6 @@ from __future__ import annotations
 import json
 import os
 import uuid
-from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from types import SimpleNamespace
@@ -31,7 +30,12 @@ async def test_synthetic_original_approval_and_live_verification_resource_copies
     from evidencesoc.agents import fallback
     from evidencesoc.agents.capabilities import InvestigationCapabilities
     from evidencesoc.agents.checkpoint import open_checkpointer
-    from evidencesoc.agents.graph import InvestigationWorkflow, _plan_hash
+    from evidencesoc.agents.diagnosis import Diagnosis
+    from evidencesoc.agents.graph import (
+        InvestigationWorkflow,
+        _plan_hash,
+        _seal_diagnosis,
+    )
     from evidencesoc.agents.services import PostgresWorkflowServices
     from evidencesoc.config import Settings
     from evidencesoc.persistence.event_search import create_opensearch_client
@@ -104,16 +108,16 @@ async def test_synthetic_original_approval_and_live_verification_resource_copies
             simulation=[],
             simulation_execution=None,
             validation_result=None,
-            diagnostic_snapshot={
-                "diagnosis": {
-                    "verdict": "attack",
-                    "taxonomy_status": "out_of_taxonomy",
-                },
-                "evidence": deepcopy(state["evidence"]),
-                "sealed_after": "reconstruct",
-            },
+            diagnosis=Diagnosis(
+                verdict="attack",
+                taxonomy_status="out_of_taxonomy",
+                origin=state["origin"],
+                evidence_ids=state["classification"]["evidence_ids"],
+            ).model_dump(mode="json"),
         )
-        state["diagnostic_snapshot_sha256"] = _plan_hash(state["diagnostic_snapshot"])
+        # Renewal consumes a complete production seal, including its knowledge
+        # and target observations. A partial legacy fixture must remain refused.
+        state.update(_seal_diagnosis(state, "reconstruct"))
         state["response_plan"]["created_at"] = (
             datetime.now(UTC) - timedelta(minutes=31)
         ).isoformat()

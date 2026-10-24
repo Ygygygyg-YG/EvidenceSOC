@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from evidencesoc.agents.capabilities import InvestigationCapabilities
 from evidencesoc.agents.collect_policy import (
+    SEARCH_ARGUMENTS,
     CollectionDecision,
     validate_collection_call,
 )
@@ -22,6 +23,15 @@ from evidencesoc.tools.ledger import (
     query_fingerprint,
 )
 from evidencesoc.tools.policy import PolicyDeniedError
+
+
+def _schema_only_work(**_arguments: Any) -> Any:
+    raise RuntimeError("schema discovery must not execute tools")
+
+
+class _SchemaOnlyAudit:
+    def record(self, _record: Any) -> None:
+        raise RuntimeError("schema discovery must not write audit records")
 
 
 class BoundedCollector:
@@ -65,6 +75,42 @@ class BoundedCollector:
         self.seen_evidence_ids: set[str] = set()
         self.seen_knowledge_ids: set[str] = set()
         self.no_new_streak = 0
+        self._schemas: list[dict[str, Any]] | None = None
+
+    async def _tool_schemas(self) -> list[dict[str, Any]]:
+        """Read the real MCP registration; discovery has no service dependencies."""
+        if self._schemas is None:
+            from evidencesoc.mcp_server.context import RunContext
+            from evidencesoc.mcp_server.main import create_server
+            from evidencesoc.tools.alert_context import AlertContextTools
+            from evidencesoc.tools.attack import AttackTools
+            from evidencesoc.tools.security_events import SecurityEventTools
+
+            context = RunContext(self.run_id, self.incident_id, "schema-discovery")
+            audit = _SchemaOnlyAudit()
+            server = create_server(
+                context=context,
+                boundary_audit=audit,
+                event_tools=SecurityEventTools(
+                    context=context, work=_schema_only_work, audit=audit
+                ),
+                alert_tools=AlertContextTools(
+                    context=context, work=_schema_only_work, audit=audit
+                ),
+                attack_tools=AttackTools(
+                    context=context, work=_schema_only_work, audit=audit
+                ),
+            )
+            self._schemas = [
+                {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "inputSchema": tool.inputSchema,
+                }
+                for tool in await server.list_tools()
+            ]
+        allowed = self._allowed_tools()
+        return [tool for tool in self._schemas if tool["name"] in allowed]
 
     async def _ledger(self, name: str, *args: Any, **kwargs: Any) -> Any:
         return await asyncio.to_thread(getattr(self.ledger, name), *args, **kwargs)
@@ -114,7 +160,7 @@ class BoundedCollector:
                 }
             )
         elif row.status == "failed":
-            if count_streak:
+            if count_streak and not (row.error_code or "").startswith("POLICY_"):
                 self.no_new_streak += 1
             self.observations.append(
                 {
@@ -135,8 +181,13 @@ class BoundedCollector:
             arguments = validate_collection_call(
                 row.tool_name, row.arguments, self.scope
             )
-        except (PermissionError, ValueError, TypeError, KeyError):
-            failed = await self._ledger("fail", row.call_id, "POLICY_DENIED")
+        except (PermissionError, ValueError, TypeError, KeyError) as exc:
+            code = (
+                "CAPABILITY_DENIED"
+                if isinstance(exc, PermissionError)
+                else getattr(exc, "code", "POLICY_ARGUMENTS_INVALID")
+            )
+            failed = await self._ledger("fail", row.call_id, code)
             self._record_result(failed, count_streak=count_streak)
             return failed
         while True:
@@ -180,13 +231,23 @@ class BoundedCollector:
 
     async def _call(
         self, tool_name: str, arguments: dict[str, Any], rationale: str
-    ) -> Literal["called", "duplicate_query", "budget_exhausted", "capability_denied"]:
+    ) -> Literal[
+        "called",
+        "duplicate_query",
+        "budget_exhausted",
+        "capability_denied",
+        "policy_denied",
+    ]:
         if self.capabilities is not None:
             try:
                 self.capabilities.require_tool(tool_name)
             except PermissionError:
                 self.observations.append(
-                    {"tool_name": tool_name, "status": "capability_denied"}
+                    {
+                        "tool_name": tool_name,
+                        "status": "capability_denied",
+                        "error_code": "CAPABILITY_DENIED",
+                    }
                 )
                 return "capability_denied"
             summary = await self._ledger("summary", self.incident_id, self.round_no)
@@ -218,7 +279,9 @@ class BoundedCollector:
             )
             return "duplicate_query"
         if row.status in {"reserved", "running"}:
-            await self._execute(row)
+            row = await self._execute(row)
+            if row.status == "failed" and (row.error_code or "").startswith("POLICY_"):
+                return "policy_denied"
         return "called"
 
     def _rule(self) -> CollectionDecision:
@@ -236,10 +299,7 @@ class BoundedCollector:
             return CollectionDecision(
                 action="call",
                 tool_name="search_security_events",
-                arguments={
-                    key: self.scope[key]
-                    for key in ("time_from", "time_to", "filters", "limit")
-                },
+                arguments={key: self.scope[key] for key in SEARCH_ARGUMENTS},
                 rationale="Search only the incident's observed entities and time window.",
             )
         if (
@@ -309,9 +369,13 @@ class BoundedCollector:
             "alerts": self.state.get("alerts", []),
             "collection_context": {
                 "allowed_tools": self._allowed_tools(),
+                "tool_schemas": await self._tool_schemas(),
+                # MCP permits a default limit, while collection requires an explicit
+                # bounded limit and must not pass scope.alert_id to event search.
+                "required_search_arguments": list(SEARCH_ARGUMENTS),
                 "scope": self.scope,
                 "remaining_logical_calls": remaining,
-                "observations": self.observations,
+                "observations": list(self.observations),
                 "evidence_summaries": [
                     {
                         "evidence_id": item.get("evidence_id"),
@@ -365,6 +429,14 @@ class BoundedCollector:
             "collection_model_attempts": self.model_attempts,
             "collection_observations": self.observations,
             "collection_stop_reason": stop_reason,
+            "collection_refusal_codes": sorted(
+                {
+                    item["error_code"]
+                    for item in self.observations
+                    if (item.get("error_code") or "").startswith("POLICY_")
+                    or item.get("error_code") == "CAPABILITY_DENIED"
+                }
+            ),
             "fallback_used": self.fallback_used,
             "collection_reserved_calls": self.capabilities.total_reserved_calls
             if self.capabilities
@@ -418,11 +490,20 @@ class BoundedCollector:
             decision = await self._plan(remaining)
             if decision.action == "stop":
                 stop_reason = "planner_stopped"
+                self.observations.append(
+                    {"status": "planner_stopped", "rationale": decision.rationale}
+                )
                 break
             assert decision.tool_name is not None
             outcome = await self._call(
                 decision.tool_name, decision.arguments, decision.rationale
             )
+            # A rejected query still consumes its original logical allowance.
+            # Keep the denial in observations while allowing the planner to
+            # correct it within the existing round/case limits.
+            if outcome == "policy_denied":
+                stop_reason = outcome
+                continue
             if outcome != "called":
                 stop_reason = outcome
                 break

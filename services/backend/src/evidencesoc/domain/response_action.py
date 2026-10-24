@@ -20,6 +20,18 @@ SIMULATED_ACTIONS = frozenset(
 )
 
 
+def canonical_host_identifier(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and 1 <= len(value) <= 255
+        and re.fullmatch(
+            r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*",
+            value,
+        )
+        is not None
+    )
+
+
 class SimulatedAction(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -57,8 +69,16 @@ class SimulatedAction(BaseModel):
     def bounded_action(self) -> Self:
         if self.action == "block_ip_simulated":
             ip_address(self.target)
-        elif re.fullmatch(r"[A-Za-z0-9_.@:-]+", self.target) is None:
-            raise ValueError("target must be a host or account identifier")
+        elif self.action == "isolate_host_simulated":
+            if not canonical_host_identifier(self.target):
+                raise ValueError("target must be a canonical host identifier")
+        elif (
+            re.fullmatch(
+                r"[A-Za-z][A-Za-z0-9_-]{0,63}(?:\.[A-Za-z0-9_-]+)*", self.target
+            )
+            is None
+        ):
+            raise ValueError("target must be a conservative account identifier")
         query = self.verification_query
         if set(query) - {"filters", "time_from", "time_to", "limit"}:
             raise ValueError("verification must use bounded read-only event search")
@@ -75,7 +95,12 @@ class SimulatedAction(BaseModel):
         target_filter = {
             "block_ip_simulated": "source_ip",
             "isolate_host_simulated": "host",
+            "disable_account_simulated": "account",
         }.get(self.action)
+        if target_filter not in ALLOWED_EVENT_FILTERS:
+            raise ValueError(
+                "account verification is unavailable under the event search policy"
+            )
         if target_filter is not None and filters.get(target_filter) != self.target:
             raise ValueError("verification query must refer to the simulated target")
         limit = query.get("limit", 100)

@@ -241,7 +241,7 @@ async def test_real_mcp_six_roles_and_postgres_resume_in_fresh_process(live_inci
 
 
 @pytest.mark.asyncio
-async def test_all_three_simulated_actions_validate_with_real_scoped_queries(
+async def test_unverifiable_account_action_is_rejected_before_approval(
     live_incident,
 ):
     settings, incident_id, _sessions = live_incident
@@ -288,18 +288,14 @@ async def test_all_three_simulated_actions_validate_with_real_scoped_queries(
             )
             try:
                 before = await workflow.run_investigation(incident_id)
-                assert before["status"] == "awaiting_approval"
-                after = await workflow.approve(
-                    incident_id,
-                    response_plan_id=before["response_plan"]["response_plan_id"],
-                    decision="approved",
-                    reason="reviewed all three previews",
-                    decided_by="reviewer",
-                )
-                assert after["status"] == "manual_review", after.get("errors")
-                assert after["validation_result"]["outcome"] == "insufficient_evidence"
-                assert len(after["simulation"]) == 3
-                assert all(action["simulated"] for action in after["simulation"])
+                assert before["status"] == "failed"
+                assert before["errors"][-1] == {
+                    "node": "respond",
+                    "code": "NODE_FAILED",
+                }
+                assert before["response_plan"] is None
+                assert before["approval"] is None
+                assert before["simulation"] == []
             finally:
                 await saver.adelete_thread(incident_id)
     finally:

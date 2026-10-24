@@ -163,6 +163,52 @@ def _resources(attempts):
     return usage, list(grouped.values()), tools, latency
 
 
+def _resource_coverage(attempts):
+    """Keep observed physical usage even when the complete row total is unknown.
+
+    Legacy attempt summaries are counted separately from physical requests. An
+    interrupted attempt has unknown usage, never an invented zero-cost request.
+    """
+    keys = ("input_tokens", "output_tokens", "cost")
+    values = {key: [] for key in keys}
+    missing = dict.fromkeys(keys, 0)
+    physical_n = legacy_n = missing_attempts = 0
+    for attempt in attempts:
+        result = attempt.get("result") or {}
+        ledger = result.get("model_ledger")
+        if ledger:
+            physical_n += len(ledger)
+            for call in ledger:
+                observed = {
+                    "input_tokens": _usage_value(call, "prompt_tokens"),
+                    "output_tokens": _usage_value(call, "completion_tokens"),
+                    "cost": call.get("cost_cny"),
+                }
+                for key, value in observed.items():
+                    if _known_sum([value], tokens=key != "cost") is None:
+                        missing[key] += 1
+                    else:
+                        values[key].append(value)
+        elif result.get("resources"):
+            legacy_n += 1
+            for key in keys:
+                value = result["resources"].get(key)
+                if _known_sum([value], tokens=key != "cost") is not None:
+                    values[key].append(value)
+        else:
+            missing_attempts += 1
+    return {
+        "known_subtotals": {
+            key: _known_sum(items, tokens=key != "cost")
+            for key, items in values.items()
+        },
+        "physical_requests_n": physical_n,
+        "physical_missing_counts": missing,
+        "legacy_summaries_n": legacy_n,
+        "missing_attempts_n": missing_attempts,
+    }
+
+
 def _tool_ledger_complete(attempts) -> bool:
     if not attempts:
         return False
@@ -219,6 +265,7 @@ def score_plan(
                 "execution_status": row["execution_status"],
                 "evidence_registry": result.get("evidence_registry", {}),
                 "usage": usage,
+                "resource_coverage": _resource_coverage(row["attempts"]),
                 "model_calls": model_calls,
                 "tool_calls": tool_calls,
                 "tool_ledger_complete": _tool_ledger_complete(row["attempts"]),

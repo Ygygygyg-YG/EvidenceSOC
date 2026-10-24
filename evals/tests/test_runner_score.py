@@ -224,3 +224,82 @@ def test_unknown_usage_preserves_group_known_subtotals_and_missing_coverage():
     assert scores["input_tokens_missing_count"] == 1
     assert scores["output_tokens_missing_count"] == 1
     assert scores["cost_missing_count"] == 1
+
+
+def test_partial_physical_usage_in_one_row_keeps_observed_lower_bound():
+    from evals.metrics import score_resources
+
+    scorer = importlib.import_module("evals.runners.score")
+    attempts = [{"record": {}, "result": {"model_ledger": [
+        {"usage": {"prompt_tokens": 3, "completion_tokens": 4}, "cost_cny": .02},
+        {"usage": None, "cost_cny": None},
+    ]}}]
+    usage, _, _, _ = scorer._resources(attempts)
+    coverage = scorer._resource_coverage(attempts)
+    scores = score_resources([{"usage": usage, "resource_coverage": coverage}])
+    assert scores["cost"] is None
+    assert scores["known_subtotals"] == {
+        "input_tokens": 3, "output_tokens": 4, "cost": .02,
+        "tool_logical_calls": None, "tool_physical_attempts": None,
+    }
+    assert coverage["physical_requests_n"] == 2
+    assert coverage["physical_missing_counts"] == {
+        "input_tokens": 1, "output_tokens": 1, "cost": 1,
+    }
+
+
+def test_interrupted_and_legacy_attempts_preserve_known_usage_without_invented_requests():
+    from evals.metrics import score_resources
+
+    scorer = importlib.import_module("evals.runners.score")
+    attempts = [
+        {"record": {}, "result": None},
+        {"record": {}, "result": {"resources": {"input_tokens": 7, "output_tokens": 0, "cost": .01}}},
+        {"record": {}, "result": {"model_ledger": [
+            {"usage": {"prompt_tokens": 8, "completion_tokens": 1}, "cost_cny": .02},
+            {"usage": {"prompt_tokens": -1, "completion_tokens": True}, "cost_cny": float("inf")},
+        ]}},
+    ]
+    usage, _, _, _ = scorer._resources(attempts)
+    coverage = scorer._resource_coverage(attempts)
+    scores = score_resources([{"usage": usage, "resource_coverage": coverage}])
+    assert scores["cost"] is None
+    assert scores["known_subtotals"]["cost"] == pytest.approx(.03)
+    assert scores["known_subtotals"]["input_tokens"] == 15
+    assert scores["known_subtotals"]["output_tokens"] == 1
+    assert coverage["physical_requests_n"] == 2
+    assert coverage["missing_attempts_n"] == 1
+    assert coverage["legacy_summaries_n"] == 1
+
+
+def test_score_plan_exports_partial_request_cost_and_coverage(tmp_path, monkeypatch):
+    scorer = importlib.import_module("evals.runners.score")
+    manifest = importlib.import_module("evals.runners.manifest")
+    config = fixture_config(tmp_path)
+    for case in Path(config["case_root"]).iterdir():
+        scoring = case / "scoring"
+        scoring.mkdir()
+        (scoring / "manifest.json").write_text("{}")
+        (scoring / "gold.jsonl").write_text(json.dumps({"is_attack": False}) + "\n")
+    plan = manifest.build_plan(config)
+    row = next(row for row in plan["rows"] if row["group"] == "B3")
+    attempt = {
+        "record": {"attempt": 1, "record_sha256": "a" * 64},
+        "result": {"model_ledger": [
+            {"usage": {"prompt_tokens": 3, "completion_tokens": 4}, "cost_cny": .02},
+            {"usage": None, "cost_cny": None},
+        ]},
+    }
+    monkeypatch.setattr(scorer, "collect_rows", lambda *_: [{
+        **row, "result": attempt["result"], "attempts": [attempt],
+        "diagnosis_status": "failed", "execution_status": "failed",
+    }])
+    scores = scorer.score_plan(plan, tmp_path / "attempts")["groups"]["ait"]["B3"]["resources"]
+    assert scores["cost"] is None
+    assert scores["known_subtotals"]["cost"] == .02
+    assert scores["physical_usage_coverage"] == {
+        "physical_requests_n": 2,
+        "physical_missing_counts": {"input_tokens": 1, "output_tokens": 1, "cost": 1},
+        "legacy_summaries_n": 0, "missing_attempts_n": 0,
+        "observed_rows_n": 1, "unobserved_rows_n": 0,
+    }

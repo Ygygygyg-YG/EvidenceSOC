@@ -221,6 +221,7 @@ class PostgresWorkflowServices:
                         "collection_model_attempts",
                         "collection_observations",
                         "collection_stop_reason",
+                        "collection_refusal_codes",
                         "fallback_used",
                     )
                     if key in delta
@@ -244,6 +245,9 @@ class PostgresWorkflowServices:
                     "diagnosis_execution_status",
                     "verification_status",
                     "collection_reserved_calls",
+                    "response_reason",
+                    "response_attempts",
+                    "plan_source",
                 )
                 if key in delta
             }

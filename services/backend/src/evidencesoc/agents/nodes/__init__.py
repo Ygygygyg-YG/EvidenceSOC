@@ -45,6 +45,26 @@ class StructuredModel(Protocol):
     ) -> BaseModel: ...
 
 
+def model_attempt_reference(model: Any, ledger_start: int) -> dict[str, Any]:
+    """Point at an existing physical request; never copy provider exception text."""
+    ledger = getattr(model, "ledger", [])
+    if not isinstance(ledger, list) or len(ledger) <= ledger_start:
+        return {"raw_source": "structured_model"}
+    entry = ledger[ledger_start]
+    reference = {"raw_source": "model_ledger"}
+    for key in ("request_ordinal", "request_id", "logical_call_id"):
+        if key in entry:
+            reference["ledger_" + key] = entry[key]
+    try:
+        content = entry["raw_response"]["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError):
+        pass
+    else:
+        if isinstance(content, str):
+            reference["raw_content_sha256"] = sha256(content.encode()).hexdigest()
+    return reference
+
+
 def merge_by_id(
     old: list[dict[str, Any]], new: list[dict[str, Any]], key: str
 ) -> list[dict[str, Any]]:
@@ -151,13 +171,13 @@ def validate_output_citations(output: BaseModel, state: dict[str, Any]) -> None:
         raise ValueError("response belongs to another incident")
     if isinstance(output, ResponseOutput) and output.response_plan is not None:
         plan = output.response_plan
-        cited = [
-            item
-            for item in state.get("evidence", [])
-            if item["evidence_id"] in plan.evidence_ids
-        ]
         for value in plan.actions:
             action = SimulatedAction.model_validate(value)
+            cited = [
+                item
+                for item in state.get("evidence", [])
+                if item["evidence_id"] in (action.evidence_ids or [])
+            ]
             if not any(fallback.matching_target(item, action) for item in cited):
                 raise ValueError("response target is not observed in cited evidence")
 
@@ -181,7 +201,13 @@ class NodeHandlers:
         self.capabilities = capabilities
 
     async def _structured(
-        self, role: str, schema: type[BaseModel], state: dict[str, Any], rule: Any
+        self,
+        role: str,
+        schema: type[BaseModel],
+        state: dict[str, Any],
+        rule: Any,
+        *,
+        response_attempts: list[dict[str, Any]] | None = None,
     ) -> tuple[BaseModel, bool, list[dict[str, Any]]]:
         errors = list(state.get("errors", []))
         if self.settings.llm_mode == "fixture":
@@ -201,7 +227,11 @@ class NodeHandlers:
         code = "MODEL_UNAVAILABLE"
         model_call_id = new_ulid()
         attempt_categories: list[str] = []
-        for _ in range(3):
+        for attempt in range(1, 4):
+            draft = None
+            failure_stage = "model_call"
+            ledger = getattr(self.model, "ledger", [])
+            ledger_start = len(ledger) if isinstance(ledger, list) else 0
             try:
                 model_state = deepcopy(state)
                 model_state["_model_call_id"] = model_call_id
@@ -213,6 +243,12 @@ class NodeHandlers:
                     self.model.structured(role, schema, model_state),
                     timeout=self.model_timeout,
                 )
+                failure_stage = "schema_validation"
+                draft = (
+                    output.model_dump(mode="json")
+                    if isinstance(output, BaseModel)
+                    else deepcopy(output)
+                )
                 result = schema.model_validate(output)
                 if (
                     self.capabilities is not None
@@ -223,7 +259,18 @@ class NodeHandlers:
                     raise ValueError(
                         "evaluation analysis requires an explicit diagnosis"
                     )
+                failure_stage = "citation_validation"
                 validate_output_citations(result, state)
+                if response_attempts is not None:
+                    response_attempts.append(
+                        {
+                            "attempt": attempt,
+                            "model_call_id": model_call_id,
+                            **model_attempt_reference(self.model, ledger_start),
+                            "status": "valid",
+                            "draft": draft,
+                        }
+                    )
                 return result, bool(state.get("fallback_used")), errors
             except TimeoutError:
                 code = "MODEL_TIMEOUT"
@@ -238,6 +285,21 @@ class NodeHandlers:
                     if isinstance(error, httpx.TransportError)
                     else "application"
                 )
+            if response_attempts is not None:
+                record = {
+                    "attempt": attempt,
+                    "model_call_id": model_call_id,
+                    **model_attempt_reference(self.model, ledger_start),
+                    "status": "failed",
+                    "code": code,
+                    "category": category,
+                    "failure_stage": failure_stage,
+                }
+                if draft is not None:
+                    record["draft"] = draft
+                # Raw provider content remains in its existing model ledger;
+                # exceptions may embed credentials and are never copied here.
+                response_attempts.append(record)
             if self.capabilities is not None:
                 attempt_categories.append(category)
         terminal_error: dict[str, Any] = {"role": role, "code": code}
@@ -301,6 +363,7 @@ class NodeHandlers:
                     "collection_model_attempts",
                     "collection_observations",
                     "collection_stop_reason",
+                    "collection_refusal_codes",
                     "collection_reserved_calls",
                 )
                 if key in result
@@ -402,10 +465,74 @@ class NodeHandlers:
         }
 
     async def respond(self, state: dict[str, Any]) -> dict[str, Any]:
+        response_state = deepcopy(state)
+        if (
+            self.capabilities is not None
+            or state.get("diagnostic_snapshot") is not None
+        ):
+            snapshot = state.get("diagnostic_snapshot")
+            try:
+                if not isinstance(snapshot, dict) or sha256(
+                    json.dumps(
+                        snapshot, sort_keys=True, separators=(",", ":"), allow_nan=False
+                    ).encode()
+                ).hexdigest() != state.get("diagnostic_snapshot_sha256"):
+                    raise ValueError("invalid diagnosis seal")
+                diagnosis = Diagnosis.model_validate(snapshot.get("diagnosis"))
+                for key in (
+                    "diagnosis",
+                    "origin",
+                    "classification",
+                    "attack_steps",
+                    "claims",
+                    "evidence",
+                    "knowledge",
+                ):
+                    response_state[key] = deepcopy(snapshot.get(key))
+                validate_output_citations(diagnosis, response_state)
+            except (ValueError, ValidationError, TypeError, KeyError):
+                return {
+                    "response_plan": None,
+                    "plan_source": None,
+                    "response_attempts": [],
+                    "response_reason": "invalid_diagnosis_snapshot",
+                    "stop_reason": "invalid_diagnosis_snapshot",
+                    "status": "manual_review",
+                    "errors": list(state.get("errors", [])),
+                }
+        diagnosis = response_state.get("diagnosis")
+        if diagnosis is not None and diagnosis.get("verdict") != "attack":
+            return {
+                "response_plan": None,
+                "plan_source": None,
+                "response_attempts": [],
+                "response_reason": "no_actionable_target",
+                "stop_reason": "no_actionable_target",
+                "status": "manual_review",
+                "errors": list(state.get("errors", [])),
+            }
+        attempts: list[dict[str, Any]] = []
         output, used, errors = await self._structured(
-            "respond", ResponseOutput, state, fallback.respond
+            "respond",
+            ResponseOutput,
+            response_state,
+            fallback.respond,
+            response_attempts=attempts,
         )
         data = output.model_dump(mode="json")
+        model_valid = bool(attempts and attempts[-1]["status"] == "valid")
+        source = "model" if model_valid else "rule_fallback"
+        reason = (
+            "model_returned_null"
+            if model_valid and data["response_plan"] is None
+            else "draft_validation_failed"
+            if any(item.get("category") == "schema" for item in attempts)
+            else "model_unavailable"
+            if attempts and not model_valid
+            else "no_actionable_target"
+            if data["response_plan"] is None
+            else None
+        )
         generation = state.get("plan_generation", 0)
         if data["response_plan"] and generation:
             source_id = state["renewed_from_plan_id"]
@@ -415,10 +542,13 @@ class NodeHandlers:
             data["response_plan"]["response_plan_id"] = f"RP-{digest}"
         return {
             **data,
+            "plan_source": source,
+            "response_reason": reason,
+            "response_attempts": attempts,
             "status": "awaiting_approval" if data["response_plan"] else "manual_review",
             "fallback_used": used,
             "errors": errors,
-            "stop_reason": None if data["response_plan"] else "insufficient_evidence",
+            "stop_reason": None if data["response_plan"] else reason,
         }
 
     async def validate(self, state: dict[str, Any]) -> dict[str, Any]:

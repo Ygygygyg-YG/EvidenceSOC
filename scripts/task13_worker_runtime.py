@@ -596,6 +596,14 @@ def preflight_runtime(options: dict, controller: dict) -> None:
 
 
 def _worker_request(spec: dict):
+    if spec.get("schema_version") == "task13-remediation-review-worker-v2":
+        from evals.adapters.remediation_review import RemediationReviewRequest
+
+        return RemediationReviewRequest.model_validate(spec)
+    if spec.get("schema_version") == "task13-remediation-worker-v2":
+        from evals.adapters.remediation_contracts import RemediationRequest
+
+        return RemediationRequest.model_validate(spec)
     if spec.get("schema_version") == "task13-source-review-worker-v1":
         from evals.adapters.verification_worker import SourceReviewRequest
 
@@ -610,6 +618,17 @@ def _worker_request(spec: dict):
 
 
 async def _invoke_adapter(request, agent_dir: Path):
+    if (
+        getattr(request, "schema_version", None)
+        == "task13-remediation-review-worker-v2"
+    ):
+        from evals.adapters.remediation_review import run_remediation_review
+
+        return await run_remediation_review(request, agent_dir)
+    if getattr(request, "schema_version", None) == "task13-remediation-worker-v2":
+        from evals.adapters.remediation_worker import run_remediation
+
+        return await run_remediation(request, agent_dir)
     if getattr(request, "schema_version", None) == "task13-source-review-worker-v1":
         from evals.adapters.verification_worker import run_source_review
 
@@ -651,6 +670,29 @@ async def run_source_review_container(request, agent_dir: Path, options: dict) -
     return value
 
 
+async def run_remediation_container(request, agent_dir: Path, options: dict) -> dict:
+    spec = (
+        request.model_dump(mode="json") if hasattr(request, "model_dump") else request
+    )
+    if spec.get("schema_version") != "task13-remediation-worker-v2":
+        raise ValueError("remediation requires its dedicated v2 worker schema")
+    return await run_container(spec, agent_dir, options)
+
+
+async def run_remediation_review_container(
+    request, agent_dir: Path, options: dict
+) -> dict:
+    spec = (
+        request.model_dump(mode="json") if hasattr(request, "model_dump") else request
+    )
+    if spec.get("schema_version") != "task13-remediation-review-worker-v2":
+        raise ValueError("remediation review requires its dedicated v2 worker schema")
+    value = await run_container(spec, agent_dir, options)
+    if spec["operation"] != "renew_plan" and value.get("model_ledger"):
+        raise ValueError("source reads and decisions cannot make model calls")
+    return value
+
+
 async def run_container(spec: dict, agent_dir: Path, options: dict) -> dict:
     from evals.datasets.dedale.common import read_json
     from evals.runners.manifest import file_hash, write_immutable_json
@@ -659,8 +701,15 @@ async def run_container(spec: dict, agent_dir: Path, options: dict) -> dict:
     verification = (
         getattr(request, "schema_version", None) == "task13-verification-worker-v1"
     )
-    source_review = (
+    remediation_review = (
+        getattr(request, "schema_version", None)
+        == "task13-remediation-review-worker-v2"
+    )
+    source_review = remediation_review or (
         getattr(request, "schema_version", None) == "task13-source-review-worker-v1"
+    )
+    remediation = (
+        getattr(request, "schema_version", None) == "task13-remediation-worker-v2"
     )
     if (verification or source_review) and request.agent_sha256 != file_hash(
         agent_dir / "events.jsonl"
@@ -673,6 +722,33 @@ async def run_container(spec: dict, agent_dir: Path, options: dict) -> dict:
     )
     source = Path(options["source_dir"]).resolve()
     _validate_source(source, options["source_commit"])
+    if remediation or remediation_review:
+        from evals.adapters.remediation_worker import (
+            require_existing_budget,
+            validate_binding,
+            validate_exported_source,
+        )
+
+        validator = validate_exported_source if remediation_review else validate_binding
+        validator(request, agent_dir, source, source_commit=options["source_commit"])
+        expected_phase = (
+            "verification"
+            if remediation_review
+            else "development"
+            if request.purpose == "development"
+            else "formal"
+        )
+        if options["phase"] != expected_phase:
+            raise ValueError(
+                "remediation runtime phase differs from registered purpose"
+            )
+        if options.get("budget_identity") != request.budget_identity:
+            raise ValueError(
+                "remediation runtime budget identity differs from registered request"
+            )
+        require_existing_budget(
+            Path(options["budget_dir"]) / "campaign.sqlite", request.budget_identity
+        )
     dependencies = Path(options["dependencies_dir"]).resolve()
     required = [
         "mcp",
@@ -781,6 +857,8 @@ async def run_container(spec: dict, agent_dir: Path, options: dict) -> dict:
                 "OPENBLAS_NUM_THREADS": "1",
             }
         )
+        if remediation or remediation_review:
+            passed["TASK13_SOURCE_DIR"] = "/app/source"
         environment.update(passed)
         arguments = docker_run_arguments(
             name=name,

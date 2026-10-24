@@ -40,15 +40,43 @@ def resource_fields(reference):
 
 
 def _require_inspected_renewal_model(model, reference):
+    from evals.adapters.budget_v2 import PURPOSE_PHASES, SupplementBudgetAccount
+    from evals.adapters.remediation_contracts import CAMPAIGN
+    from evals.adapters.remediation_worker import StableCallModel
+
     budget = os.environ.get("TASK13_BUDGET_DB")
     commit = os.environ.get("TASK13_SOURCE_COMMIT", "")
+    valid_model = (
+        isinstance(model, TrackedModel)
+        and isinstance(model.account, BudgetAccount)
+        and not isinstance(model.account, SupplementBudgetAccount)
+        and model.phase == "verification"
+    )
+    if type(model) is StableCallModel and type(model.model) is TrackedModel:
+        binding = (
+            model.account.request_binding()
+            if type(model.account) is SupplementBudgetAccount
+            else {}
+        )
+        purpose = binding.get("purpose")
+        valid_model = (
+            type(model.model) is TrackedModel
+            and type(model.account) is SupplementBudgetAccount
+            and binding.get("campaign_id") == CAMPAIGN
+            and binding.get("group") == "B3"
+            and purpose in {"f8", "development"}
+            and model.phase == PURPOSE_PHASES[purpose]
+            and model.slot_id.startswith(purpose + "-review-")
+            and model.run_id
+            == CAMPAIGN
+            + "-"
+            + canonical_hash([model.slot_id, binding.get("attempt")])[:16]
+        )
     if (
-        not isinstance(model, TrackedModel)
-        or not isinstance(model.account, BudgetAccount)
+        not valid_model
         or not budget
         or not Path(budget).is_file()
         or model.account.path.resolve() != Path(budget).resolve()
-        or model.phase != "verification"
         or os.environ.get("TASK13_PHASE") != "verification"
         or os.getpid() != 1
         or not os.environ.get("TASK13_WORKER_NONCE")

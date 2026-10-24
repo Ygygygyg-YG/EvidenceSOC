@@ -377,6 +377,20 @@ async def test_load_incident_and_agent_runs_are_persisted(database: Any) -> None
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("role,summary", [
+    ("collect", {"collection_refusal_codes": ["POLICY_DENIED"]}),
+    ("respond", {"response_reason": "draft_validation_failed", "plan_source": "rule_fallback",
+                 "response_attempts": [{"attempt": 1, "raw_source": "model_ledger", "code": "MODEL_INVALID_OUTPUT"}]}),
+])
+async def test_remediation_audit_fields_survive_role_run_persistence(database, role, summary):
+    api = service(database)
+    run_id = await api.start_run({"incident_id": "IN-1"}, role)
+    await api.finish_run(run_id, summary)
+    with database[0]() as session:
+        assert session.get(AgentRunTable, run_id).output_summary == summary
+
+
+@pytest.mark.asyncio
 async def test_role_run_is_reused_after_restart_and_distinct_for_fallback_attempt(
     database: Any,
 ) -> None:
@@ -604,10 +618,11 @@ async def test_model_planner_denial_consumes_budget_without_cross_incident_call(
     assert tool_calls == ["get_alert_context", "search_security_events"]
     assert result["collection_budget_used"] == 3
     assert any(
-        item.get("error_code") == "POLICY_DENIED"
+        item.get("error_code") == "POLICY_INCIDENT_DENIED"
         for item in result["collection_observations"]
     )
     assert result["collection_stop_reason"] == "budget_exhausted"
+    assert result["collection_refusal_codes"] == ["POLICY_INCIDENT_DENIED"]
 
 
 @pytest.mark.asyncio

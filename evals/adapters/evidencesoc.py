@@ -243,7 +243,9 @@ def _complete_usage(ledger: list[dict]) -> bool:
     )
 
 
-async def run_case(spec: WorkerRunSpec, agent_dir: Path) -> AdapterResult:
+async def run_case(
+    spec: WorkerRunSpec, agent_dir: Path, *, model_factory=None
+) -> AdapterResult:
     if not os.environ.get("TASK13_WORKER_NONCE") or os.getpid() != 1:
         raise PermissionError(
             "real model adapter requires inspected container worker PID1"
@@ -256,15 +258,18 @@ async def run_case(spec: WorkerRunSpec, agent_dir: Path) -> AdapterResult:
     try:
         seed = load_seed(spec, agent_dir)
         phase = os.environ["TASK13_PHASE"]
-        account = BudgetAccount(Path(os.environ["TASK13_BUDGET_DB"]))
-        model = TrackedModel(
-            spec.model,
-            api_key=os.environ.get("DEEPSEEK_API_KEY", ""),
-            account=account,
-            phase=phase,
-            max_calls=spec.budget.max_model_calls * spec.budget.max_model_attempts,
-            max_logical_calls=spec.budget.max_model_calls,
-        )
+        if model_factory is None:
+            account = BudgetAccount(Path(os.environ["TASK13_BUDGET_DB"]))
+            model = TrackedModel(
+                spec.model,
+                api_key=os.environ.get("DEEPSEEK_API_KEY", ""),
+                account=account,
+                phase=phase,
+                max_calls=spec.budget.max_model_calls * spec.budget.max_model_attempts,
+                max_logical_calls=spec.budget.max_model_calls,
+            )
+        else:
+            model = model_factory(spec, phase)
         with case_environment(spec, seed) as environment:
             settings, sessions, incident_id = environment
 
