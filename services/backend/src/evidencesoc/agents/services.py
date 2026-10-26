@@ -246,6 +246,8 @@ class PostgresWorkflowServices:
                     "verification_status",
                     "collection_reserved_calls",
                     "response_reason",
+                    "no_plan_reason",
+                    "no_plan_reason_missing",
                     "response_attempts",
                     "plan_source",
                 )

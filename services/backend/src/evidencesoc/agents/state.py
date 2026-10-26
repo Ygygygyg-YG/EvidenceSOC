@@ -24,6 +24,8 @@ class InvestigationState(TypedDict, total=False):
     response_plan: dict[str, Any] | None
     plan_source: str | None
     response_reason: str | None
+    no_plan_reason: str | None
+    no_plan_reason_missing: bool
     response_attempts: list[dict[str, Any]]
     approval: dict[str, Any] | None
     validation_result: dict[str, Any] | None

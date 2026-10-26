@@ -463,6 +463,9 @@ class TrackedModel:
         )
         if role == "respond":
             instruction += (
+                "\nWhen response_plan is null, include an optional no_plan_reason explaining why "
+                "a traceable action cannot be supported. This is an unverified model statement, "
+                "not an established fact. A missing or blank reason remains valid; do not force a plan. "
                 '\nEach verification_query must be bounded event search: {"filters": {...}, "limit": 100}, '
                 "optionally with both time_from and time_to. Its only top-level keys are filters, limit, time_from, time_to. "
                 "Allowed filter keys are source, dataset_id, event_type, severity, source_ip, destination_ip, host, service. "

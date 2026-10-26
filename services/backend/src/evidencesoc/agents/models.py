@@ -68,6 +68,10 @@ class ReconstructionOutput(BaseModel):
 class ResponseOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     response_plan: ResponsePlan | None
+    no_plan_reason: str | None = Field(
+        default=None,
+        description="Optional unverified model statement explaining a null response_plan.",
+    )
 
     @model_validator(mode="after")
     def simulated_actions_only(self) -> Self:

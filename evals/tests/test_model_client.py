@@ -1,3 +1,4 @@
+import json
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
@@ -17,6 +18,50 @@ from evals.contracts import ModelConfig
 
 class Answer(BaseModel):
     verdict: str
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "extra",
+    [{}, {"no_plan_reason": ""}, {"no_plan_reason": " \n"},
+     {"no_plan_reason": "Insufficient evidence."}],
+)
+async def test_tracked_response_prompt_and_valid_null_need_one_physical_request(
+    tmp_path, extra,
+):
+    from evidencesoc.agents.models import ResponseOutput
+
+    requests = []
+
+    def respond(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={
+                "id": "offline-null", "model": "offline-model",
+                "choices": [{
+                    "finish_reason": "stop",
+                    "message": {"content": json.dumps({"response_plan": None, **extra})},
+                }],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 10},
+            },
+        )
+
+    model = TrackedModel(
+        ModelConfig(), api_key="synthetic",
+        account=BudgetAccount(tmp_path / "synthetic.sqlite"),
+        phase="development", transport=httpx.MockTransport(respond),
+    )
+    result = await model.structured("respond", ResponseOutput, {})
+    assert result.response_plan is None
+    assert len(requests) == 1
+    assert len(model.ledger) == 1
+    assert model.ledger[0]["parse_status"] == "valid"
+    instruction = requests[0]["messages"][0]["content"]
+    assert "no_plan_reason" in instruction
+    assert "optional" in instruction
+    assert "model statement" in instruction
+    assert "unverified" in instruction
 
 
 @pytest.mark.asyncio

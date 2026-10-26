@@ -381,6 +381,11 @@ async def test_load_incident_and_agent_runs_are_persisted(database: Any) -> None
     ("collect", {"collection_refusal_codes": ["POLICY_DENIED"]}),
     ("respond", {"response_reason": "draft_validation_failed", "plan_source": "rule_fallback",
                  "response_attempts": [{"attempt": 1, "raw_source": "model_ledger", "code": "MODEL_INVALID_OUTPUT"}]}),
+    ("respond", {"response_reason": "model_returned_null", "plan_source": "model",
+                 "no_plan_reason": "Insufficient observed evidence.", "no_plan_reason_missing": False}),
+    ("respond", {"response_reason": "model_returned_null", "plan_source": "model",
+                 "no_plan_reason": None, "no_plan_reason_missing": True}),
+    ("respond", {"no_plan_reason": None, "no_plan_reason_missing": False}),
 ])
 async def test_remediation_audit_fields_survive_role_run_persistence(database, role, summary):
     api = service(database)

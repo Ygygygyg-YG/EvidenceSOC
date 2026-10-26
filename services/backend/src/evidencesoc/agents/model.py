@@ -66,6 +66,13 @@ class DeepSeekStructuredModel:
                     "verification_query, and evidence_ids drawn from the plan's observed incident "
                     "evidence. Never cite evidence from another incident. "
                     + (ORIGIN_SCOPE_INSTRUCTION if role == "analyze" else "")
+                    + (
+                        "When response_plan is null, include an optional no_plan_reason explaining why "
+                        "a traceable action cannot be supported. This is an unverified model statement, "
+                        "not an established fact. A missing or blank reason remains valid; do not force a plan. "
+                        if role == "respond"
+                        else ""
+                    )
                     + collection_instruction
                 ),
             ),

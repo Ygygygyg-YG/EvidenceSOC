@@ -138,14 +138,59 @@ async def test_eval_response_rejects_unsealed_or_invalid_diagnosis_without_model
 
 
 @pytest.mark.asyncio
-async def test_valid_model_null_keeps_observed_reason_and_does_not_invoke_fallback():
-    model = Tape({"response_plan": None})
+@pytest.mark.parametrize("extra,expected_reason", [
+    ({}, None),
+    ({"no_plan_reason": None}, None),
+    ({"no_plan_reason": ""}, None),
+    ({"no_plan_reason": " \t\n"}, None),
+    ({"no_plan_reason": "  Target evidence is insufficient.  "},
+     "  Target evidence is insufficient.  "),
+])
+async def test_valid_model_null_keeps_observed_reason_and_does_not_invoke_fallback(
+    extra, expected_reason,
+):
+    model = Tape({"response_plan": None, **extra})
     result = await handlers(model).respond(response_state())
     assert result["response_plan"] is None
     assert result["response_reason"] == "model_returned_null"
     assert result["stop_reason"] == "model_returned_null"
     assert result["plan_source"] == "model"
     assert len(result["response_attempts"]) == 1
+    assert len(model.calls) == 1
+    assert result["response_attempts"][0]["status"] == "valid"
+    assert result["fallback_used"] is False
+    assert result["no_plan_reason"] == expected_reason
+    assert result["no_plan_reason_missing"] is (expected_reason is None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "branch", ["model_plan", "rule_plan", "benign", "unknown", "invalid_seal", "no_target"],
+)
+async def test_response_clears_previous_no_plan_reason_outside_valid_model_null(
+    branch,
+):
+    current = response_state(branch if branch in {"benign", "unknown"} else "attack")
+    current.update(no_plan_reason="Old model claim", no_plan_reason_missing=True)
+    valid_plan = (await handlers().respond(response_state()))["response_plan"]
+    model = Tape({"response_plan": valid_plan, "no_plan_reason": "Contradictory claim"})
+    if branch == "invalid_seal":
+        current.pop("diagnostic_snapshot")
+    elif branch == "no_target":
+        current = {
+            **response_state(raw={}),
+            "no_plan_reason": "Old model claim",
+            "no_plan_reason_missing": True,
+        }
+    result = await handlers(
+        None if branch in {"rule_plan", "no_target"} else model
+    ).respond(current)
+    assert result["no_plan_reason"] is None
+    assert result["no_plan_reason_missing"] is False
+    if branch in {"benign", "unknown", "invalid_seal"}:
+        assert not model.calls
+    if branch in {"model_plan", "rule_plan"}:
+        assert result["response_plan"] is not None
 
 
 @pytest.mark.asyncio
@@ -248,8 +293,13 @@ async def test_unusable_observed_targets_have_explicit_no_actionable_target(raw)
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("extra,expected_reason", [
+    ({}, None),
+    ({"no_plan_reason": " \n\t"}, None),
+    ({"no_plan_reason": "No traceable action is supported."}, "No traceable action is supported."),
+])
 async def test_b3_a4_fixed_http_tape_has_identical_preverification_requests_and_seal(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, extra, expected_reason
 ):
     import httpx
     from evidencesoc.agents import fallback, graph, models
@@ -274,7 +324,7 @@ async def test_b3_a4_fixed_http_tape_has_identical_preverification_requests_and_
     tape = [
         {"origin": None, "classification": None, "diagnosis": seed["diagnosis"]},
         {"attack_steps": []},
-        {"response_plan": None},
+        {"response_plan": None, **extra},
     ]
     outputs, requests, paths = [], [], []
     for enabled in (True, False):
@@ -344,6 +394,8 @@ async def test_b3_a4_fixed_http_tape_has_identical_preverification_requests_and_
         result = await workflow.get_state("IN-fixed")
         assert result["status"] == "manual_review"
         assert result["response_reason"] == "model_returned_null"
+        assert result["no_plan_reason"] == expected_reason
+        assert result["no_plan_reason_missing"] is (expected_reason is None)
         recorded = result["response_attempts"][0]
         assert recorded["raw_source"] == "model_ledger"
         assert recorded["ledger_request_ordinal"] == 3

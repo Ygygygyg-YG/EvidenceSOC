@@ -496,6 +496,8 @@ class NodeHandlers:
                     "plan_source": None,
                     "response_attempts": [],
                     "response_reason": "invalid_diagnosis_snapshot",
+                    "no_plan_reason": None,
+                    "no_plan_reason_missing": False,
                     "stop_reason": "invalid_diagnosis_snapshot",
                     "status": "manual_review",
                     "errors": list(state.get("errors", [])),
@@ -507,6 +509,8 @@ class NodeHandlers:
                 "plan_source": None,
                 "response_attempts": [],
                 "response_reason": "no_actionable_target",
+                "no_plan_reason": None,
+                "no_plan_reason_missing": False,
                 "stop_reason": "no_actionable_target",
                 "status": "manual_review",
                 "errors": list(state.get("errors", [])),
@@ -533,6 +537,13 @@ class NodeHandlers:
             if data["response_plan"] is None
             else None
         )
+        # This is a model statement, not an independently verified finding.
+        no_plan_reason = data.get("no_plan_reason")
+        if reason != "model_returned_null" or not (
+            no_plan_reason and no_plan_reason.strip()
+        ):
+            no_plan_reason = None
+        data["no_plan_reason"] = no_plan_reason
         generation = state.get("plan_generation", 0)
         if data["response_plan"] and generation:
             source_id = state["renewed_from_plan_id"]
@@ -544,6 +555,8 @@ class NodeHandlers:
             **data,
             "plan_source": source,
             "response_reason": reason,
+            "no_plan_reason_missing": reason == "model_returned_null"
+            and no_plan_reason is None,
             "response_attempts": attempts,
             "status": "awaiting_approval" if data["response_plan"] else "manual_review",
             "fallback_used": used,
