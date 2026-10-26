@@ -62,9 +62,22 @@ def _purpose(registration):
     return schemas[registration["schema_version"]]
 
 
-def prepare_bundle(registration, *, source_commit, source_sha256, config):
+def prepare_bundle(
+    registration, *, source_commit, source_sha256, config, epoch_binding=None
+):
     """Project only registered observable inputs into dedicated worker requests."""
     purpose = _purpose(registration)
+    request_class = RemediationRequest
+    if epoch_binding is not None:
+        from evals.adapters.epoch_remediation import EpochRemediationRequest
+
+        if (
+            purpose != "regression"
+            or not isinstance(epoch_binding, dict)
+            or set(epoch_binding) != {"epoch_id", "epoch_manifest_sha256"}
+        ):
+            raise ValueError("complete explicit regression epoch binding is required")
+        request_class = EpochRemediationRequest
     if (
         not isinstance(config.get("budget_identity"), dict)
         or config["budget_identity"].get("baseline_count", 0) < 3350
@@ -159,7 +172,7 @@ def prepare_bundle(registration, *, source_commit, source_sha256, config):
                 initial_query_sha256=row["initial_query_sha256"],
                 repeat=row["repeat"],
             )
-        request = RemediationRequest(**fields)
+        request = request_class(**fields, **(epoch_binding or {}))
         projected.append(
             {
                 "slot_id": row["slot_id"],
@@ -181,19 +194,37 @@ def prepare_bundle(registration, *, source_commit, source_sha256, config):
         "config": deepcopy(config),
         "rows": projected,
     }
+    if epoch_binding is not None:
+        payload.update(
+            schema_version="task13-remediation-bundle-v3",
+            registered_order_sha256=registration["order_sha256"],
+            **epoch_binding,
+        )
     return {**payload, "bundle_sha256": canonical_hash(payload)}
 
 
 def validate_bundle(bundle):
+    epoch_bound = bundle.get("schema_version") == "task13-remediation-bundle-v3"
     payload = {key: value for key, value in bundle.items() if key != "bundle_sha256"}
     if (
         canonical_hash(payload) != bundle.get("bundle_sha256")
         or bundle.get("campaign_id") != CAMPAIGN
-        or bundle.get("schema_version") != "task13-remediation-bundle-v2"
+        or bundle.get("schema_version")
+        not in {"task13-remediation-bundle-v2", "task13-remediation-bundle-v3"}
         or bundle.get("executable") is not False
         or bundle.get("purpose") not in {"development", "regression"}
     ):
         raise ValueError("supplement bundle hash or campaign differs")
+    request_class = RemediationRequest
+    epoch_fields = {"epoch_id", "epoch_manifest_sha256", "registered_order_sha256"}
+    if epoch_bound:
+        from evals.adapters.epoch_remediation import EpochRemediationRequest
+
+        if bundle["purpose"] != "regression" or not epoch_fields <= bundle.keys():
+            raise ValueError("explicit regression epoch bundle binding is required")
+        request_class = EpochRemediationRequest
+    elif epoch_fields & bundle.keys():
+        raise ValueError("epoch binding requires its dedicated v3 bundle schema")
     if canonical_hash(bundle["config"]) != bundle["config_sha256"]:
         raise ValueError("frozen configuration differs")
     if (
@@ -201,13 +232,17 @@ def validate_bundle(bundle):
         != bundle["budget_identity_sha256"]
     ):
         raise ValueError("original budget identity differs")
-    requests = [
-        RemediationRequest.model_validate(row["request"]) for row in bundle["rows"]
-    ]
+    requests = [request_class.model_validate(row["request"]) for row in bundle["rows"]]
     if len(requests) != (36 if bundle["purpose"] == "development" else 176):
         raise ValueError("complete supplemental matrix required")
     if len({request.slot_id for request in requests}) != len(requests):
         raise ValueError("duplicate supplemental slot")
+    if (
+        epoch_bound
+        and canonical_hash([(request.case_id, request.group) for request in requests])
+        != bundle["registered_order_sha256"]
+    ):
+        raise ValueError("registered regression epoch slot order differs")
     cases = {request.case_id for request in requests}
     if bundle["purpose"] == "development":
         if (
@@ -246,6 +281,13 @@ def validate_bundle(bundle):
             or request.budget != CallBudget(**bundle["config"].get("budget", {}))
             or request.seed != SeedPolicy(**bundle["config"].get("seed", {}))
             or request.budget_identity != bundle["config"]["budget_identity"]
+            or (
+                epoch_bound
+                and any(
+                    getattr(request, key) != bundle[key]
+                    for key in ("epoch_id", "epoch_manifest_sha256")
+                )
+            )
             or row["slot_id"] != request.slot_id
             or row["case_id"] != request.case_id
             or row["input_hashes"]["events.jsonl"] != request.agent_sha256
@@ -346,12 +388,22 @@ async def _execute(bundle, root, case_roots, admitter, worker, scope, row_limit)
                 "budget_identity_sha256",
             )
         }
+        epoch_bound = bundle["schema_version"] == "task13-remediation-bundle-v3"
+        if epoch_bound:
+            identity.update(
+                {key: bundle[key] for key in ("epoch_id", "epoch_manifest_sha256")}
+            )
         gate = admitter(deepcopy(identity))
         gate = await gate if inspect.isawaitable(gate) else gate
         if (
             not isinstance(gate, dict)
             or gate.get("status") != "verified"
-            or gate.get("schema_version") != "task13-v2-execution-gate-v1"
+            or gate.get("schema_version")
+            != (
+                "task13-v3-execution-gate-v1"
+                if epoch_bound
+                else "task13-v2-execution-gate-v1"
+            )
             or gate.get("scope") != scope
             or any(gate.get(key) != value for key, value in identity.items())
         ):
@@ -401,7 +453,12 @@ async def _execute(bundle, root, case_roots, admitter, worker, scope, row_limit)
             },
         )
         try:
-            request = RemediationRequest.model_validate(row["request"])
+            if epoch_bound:
+                from evals.adapters.epoch_remediation import EpochRemediationRequest
+
+                request = EpochRemediationRequest.model_validate(row["request"])
+            else:
+                request = RemediationRequest.model_validate(row["request"])
             value = await worker(request, agent)
             value = AdapterResult.model_validate(value).model_dump(mode="json")
             status = (

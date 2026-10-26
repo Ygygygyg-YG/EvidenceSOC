@@ -104,7 +104,7 @@ def _require_renewal_workflow(workflow):
 
 
 @asynccontextmanager
-async def open_retained_workflow(reference, *, model=None):
+async def open_retained_workflow(reference, *, model=None, verification_enabled=True):
     """Open the original retained checkpoint; only a tracked worker may renew it."""
     # Import locally: the worker contract also imports these workflow helpers.
     from evals.adapters.verification_worker import SourceResources
@@ -128,7 +128,7 @@ async def open_retained_workflow(reference, *, model=None):
         llm_mode="deepseek" if model is not None else "fixture",
     )
     engine = create_database_engine(database_url)
-    policy = InvestigationCapabilities()
+    policy = InvestigationCapabilities(verification_enabled=verification_enabled)
     services = PostgresWorkflowServices(
         settings,
         session_factory=create_session_factory(engine),
@@ -224,7 +224,9 @@ async def _matching_workflow_state(workflow, packet):
     return state
 
 
-async def apply_human_decision(workflow, packet, *, decision, reason, decided_by):
+async def apply_human_decision(
+    workflow, packet, *, decision, reason, decided_by, decision_admitter=None
+):
     """Call the original persistent approval path only for an explicit human input."""
     if (
         decided_by != "user"
@@ -240,6 +242,8 @@ async def apply_human_decision(workflow, packet, *, decision, reason, decided_by
         raise PermissionError("the original workflow is not awaiting this approval")
     if plan.expires_at is None or plan.expires_at <= datetime.now(UTC):
         raise PermissionError("expired plan requires original product renewal")
+    if decision_admitter is not None:
+        decision_admitter()
     return await workflow.approve(
         state["incident_id"],
         response_plan_id=plan.response_plan_id,

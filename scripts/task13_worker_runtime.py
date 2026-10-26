@@ -32,9 +32,13 @@ READ_ONLY_MOUNTS = {
     "/app/knowledge",
 }
 WRITABLE_MOUNTS = {"/app/budget", "/app/output"}
+E_PLANNING_SCHEMA = "task13-e-planning-worker-v1"
+E_PLANNING_REVIEW_SCHEMA = "task13-e-planning-review-worker-v1"
+EPOCH_REGRESSION_SCHEMA = "task13-remediation-worker-v3"
 EXPORT_PATHS = [
     "services/backend/src",
     "evals/contracts.py",
+    "evals/e_planning.py",
     "evals/adapters",
     "scripts/dedale_task12_runtime.py",
     "scripts/task13_worker_runtime.py",
@@ -137,14 +141,20 @@ def docker_run_arguments(
     network: str,
     mounts: dict[str, str],
     environment: dict[str, str],
+    schema_version: str | None = None,
 ) -> list[str]:
+    readonly, writable = mount_policy(schema_version)
     if (
         not re.fullmatch(r"task13-worker-[a-z0-9]+", name)
         or not re.fullmatch(r"sha256:[0-9a-f]{64}", image_id)
         or not network
         or network in {"host", "none"}
-        or not READ_ONLY_MOUNTS.issubset(mounts)
-        or set(mounts) - READ_ONLY_MOUNTS - WRITABLE_MOUNTS
+        or not readonly.issubset(mounts)
+        or set(mounts) - readonly - writable
+        or (
+            schema_version in {E_PLANNING_SCHEMA, E_PLANNING_REVIEW_SCHEMA}
+            and not writable.issubset(mounts)
+        )
     ):
         raise ValueError("unexpected Task13 Docker isolation boundary")
     args = [
@@ -177,13 +187,200 @@ def docker_run_arguments(
     for target, source in sorted(mounts.items()):
         if "," in source or not source:
             raise ValueError("invalid Docker bind source")
-        mode = "" if target in WRITABLE_MOUNTS else ",readonly"
+        mode = "" if target in writable else ",readonly"
         args += ["--mount", f"type=bind,source={source},target={target}{mode}"]
     for key in sorted(environment):
         if not re.fullmatch(r"[A-Z][A-Z0-9_]*", key):
             raise ValueError("invalid explicit environment key")
         args += ["--env", key]
     return args + ["--entrypoint", "python3", image_id, "-B", "/app/runtime.py"]
+
+
+def mount_policy(schema_version: str | None = None) -> tuple[set, set]:
+    if schema_version in {E_PLANNING_SCHEMA, E_PLANNING_REVIEW_SCHEMA}:
+        return READ_ONLY_MOUNTS | {"/app/import-source"}, WRITABLE_MOUNTS | {
+            "/app/import-dispatch"
+        }
+    return READ_ONLY_MOUNTS, WRITABLE_MOUNTS
+
+
+def e_planning_runtime_binding(options: dict, dependency_receipt: dict) -> dict:
+    """Derive the actual host runtime identity, independently of worker claims."""
+    from evals.runners.manifest import file_hash
+
+    if dependency_receipt.get("lock_sha256") != options["dependencies_lock_sha256"]:
+        raise ValueError("planning dependency receipt differs from runtime")
+    return {
+        "image_id": options["image_id"],
+        "dependencies_lock_sha256": options["dependencies_lock_sha256"],
+        "dependencies_tree_sha256": dependency_receipt["tree_sha256"],
+        "knowledge_sha256": options["knowledge_sha256"],
+        "controller_manifest_sha256": file_hash(
+            Path(options["controller_manifest_path"])
+        ),
+    }
+
+
+def validate_e_planning_probe(probe: dict, request, *, authority_sha256: str) -> None:
+    from evals.contracts import canonical_hash
+
+    expected = {
+        "source_package_manifest_sha256": request.source_package_manifest_sha256,
+        "registration_sha256": request.registration_sha256,
+        "request_sha256": canonical_hash(request),
+        "authority_sha256": authority_sha256,
+        "readonly_source": True,
+        "writable_dispatch": True,
+    }
+    if any(
+        type(probe.get(k)) is not type(v) or probe[k] != v for k, v in expected.items()
+    ):
+        raise ValueError("planning pre-GO source, journal or mount probe differs")
+
+
+def _planning_journal_path(path: Path) -> Path:
+    path = Path(path)
+    if path.name != "e-planning.sqlite" or not path.is_file():
+        raise ValueError(
+            "planning requires its existing uniquely named dispatch journal"
+        )
+    allowed = {path.name + suffix for suffix in ("", "-wal", "-shm", "-journal")}
+    for entry in (path.parent, *path.parent.parents, *path.parent.iterdir()):
+        if entry.is_symlink() or entry.is_junction():
+            raise ValueError("planning journal cannot contain filesystem links")
+    for entry in path.parent.iterdir():
+        if (
+            not entry.is_file()
+            or entry.name not in allowed
+            or entry.stat().st_nlink != 1
+        ):
+            raise ValueError("planning dispatch mount contains unregistered files")
+    return path.resolve()
+
+
+def _validate_planning_source(request, imported) -> None:
+    if imported.source_identity != request.source_identity:
+        raise ValueError("planning original source identity differs")
+    provenance = imported.provenance
+    expected = request.source.model_dump(mode="json")
+    expected.pop("source_identity")
+    if any(provenance.get(key) != value for key, value in expected.items()):
+        raise ValueError("planning portable package original provenance differs")
+
+
+def validate_e_planning_host(
+    request, agent_dir: Path, options: dict, dependency_receipt: dict, *, review=False
+) -> dict:
+    """Read-only admission checks run before creating a container or passing a key."""
+    from evals.adapters.analysis_package import verify_portable_analysis_package
+    from evals.adapters.e_planning_journal import EPlanningDispatchJournal
+    from evals.adapters.remediation_worker import (
+        require_existing_budget,
+        validate_exported_source,
+    )
+    from evals.adapters.source_epochs import require_registered_epoch
+    from evals.runners.manifest import file_hash
+
+    if (
+        options["phase"] != ("verification" if review else "development")
+        or options.get("budget_identity") != request.budget_identity
+    ):
+        raise ValueError("planning phase or original budget identity differs")
+    validate_exported_source(
+        request,
+        agent_dir,
+        Path(options["source_dir"]),
+        source_commit=options["source_commit"],
+    )
+    budget_path = Path(options["budget_dir"]) / "campaign.sqlite"
+    require_existing_budget(budget_path, request.budget_identity)
+    epoch = require_registered_epoch(
+        budget_path,
+        request.epoch_id,
+        source_sha256=request.source_sha256,
+        config_sha256=request.config_sha256,
+        budget_identity=request.budget_identity,
+        manifest_sha256=request.epoch_manifest_sha256,
+        latest=True,
+    )
+    actual_runtime = e_planning_runtime_binding(options, dependency_receipt)
+    if (
+        epoch["source_commit"] != request.source_commit
+        or Path(epoch["budget_path"]).resolve() != budget_path.resolve()
+        or epoch["runtime_binding"] != actual_runtime
+    ):
+        raise ValueError("planning registered source epoch runtime differs")
+    root = Path(__file__).resolve().parents[1]
+    required_entries = {
+        "scripts/task13_worker_runtime.py",
+        "evals/adapters/e_planning_worker.py",
+        "evals/adapters/e_planning_contracts.py",
+        "evals/adapters/e_planning_journal.py",
+        "evals/adapters/analysis_package.py",
+        "evals/adapters/analysis_import.py",
+        "evals/e_planning.py",
+        "evals/adapters/e_planning_review.py",
+        "evals/adapters/verification_worker.py",
+    }
+    if not required_entries.issubset(epoch["entrypoints"]) or any(
+        file_hash(root / relative) != digest
+        for relative, digest in epoch["entrypoints"].items()
+    ):
+        raise ValueError(
+            "planning actual controller entrypoints differ from source epoch"
+        )
+    imported = verify_portable_analysis_package(
+        Path(options["import_source_dir"]), request.source_package_manifest_sha256
+    )
+    _validate_planning_source(request, imported)
+    journal_path = _planning_journal_path(Path(options["import_dispatch_path"]))
+    journal = EPlanningDispatchJournal.open_existing(
+        journal_path,
+        expected_registration_sha256=request.registration_sha256,
+        expected_authority_sha256=options["planning_authority_sha256"],
+    )
+    journal.validate_request(request)
+    return actual_runtime
+
+
+def e_planning_worker_probe(request) -> dict:
+    """Inspect actual read-only source and existing metadata journal before GO."""
+    from evals.adapters.analysis_package import verify_portable_analysis_package
+    from evals.adapters.e_planning_journal import EPlanningDispatchJournal
+    from evals.contracts import canonical_hash
+
+    source = Path(os.environ["TASK13_IMPORT_SOURCE_DIR"])
+    imported = verify_portable_analysis_package(
+        source, request.source_package_manifest_sha256
+    )
+    _validate_planning_source(request, imported)
+    journal_path = _planning_journal_path(Path(os.environ["TASK13_IMPORT_DISPATCH_DB"]))
+    authority_sha256 = os.environ["TASK13_IMPORT_AUTHORITY_SHA256"]
+    journal = EPlanningDispatchJournal.open_existing(
+        journal_path,
+        expected_registration_sha256=request.registration_sha256,
+        expected_authority_sha256=authority_sha256,
+        mounted_host_journal_path=os.environ["TASK13_IMPORT_HOST_JOURNAL_PATH"],
+    )
+    journal.validate_request(request)
+    flags = {}
+    for line in Path("/proc/self/mountinfo").read_text(encoding="utf-8").splitlines():
+        fields = line.split()
+        if len(fields) >= 6 and fields[4] in {
+            "/app/import-source",
+            "/app/import-dispatch",
+        }:
+            flags[fields[4]] = fields[5].split(",")
+    probe = {
+        "source_package_manifest_sha256": request.source_package_manifest_sha256,
+        "registration_sha256": request.registration_sha256,
+        "request_sha256": canonical_hash(request),
+        "authority_sha256": authority_sha256,
+        "readonly_source": "ro" in flags.get("/app/import-source", []),
+        "writable_dispatch": "rw" in flags.get("/app/import-dispatch", []),
+    }
+    validate_e_planning_probe(probe, request, authority_sha256=authority_sha256)
+    return probe
 
 
 def worker_probe(
@@ -402,7 +599,11 @@ def quarantine_isolation_failure(value: dict, raw_stdout: dict, stage: str) -> d
 
 
 def validate_worker_inspection(
-    info: dict, expected_mounts: dict[str, str], network: str
+    info: dict,
+    expected_mounts: dict[str, str],
+    network: str,
+    *,
+    schema_version: str | None = None,
 ) -> dict:
     from scripts.dedale_task12_runtime import (
         _host_source,
@@ -410,6 +611,7 @@ def validate_worker_inspection(
     )
 
     host = info.get("HostConfig", {})
+    _, writable = mount_policy(schema_version)
     if (
         host.get("PidsLimit") != 256
         or host.get("Memory") != 2 * 1024**3
@@ -421,20 +623,16 @@ def validate_worker_inspection(
         raise ValueError("unexpected worker mount count")
     read_info = {
         **info,
-        "Mounts": [row for row in actual if row["Destination"] not in WRITABLE_MOUNTS],
+        "Mounts": [row for row in actual if row["Destination"] not in writable],
     }
     accepted = validate_container_inspection(
         read_info,
-        {
-            key: value
-            for key, value in expected_mounts.items()
-            if key not in WRITABLE_MOUNTS
-        },
+        {key: value for key, value in expected_mounts.items() if key not in writable},
         network,
     )
     for mount in actual:
         target = mount["Destination"]
-        if target in WRITABLE_MOUNTS and (
+        if target in writable and (
             mount.get("RW") is not True
             or mount.get("Type") != "bind"
             or target not in expected_mounts
@@ -444,7 +642,7 @@ def validate_worker_inspection(
                 "writable worker storage is not the exact budget/output boundary"
             )
     accepted["writable_mounts"] = sorted(
-        target for target in expected_mounts if target in WRITABLE_MOUNTS
+        target for target in expected_mounts if target in writable
     )
     return accepted
 
@@ -596,6 +794,18 @@ def preflight_runtime(options: dict, controller: dict) -> None:
 
 
 def _worker_request(spec: dict):
+    if spec.get("schema_version") == EPOCH_REGRESSION_SCHEMA:
+        from evals.adapters.epoch_remediation import EpochRemediationRequest
+
+        return EpochRemediationRequest.model_validate(spec)
+    if spec.get("schema_version") == E_PLANNING_REVIEW_SCHEMA:
+        from evals.adapters.e_planning_review import EPlanningReviewRequest
+
+        return EPlanningReviewRequest.model_validate(spec)
+    if spec.get("schema_version") == E_PLANNING_SCHEMA:
+        from evals.adapters.e_planning_contracts import EPlanningRequest
+
+        return EPlanningRequest.model_validate(spec)
     if spec.get("schema_version") == "task13-remediation-review-worker-v2":
         from evals.adapters.remediation_review import RemediationReviewRequest
 
@@ -618,6 +828,18 @@ def _worker_request(spec: dict):
 
 
 async def _invoke_adapter(request, agent_dir: Path):
+    if getattr(request, "schema_version", None) == EPOCH_REGRESSION_SCHEMA:
+        from evals.adapters.epoch_remediation import run_epoch_remediation
+
+        return await run_epoch_remediation(request, agent_dir)
+    if getattr(request, "schema_version", None) == E_PLANNING_REVIEW_SCHEMA:
+        from evals.adapters.e_planning_review import run_e_planning_review
+
+        return await run_e_planning_review(request, agent_dir)
+    if getattr(request, "schema_version", None) == E_PLANNING_SCHEMA:
+        from evals.adapters.e_planning_worker import run_e_planning
+
+        return await run_e_planning(request, agent_dir)
     if (
         getattr(request, "schema_version", None)
         == "task13-remediation-review-worker-v2"
@@ -656,6 +878,32 @@ async def run_verification_container(request, agent_dir: Path, options: dict) ->
     return value
 
 
+async def run_e_planning_container(request, agent_dir: Path, options: dict) -> dict:
+    spec = (
+        request.model_dump(mode="json") if hasattr(request, "model_dump") else request
+    )
+    if spec.get("schema_version") != E_PLANNING_SCHEMA:
+        raise ValueError("planning requires its dedicated worker schema")
+    return await run_container(spec, agent_dir, options)
+
+
+async def run_e_planning_review_container(
+    request, agent_dir: Path, options: dict
+) -> dict:
+    spec = (
+        request.model_dump(mode="json") if hasattr(request, "model_dump") else request
+    )
+    if spec.get("schema_version") != E_PLANNING_REVIEW_SCHEMA:
+        raise ValueError("planning review requires its dedicated worker schema")
+    from evals.adapters.e_planning_review import require_review_window
+
+    require_review_window()
+    value = await run_container(spec, agent_dir, options)
+    if value.get("model_ledger"):
+        raise ValueError("planning reads and decisions cannot make model calls")
+    return value
+
+
 async def run_source_review_container(request, agent_dir: Path, options: dict) -> dict:
     spec = (
         request.model_dump(mode="json") if hasattr(request, "model_dump") else request
@@ -674,8 +922,11 @@ async def run_remediation_container(request, agent_dir: Path, options: dict) -> 
     spec = (
         request.model_dump(mode="json") if hasattr(request, "model_dump") else request
     )
-    if spec.get("schema_version") != "task13-remediation-worker-v2":
-        raise ValueError("remediation requires its dedicated v2 worker schema")
+    if spec.get("schema_version") not in {
+        "task13-remediation-worker-v2",
+        EPOCH_REGRESSION_SCHEMA,
+    }:
+        raise ValueError("remediation requires its dedicated versioned worker schema")
     return await run_container(spec, agent_dir, options)
 
 
@@ -698,22 +949,46 @@ async def run_container(spec: dict, agent_dir: Path, options: dict) -> dict:
     from evals.runners.manifest import file_hash, write_immutable_json
 
     request = _worker_request(spec)
+    epoch_regression = (
+        getattr(request, "schema_version", None) == EPOCH_REGRESSION_SCHEMA
+    )
+    planning_review = (
+        getattr(request, "schema_version", None) == E_PLANNING_REVIEW_SCHEMA
+    )
+    planning = getattr(request, "schema_version", None) in {
+        E_PLANNING_SCHEMA,
+        E_PLANNING_REVIEW_SCHEMA,
+    }
+    planning_request = request.planning_request if planning_review else request
+    if planning_review:
+        from evals.adapters.e_planning_review import require_review_window
+
+        require_review_window()
     verification = (
         getattr(request, "schema_version", None) == "task13-verification-worker-v1"
     )
+    termination_dir = options.get("host_termination_dir")
+    if termination_dir is not None and not verification:
+        raise ValueError(
+            "host termination evidence is restricted to verification workers"
+        )
     remediation_review = (
         getattr(request, "schema_version", None)
         == "task13-remediation-review-worker-v2"
     )
-    source_review = remediation_review or (
-        getattr(request, "schema_version", None) == "task13-source-review-worker-v1"
+    source_review = (
+        planning_review
+        or remediation_review
+        or (
+            getattr(request, "schema_version", None) == "task13-source-review-worker-v1"
+        )
     )
-    remediation = (
+    remediation = epoch_regression or (
         getattr(request, "schema_version", None) == "task13-remediation-worker-v2"
     )
-    if (verification or source_review) and request.agent_sha256 != file_hash(
-        agent_dir / "events.jsonl"
-    ):
+    if (
+        verification or source_review or planning
+    ) and request.agent_sha256 != file_hash(agent_dir / "events.jsonl"):
         raise ValueError("verification source case input hash differs")
     if source_review and request.source_commit != options["source_commit"]:
         raise ValueError("source review implementation commit differs from runtime")
@@ -772,6 +1047,32 @@ async def run_container(spec: dict, agent_dir: Path, options: dict) -> dict:
     knowledge = Path(options["knowledge_dir"]).resolve()
     if dependency_tree_hash(knowledge) != options.get("knowledge_sha256"):
         raise ValueError("frozen knowledge snapshot hash differs")
+    planning_runtime = (
+        validate_e_planning_host(
+            planning_request,
+            agent_dir,
+            options,
+            dependency_receipt,
+            review=planning_review,
+        )
+        if planning
+        else None
+    )
+    epoch_manifest = None
+    epoch_runtime = None
+    if epoch_regression:
+        from evals.adapters.epoch_remediation import validate_epoch_runtime
+
+        epoch_runtime = e_planning_runtime_binding(options, dependency_receipt)
+        epoch_manifest = validate_epoch_runtime(
+            request,
+            agent_dir,
+            source,
+            Path(options["budget_dir"]) / "campaign.sqlite",
+            epoch_runtime,
+            options["source_commit"],
+            worker=False,
+        )
     nonce = uuid.uuid4().hex
     name = "task13-worker-" + nonce
     budget = Path(options["budget_dir"]).resolve()
@@ -826,6 +1127,17 @@ async def run_container(spec: dict, agent_dir: Path, options: dict) -> dict:
             "/app/budget": str(budget),
             "/app/output": str(output),
         }
+        if planning:
+            mounts.update(
+                {
+                    "/app/import-source": str(
+                        Path(options["import_source_dir"]).resolve()
+                    ),
+                    "/app/import-dispatch": str(
+                        Path(options["import_dispatch_path"]).resolve().parent
+                    ),
+                }
+            )
         environment = {
             key: os.environ[key]
             for key in ["PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP"]
@@ -857,8 +1169,27 @@ async def run_container(spec: dict, agent_dir: Path, options: dict) -> dict:
                 "OPENBLAS_NUM_THREADS": "1",
             }
         )
-        if remediation or remediation_review:
+        if remediation or remediation_review or planning:
             passed["TASK13_SOURCE_DIR"] = "/app/source"
+        if epoch_regression:
+            passed["TASK13_RUNTIME_BINDING"] = json.dumps(epoch_runtime, sort_keys=True)
+            passed["TASK13_EPOCH_HOST_BUDGET_PATH"] = epoch_manifest["budget_path"]
+        if planning:
+            passed.update(
+                {
+                    "TASK13_IMPORT_SOURCE_DIR": "/app/import-source",
+                    "TASK13_IMPORT_DISPATCH_DB": "/app/import-dispatch/e-planning.sqlite",
+                    "TASK13_IMPORT_HOST_JOURNAL_PATH": str(
+                        Path(options["import_dispatch_path"]).resolve()
+                    ),
+                    "TASK13_IMPORT_AUTHORITY_SHA256": options[
+                        "planning_authority_sha256"
+                    ],
+                    "TASK13_RUNTIME_BINDING": json.dumps(
+                        planning_runtime, sort_keys=True
+                    ),
+                }
+            )
         environment.update(passed)
         arguments = docker_run_arguments(
             name=name,
@@ -866,6 +1197,7 @@ async def run_container(spec: dict, agent_dir: Path, options: dict) -> dict:
             network=options["network"],
             mounts=mounts,
             environment=passed,
+            **({"schema_version": request.schema_version} if planning else {}),
         )
         try:
             process = await asyncio.create_subprocess_exec(
@@ -900,7 +1232,12 @@ async def run_container(spec: dict, agent_dir: Path, options: dict) -> dict:
             if inspection.returncode:
                 raise WorkerInfrastructureError("real worker Docker inspection failed")
             info = json.loads(raw)[0]
-            accepted = validate_worker_inspection(info, mounts, options["network"])
+            accepted = validate_worker_inspection(
+                info,
+                mounts,
+                options["network"],
+                **({"schema_version": request.schema_version} if planning else {}),
+            )
             if accepted["image_id"] != options["image_id"]:
                 raise ValueError("worker image digest differs from frozen runtime")
             if probe.get("python_version") != dependency_receipt["python_version"]:
@@ -913,6 +1250,12 @@ async def run_container(spec: dict, agent_dir: Path, options: dict) -> dict:
                 nonce=nonce,
                 agent_sha256=file_hash(agent_dir / "events.jsonl"),
             )
+            if planning:
+                validate_e_planning_probe(
+                    probe.get("planning", {}),
+                    planning_request,
+                    authority_sha256=options["planning_authority_sha256"],
+                )
             process.stdin.write(("GO:" + nonce + "\n").encode())
             await process.stdin.drain()
             process.stdin.close()
@@ -1017,7 +1360,31 @@ async def run_container(spec: dict, agent_dir: Path, options: dict) -> dict:
                 "Docker worker process is unavailable"
             ) from error
         finally:
-            if process.returncode is None:
+            if termination_dir is not None:
+                from evals.contracts import canonical_hash
+                from evals.worker_lifecycle import capture_worker_termination
+
+                termination = asyncio.create_task(
+                    capture_worker_termination(
+                        process=process,
+                        name=name,
+                        nonce=nonce,
+                        container_id=accepted.get("container_id") if accepted else None,
+                        request_sha256=canonical_hash(spec),
+                        source_commit=options["source_commit"],
+                        environment=environment,
+                        receipt_dir=termination_dir,
+                    )
+                )
+                try:
+                    await asyncio.shield(termination)
+                except asyncio.CancelledError:
+                    # Keep the cleanup proof running even if an outer deadline
+                    # cancels this coroutine a second time. Missing proof stays
+                    # unknown at the controller; it never authorizes replay.
+                    await termination
+                    raise
+            elif process.returncode is None:
                 stop = await asyncio.create_subprocess_exec(
                     "docker",
                     "rm",
@@ -1038,6 +1405,15 @@ def main() -> None:
     }
     nonce = os.environ["TASK13_WORKER_NONCE"]
     probe = worker_probe(Path("/app/agent/events.jsonl"), forbidden, nonce)
+    if os.environ.get("TASK13_IMPORT_SOURCE_DIR"):
+        request = _worker_request(json.loads(Path("/app/spec.json").read_bytes()))
+        if request.schema_version not in {E_PLANNING_SCHEMA, E_PLANNING_REVIEW_SCHEMA}:
+            raise ValueError("only planning workers may mount import resources")
+        probe["planning"] = e_planning_worker_probe(
+            request.planning_request
+            if request.schema_version == E_PLANNING_REVIEW_SCHEMA
+            else request
+        )
     sys.stderr.write(PROBE_PREFIX + json.dumps(probe, sort_keys=True) + "\n")
     sys.stderr.flush()
     if sys.stdin.readline().strip() != "GO:" + nonce:

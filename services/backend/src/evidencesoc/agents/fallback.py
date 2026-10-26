@@ -14,6 +14,7 @@ from evidencesoc.agents.models import (
     ResponseOutput,
     SimulatedAction,
 )
+from evidencesoc.agents.origin_scope import INTERNAL_SOURCE_NETWORKS
 from evidencesoc.domain.models import (
     AttackClassification,
     AttackOrigin,
@@ -96,8 +97,7 @@ def source_scope(address: str | None) -> Literal["external", "internal", "unknow
     if address is None:
         return "unknown"
     parsed = ip_address(address)
-    internal = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7")
-    if any(parsed in ip_network(network) for network in internal):
+    if any(parsed in ip_network(network) for network in INTERNAL_SOURCE_NETWORKS):
         return "internal"
     return "external" if parsed.is_global else "unknown"
 

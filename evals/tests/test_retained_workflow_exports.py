@@ -20,6 +20,7 @@ def test_source_review_dependencies_work_with_only_worker_export_paths(tmp_path)
     assert EXPORT_PATHS == [
         "services/backend/src",
         "evals/contracts.py",
+        "evals/e_planning.py",
         "evals/adapters",
         "scripts/dedale_task12_runtime.py",
         "scripts/task13_worker_runtime.py",
@@ -58,15 +59,18 @@ sys.path[:0] = [str(root), str(root / "services/backend/src")]
 class ControllerFence(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
         if fullname.startswith("evals.") and not (
-            fullname == "evals.contracts" or fullname == "evals.adapters"
+            fullname in {"evals.contracts", "evals.e_planning", "evals.adapters"}
             or fullname.startswith("evals.adapters.")
         ):
             raise AssertionError("worker attempted controller import: " + fullname)
 
 sys.meta_path.insert(0, ControllerFence())
 from evals.adapters import verification_worker as worker
+from evals.adapters import analysis_package, e_planning_worker, e_planning_review
 
 assert Path(worker.__file__).is_relative_to(root)
+for module in (analysis_package, e_planning_worker, e_planning_review):
+    assert Path(module.__file__).is_relative_to(root)
 data = json.loads(input_path.read_text(encoding="utf-8"))
 agent, output = root / "agent", root / "output"
 agent.mkdir()

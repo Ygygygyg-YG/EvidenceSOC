@@ -182,7 +182,13 @@ class SourceReviewRequest(BaseModel):
 
 
 async def run_source_review(
-    request: SourceReviewRequest, agent_dir: Path, *, model_factory=None
+    request: SourceReviewRequest,
+    agent_dir: Path,
+    *,
+    model_factory=None,
+    state_validator=None,
+    decision_admitter=None,
+    verification_enabled=True,
 ) -> dict:
     """Read, explicitly decide, or renew the retained original product workflow."""
     from evals.adapters import retained_workflow
@@ -228,7 +234,9 @@ async def run_source_review(
                 else model_factory(request)
             )
         async with retained_workflow.open_retained_workflow(
-            reference, model=model
+            reference,
+            model=model,
+            **({"verification_enabled": False} if not verification_enabled else {}),
         ) as workflow:
             sessions = workflow.services._sessions
             ledger = Ledger(sessions)
@@ -238,6 +246,8 @@ async def run_source_review(
                 for row in ledger.calls(request.incident_id, round_no)
             }
             try:
+                if state_validator is not None:
+                    state_validator(await workflow.get_state(request.incident_id))
                 if request.operation == "decision":
                     state = await retained_workflow.apply_human_decision(
                         workflow,
@@ -245,6 +255,11 @@ async def run_source_review(
                         decision=request.decision,
                         reason=request.reason,
                         decided_by=request.reviewer,
+                        **(
+                            {"decision_admitter": decision_admitter}
+                            if decision_admitter is not None
+                            else {}
+                        ),
                     )
                     if request.decision == "approved":
                         receipt = read_persisted_approval(state, sessions)
@@ -270,6 +285,8 @@ async def run_source_review(
                         )
                 else:
                     state = await workflow.get_state(request.incident_id)
+                if state_validator is not None:
+                    state_validator(state)
                 packet = retained_workflow.build_approval_packet(
                     {"case_id": request.case_id, "dataset": request.dataset}, state
                 )

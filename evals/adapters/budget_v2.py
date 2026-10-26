@@ -102,6 +102,7 @@ class SupplementBudgetAccount(BudgetAccount):
         config_sha256: str,
         total_cny: float = 100,
         dev_cny: float = 15,
+        epoch_id: str | None = None,
     ):
         if (
             campaign_id != CAMPAIGN_ID
@@ -118,6 +119,33 @@ class SupplementBudgetAccount(BudgetAccount):
         self._binding = _Binding(
             campaign_id, case_id, group, attempt, purpose, source_sha256, config_sha256
         )
+        self._stable_keys: dict[str, tuple[str, int]] = {}
+        self._epoch_id = epoch_id
+        if epoch_id is not None:
+            from evals.adapters.source_epochs import require_registered_epoch
+
+            if (
+                not _identity(epoch_id)
+                or isinstance(total_cny, bool)
+                or isinstance(dev_cny, bool)
+                or total_cny != 100
+                or dev_cny != 15
+            ):
+                raise ValueError(
+                    "registered epoch requires the unchanged 100/15 budget"
+                )
+            # A worker may only read registration. In particular, do not invoke
+            # the legacy constructor which can create a DB/campaign/schema.
+            self.path = Path(path)
+            manifest = require_registered_epoch(
+                self.path,
+                epoch_id,
+                source_sha256=source_sha256,
+                config_sha256=config_sha256,
+            )
+            self._epoch_manifest_sha256 = canonical_hash(manifest)
+            self._epoch_budget_identity = manifest["budget_identity"]
+            return
         super().__init__(path, total_cny=total_cny, dev_cny=dev_cny)
         with self._db() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -163,7 +191,36 @@ class SupplementBudgetAccount(BudgetAccount):
             )
 
     def request_binding(self) -> dict[str, Any]:
-        return asdict(self._binding)
+        value = asdict(self._binding)
+        if self._epoch_id is not None:
+            value["epoch_id"] = self._epoch_id
+        return value
+
+    def _require_epoch(self, db, *, latest=False):
+        if self._epoch_id is not None:
+            from evals.adapters.source_epochs import require_epoch_in_transaction
+
+            return require_epoch_in_transaction(
+                db,
+                self._epoch_id,
+                source_sha256=self._binding.source_sha256,
+                config_sha256=self._binding.config_sha256,
+                budget_identity=self._epoch_budget_identity,
+                manifest_sha256=self._epoch_manifest_sha256,
+                latest=latest,
+            )
+        if (
+            latest
+            and db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='supplement_source_epochs'"
+            ).fetchone()
+        ):
+            from evals.adapters.source_epochs import (
+                require_legacy_dispatch_in_transaction,
+            )
+
+            require_legacy_dispatch_in_transaction(db)
+        return None
 
     def physical_request_key(
         self, logical_key: str, physical_attempt: int, *, explicit_call_id: Any
@@ -172,7 +229,56 @@ class SupplementBudgetAccount(BudgetAccount):
         # A stable call ID is supplied by the trusted controller, never inferred.
         if not _identity(explicit_call_id):
             raise ValueError("supplement requires an explicit stable model call ID")
-        return canonical_hash([self.request_binding(), logical_key, physical_attempt])
+        key = canonical_hash([self.request_binding(), logical_key, physical_attempt])
+        # The legacy alias also needs this hint after epoch zero is registered:
+        # TrackedModel's persisted logical_call_id is random on reopen.
+        self._stable_keys[key] = (logical_key, physical_attempt)
+        return key
+
+    def _reject_stable_replay(self, db, request_key, metadata):
+        stable = self._stable_keys.get(request_key)
+        if stable is None:
+            return
+        if not db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='supplement_request_epochs'"
+        ).fetchone():
+            # Preserve legacy-to-legacy behavior before any explicit epoch.
+            return
+        logical_key, physical = stable
+        if (
+            physical != metadata["physical_attempt"]
+            or metadata["request_id"] != request_key
+        ):
+            raise ValueError("physical request metadata differs from its stable key")
+        binding = self._binding
+        candidates = db.execute(
+            "SELECT s.source_sha256,s.config_sha256,e.epoch_id,r.request_key "
+            "FROM supplement_requests s JOIN reservations r ON r.id=s.reservation_id "
+            "LEFT JOIN supplement_request_epochs e ON e.reservation_id=s.reservation_id "
+            "WHERE s.campaign_id=? AND s.case_id=? AND s.group_name=? AND s.attempt=? "
+            "AND s.purpose=? AND s.role=? AND s.physical_attempt=?",
+            (
+                binding.campaign_id,
+                binding.case_id,
+                binding.group,
+                binding.attempt,
+                binding.purpose,
+                metadata["role"],
+                physical,
+            ),
+        )
+        for source, config, epoch, old_key in candidates:
+            old_binding = {
+                **asdict(binding),
+                "source_sha256": source,
+                "config_sha256": config,
+            }
+            if epoch is not None:
+                old_binding["epoch_id"] = epoch
+            if canonical_hash([old_binding, logical_key, physical]) == old_key:
+                raise BudgetLimit(
+                    "stable physical request already reserved; source epoch replay refused"
+                )
 
     def _reserve_in_transaction(
         self, db, reservation, request_key, upper_cny, phase, metadata
@@ -194,11 +300,43 @@ class SupplementBudgetAccount(BudgetAccount):
         ):
             raise ValueError("invalid physical request metadata")
         _timestamp(metadata["requested_at"])
+        self._require_epoch(db, latest=True)
         if db.execute(
             "SELECT 1 FROM supplement_requests WHERE request_id=?",
             (metadata["request_id"],),
         ).fetchone():
             raise BudgetLimit("physical request ID already reserved; duplicate refused")
+        self._reject_stable_replay(db, request_key, metadata)
+        mapped = db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='supplement_request_epochs'"
+        ).fetchone()
+        if self._epoch_id is not None or mapped:
+            replay = db.execute(
+                "SELECT s.reservation_id FROM supplement_requests s "
+                "WHERE s.campaign_id=? AND s.case_id=? AND s.group_name=? AND s.attempt=? "
+                "AND s.purpose=? AND s.role=? AND s.logical_call_id=? AND s.physical_attempt=?"
+                + (
+                    " AND EXISTS (SELECT 1 FROM supplement_request_epochs e "
+                    "WHERE e.reservation_id=s.reservation_id)"
+                    if self._epoch_id is None
+                    else ""
+                )
+                + " LIMIT 1",
+                (
+                    binding.campaign_id,
+                    binding.case_id,
+                    binding.group,
+                    binding.attempt,
+                    binding.purpose,
+                    metadata["role"],
+                    metadata["logical_call_id"],
+                    metadata["physical_attempt"],
+                ),
+            ).fetchone()
+            if replay:
+                raise BudgetLimit(
+                    "semantic physical request already reserved; cross-epoch replay refused"
+                )
         campaign_amount, purpose_amount = db.execute(
             "SELECT COALESCE(SUM(COALESCE(r.actual,r.upper)),0), "
             "COALESCE(SUM(CASE WHEN s.purpose=? THEN COALESCE(r.actual,r.upper) ELSE 0 END),0) "
@@ -234,6 +372,11 @@ class SupplementBudgetAccount(BudgetAccount):
                 metadata["request_sha256"],
             ),
         )
+        if self._epoch_id is not None:
+            db.execute(
+                "INSERT INTO supplement_request_epochs (reservation_id,epoch_id) VALUES (?,?)",
+                (reservation, self._epoch_id),
+            )
 
     def _settle_in_transaction(self, db, reservation, actual, metadata) -> None:
         if not isinstance(metadata, dict) or set(metadata) != _END_FIELDS:
@@ -245,6 +388,20 @@ class SupplementBudgetAccount(BudgetAccount):
         ).fetchone()
         if row is None or tuple(row[:7]) != tuple(asdict(self._binding).values()):
             raise ValueError("settlement does not match the bound supplement binding")
+        self._require_epoch(db)
+        if db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='supplement_request_epochs'"
+        ).fetchone():
+            epoch = db.execute(
+                "SELECT epoch_id FROM supplement_request_epochs WHERE reservation_id=?",
+                (reservation,),
+            ).fetchone()
+            if (epoch[0] if epoch else None) != self._epoch_id:
+                raise ValueError(
+                    "settlement does not match the original source epoch mapping"
+                )
+        elif self._epoch_id is not None:
+            raise ValueError("settlement source epoch mapping is unavailable")
         if metadata["request_id"] != row[7]:
             raise ValueError("settlement request ID does not match reservation")
         if _timestamp(metadata["finished_at"]) < _timestamp(row[8]):

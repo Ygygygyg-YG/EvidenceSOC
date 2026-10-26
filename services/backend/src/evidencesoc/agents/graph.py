@@ -21,7 +21,12 @@ from evidencesoc.agents.models import SimulatedAction
 from evidencesoc.agents.nodes import NodeHandlers
 from evidencesoc.agents.state import InvestigationState
 from evidencesoc.config import Settings, get_settings
-from evidencesoc.domain.models import ApprovalDecision, ApprovalRecord, ResponsePlan
+from evidencesoc.domain.models import (
+    ApprovalDecision,
+    ApprovalRecord,
+    EvidenceItem,
+    ResponsePlan,
+)
 from evidencesoc.domain.response_action import SimulationExecution
 from evidencesoc.evidence.citations import FactualClaim, validate_citations
 from evidencesoc.ids import new_ulid
@@ -156,6 +161,13 @@ def _seal_diagnosis(state, role):
         )
     }
     snapshot.update({"sealed_after": role, "sealed_at": _now()})
+    provenance = state.get("analysis_import_provenance")
+    if (
+        role == "analysis_import"
+        and isinstance(provenance, dict)
+        and "planning_admission" in provenance
+    ):
+        snapshot["analysis_import_provenance"] = deepcopy(provenance)
     return {
         "diagnostic_snapshot": snapshot,
         "diagnostic_snapshot_sha256": _plan_hash(snapshot),
@@ -205,7 +217,15 @@ def _role_route(next_node):
     return route
 
 
-def build_graph(nodes, services, checkpointer, *, capabilities=None):
+def build_graph(
+    nodes,
+    services,
+    checkpointer,
+    *,
+    capabilities=None,
+    imported_analysis=None,
+    planning_admission=None,
+):
     builder = StateGraph(InvestigationState)
 
     def wrap(role):
@@ -216,9 +236,77 @@ def build_graph(nodes, services, checkpointer, *, capabilities=None):
             writer(started)
             try:
                 with capability_scope(capabilities):
-                    delta = await getattr(nodes, role)({**state, "_run_id": run_id})
+                    if role == "analysis_import":
+                        from evidencesoc.agents.models import AnalysisOutput
+                        from evidencesoc.agents.nodes import validate_output_citations
+
+                        imported_analysis.revalidate()
+                        values = imported_analysis.product_values()
+                        if planning_admission is not None:
+                            values["analysis_import_provenance"] = (
+                                planning_admission.provenance_for(
+                                    imported_analysis, state["incident_id"]
+                                )
+                            )
+                        incident = await services.load_incident(state["incident_id"])
+                        if not incident or incident.get("status") != "received":
+                            raise ValueError("import requires a new persisted incident")
+                        verified = await services.hydrate_evidence(
+                            state["incident_id"], values["evidence"]
+                        )
+                        # Hydration checks ownership and the full stored raw hash.
+                        # Artifact replay independently verifies the bounded seed.
+                        # Compare persisted identity/query/summary, allowing the
+                        # service's richer raw projection without expanding the
+                        # original evidence subsequently consumed by respond.
+                        hydrated_items = {
+                            item["evidence_id"]: EvidenceItem.model_validate(item)
+                            for item in verified
+                        }
+                        seed_items = {
+                            item["evidence_id"]: EvidenceItem.model_validate(item)
+                            for item in values["evidence"]
+                        }
+                        if (
+                            not verified
+                            or len(verified) != len(hydrated_items)
+                            or len(values["evidence"]) != len(seed_items)
+                            or hydrated_items != seed_items
+                        ):
+                            raise ValueError(
+                                "import evidence failed product integrity verification"
+                            )
+                        output = AnalysisOutput.model_validate(
+                            {
+                                key: values[key]
+                                for key in ("origin", "classification", "diagnosis")
+                            }
+                        )
+                        validate_output_citations(output, values)
+                        delta = {
+                            **values,
+                            "status": "received",
+                            "diagnosis_execution_status": "completed",
+                        }
+                    else:
+                        delta = await getattr(nodes, role)({**state, "_run_id": run_id})
                 _validate_output(state, delta)
+                if (
+                    role == "respond"
+                    and state.get("analysis_import_provenance")
+                    and delta.get("response_plan")
+                ):
+                    plan = ResponsePlan.model_validate(delta["response_plan"])
+                    if (
+                        plan.expires_at is None
+                        or (plan.expires_at - plan.created_at).total_seconds() != 1800
+                    ):
+                        raise ValueError(
+                            "imported response plan must expire exactly 1800 seconds after creation"
+                        )
                 combined = {**state, **delta}
+                if role == "analysis_import":
+                    delta.update(_seal_diagnosis(combined, role))
                 if (
                     role in {"analyze", "reconstruct"}
                     and combined.get("diagnosis") is not None
@@ -271,6 +359,8 @@ def build_graph(nodes, services, checkpointer, *, capabilities=None):
 
     for role in ROLE_NAMES:
         builder.add_node(role, wrap(role))
+    if imported_analysis is not None:
+        builder.add_node("analysis_import", wrap("analysis_import"))
 
     async def retry(state):
         return {"fallback_count": 1, "status": "collecting"}
@@ -465,7 +555,11 @@ def build_graph(nodes, services, checkpointer, *, capabilities=None):
     builder.add_node("review", review)
     builder.add_node("approval", approval)
     builder.add_node("simulate", simulate)
-    builder.add_edge(START, "triage")
+    builder.add_edge(
+        START, "analysis_import" if imported_analysis is not None else "triage"
+    )
+    if imported_analysis is not None:
+        builder.add_conditional_edges("analysis_import", _role_route("respond"))
     builder.add_conditional_edges("triage", _role_route("collect"))
     builder.add_conditional_edges("collect", _role_route("analyze"))
     builder.add_conditional_edges("analyze", _analysis_route)
@@ -500,12 +594,18 @@ class InvestigationWorkflow:
         database_url=None,
         capabilities=None,
         initial_state=None,
+        _imported_analysis=None,
+        _import_admission=None,
+        _planning_admission=None,
     ):
         self.services = services
         self.settings = settings
         self.checkpointer = checkpointer
         self.database_url = database_url
         self.capabilities = capabilities
+        self._imported_analysis = _imported_analysis
+        self._import_admission = _import_admission
+        self._planning_admission = _planning_admission
         self.initial_state = deepcopy(initial_state or {})
         if set(self.initial_state) - {
             "alerts",
@@ -521,10 +621,122 @@ class InvestigationWorkflow:
             services,
             checkpointer,
             capabilities=capabilities,
+            imported_analysis=_imported_analysis,
+            planning_admission=_planning_admission,
         )
         if not hasattr(checkpointer, "_investigation_locks"):
             checkpointer._investigation_locks = {}
         self._locks = checkpointer._investigation_locks
+
+    @classmethod
+    def for_analysis_import(
+        cls, *, imported_analysis, admission=None, planning_admission=None, **kwargs
+    ):
+        from evidencesoc.agents.analysis_import import (
+            ImportDispatchJournal,
+            ImportedAnalysis,
+            PlanningAdmission,
+        )
+
+        if type(imported_analysis) is not ImportedAnalysis or not (
+            (type(admission) is ImportDispatchJournal and planning_admission is None)
+            or (admission is None and type(planning_admission) is PlanningAdmission)
+        ):
+            raise TypeError(
+                "analysis import requires a verified source and durable dispatch journal"
+            )
+        if kwargs.get("initial_state") or kwargs.get("nodes") is not None:
+            raise ValueError(
+                "analysis import cannot override seed state or product nodes"
+            )
+        imported_analysis.revalidate()
+        return cls(
+            _imported_analysis=imported_analysis,
+            _import_admission=admission,
+            _planning_admission=planning_admission,
+            **kwargs,
+        )
+
+    async def import_analysis(self, incident_id, imported_analysis):
+        from evidencesoc.agents.analysis_import import ImportedAnalysis
+
+        if (
+            type(imported_analysis) is not ImportedAnalysis
+            or self._imported_analysis is not imported_analysis
+            or (self._import_admission is None and self._planning_admission is None)
+        ):
+            raise PermissionError(
+                "analysis import requires the explicitly bound workflow constructor"
+            )
+        config = self._config(incident_id)
+        async with self._exclusive(incident_id):
+            imported_analysis.revalidate()
+            provenance = (
+                self._planning_admission.provenance_for(imported_analysis, incident_id)
+                if self._planning_admission is not None
+                else imported_analysis.provenance
+            )
+            snapshot = await self.graph.aget_state(config)
+            if snapshot.values:
+                if (
+                    snapshot.next == ("approval",)
+                    and snapshot.values.get("status") == "awaiting_approval"
+                    and snapshot.values.get("analysis_import_provenance") == provenance
+                ):
+                    seal = snapshot.values.get("diagnostic_snapshot")
+                    if (
+                        not isinstance(seal, dict)
+                        or snapshot.values.get("diagnostic_snapshot_sha256")
+                        != _plan_hash(seal)
+                        or seal.get("sealed_after") != "analysis_import"
+                        or (
+                            self._planning_admission is not None
+                            and seal.get("analysis_import_provenance") != provenance
+                        )
+                        or any(
+                            seal.get(key) != value
+                            for key, value in imported_analysis.product_values().items()
+                            if key
+                            in {
+                                "diagnosis",
+                                "origin",
+                                "classification",
+                                "attack_steps",
+                                "claims",
+                                "evidence",
+                                "knowledge",
+                            }
+                        )
+                    ):
+                        raise PermissionError(
+                            "imported diagnosis seal changed while awaiting approval"
+                        )
+                    return dict(snapshot.values)
+                raise PermissionError(
+                    "incident already has a checkpoint; automatic import replay refused"
+                )
+            if self._planning_admission is None:
+                self._import_admission.claim(
+                    imported_analysis.source_identity, incident_id
+                )
+            initial = {
+                "incident_id": incident_id,
+                "trace_id": f"TRACE-{new_ulid()}",
+                "status": "received",
+                "events": [],
+                "errors": [],
+                "attack_steps": [],
+                "response_plan": None,
+                "approval": None,
+                "simulation": [],
+                "simulation_execution": None,
+                "fallback_count": 0,
+                "fallback_used": False,
+                "diagnostic_snapshot": None,
+                "diagnostic_snapshot_sha256": None,
+            }
+            await self.graph.ainvoke(initial, config)
+            return await self.get_state(incident_id)
 
     def _config(self, incident_id):
         if (
@@ -573,6 +785,10 @@ class InvestigationWorkflow:
     async def stream_events(
         self, incident_id: str, *, after_event_id: int = 0, trace_id: str | None = None
     ) -> AsyncIterator[dict[str, Any]]:
+        if self._imported_analysis is not None:
+            raise PermissionError(
+                "use the explicit analysis import method on an import workflow"
+            )
         config = self._config(incident_id)
         if after_event_id < 0:
             raise ValueError("event cursor must not be negative")

@@ -4,6 +4,7 @@ import json
 
 from pydantic import BaseModel
 
+from evidencesoc.agents.origin_scope import ORIGIN_SCOPE_INSTRUCTION
 from evidencesoc.config import Settings
 from evidencesoc.llm.factory import create_llm
 
@@ -64,6 +65,7 @@ class DeepSeekStructuredModel:
                     "risk, impact, preview, rollback, rollback_ref naming a plan rollback step, "
                     "verification_query, and evidence_ids drawn from the plan's observed incident "
                     "evidence. Never cite evidence from another incident. "
+                    + (ORIGIN_SCOPE_INSTRUCTION if role == "analyze" else "")
                     + collection_instruction
                 ),
             ),

@@ -19,6 +19,7 @@ class InvestigationState(TypedDict, total=False):
     diagnostic_snapshot: dict[str, Any] | None
     diagnostic_snapshot_sha256: str | None
     diagnosis_execution_status: str
+    analysis_import_provenance: dict[str, Any]
     attack_steps: list[dict[str, Any]]
     response_plan: dict[str, Any] | None
     plan_source: str | None

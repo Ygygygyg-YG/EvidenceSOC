@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from evidencesoc.agents.origin_scope import ORIGIN_SCOPE_INSTRUCTION
 from pydantic import BaseModel
 
 from evals.contracts import ModelConfig, canonical_hash
@@ -455,7 +456,9 @@ class TrackedModel:
             "Response actions are simulated only and require individual human approval. "
             "Every response action needs a stable action_id, target-only parameters, expected_effect, risk, impact, "
             "preview, rollback, rollback_ref pointing to a plan rollback step, verification_query and observed evidence_ids. "
-            "Return no response plan if the evidence cannot support a traceable action. JSON schema:\n"
+            "Return no response plan if the evidence cannot support a traceable action. "
+            + (ORIGIN_SCOPE_INSTRUCTION + " " if role == "analyze" else "")
+            + "JSON schema:\n"
             + json.dumps(schema.model_json_schema(), ensure_ascii=False)
         )
         if role == "respond":

@@ -272,6 +272,30 @@ def _immutable(path, value):
         temporary.unlink(missing_ok=True)
 
 
+def read_campaign_journal(output_dir):
+    """Read verified current journal state without initialization or recovery.
+
+    The host caller must already hold the writer lock. This creates no files,
+    applies no recovery transitions and does not trust the mutable projection.
+    """
+    root = Path(output_dir)
+    registration = json.loads((root / "registration.json").read_text(encoding="utf-8"))
+    validate_registration(registration["plan"])
+    view = object.__new__(VerificationCampaign)
+    view.root = root
+    view._registration = deepcopy(registration)
+    view._registration_written = True
+    view.plan = deepcopy(registration["plan"])
+    view.identity = deepcopy(registration["identity"])
+    view.source_files = deepcopy(registration["source_files"])
+    view.config = deepcopy(registration["config"])
+    view._guard()
+    view._load()
+    if not view.events:
+        raise PermissionError("campaign journal origin is missing")
+    return {"cases": deepcopy(view.cases), "records": deepcopy(view.records)}
+
+
 class VerificationCampaign:
     """Single-writer append-only campaign, with a disposable atomic projection.
 

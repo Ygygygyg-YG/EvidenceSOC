@@ -126,7 +126,14 @@ def validate_binding(
     source_commit: str | None = None,
 ) -> None:
     """Recheck mounted bytes in-worker; the controller also validates the Git archive."""
-    request = RemediationRequest.model_validate(request.model_dump(mode="json"))
+    if getattr(request, "schema_version", None) == "task13-remediation-worker-v3":
+        from evals.adapters.epoch_remediation import EpochRemediationRequest
+
+        request = EpochRemediationRequest.model_validate(
+            request.model_dump(mode="json")
+        )
+    else:
+        request = RemediationRequest.model_validate(request.model_dump(mode="json"))
     validate_exported_source(request, agent_dir, source, source_commit=source_commit)
 
 
@@ -555,7 +562,12 @@ async def run_remediation(
 ) -> AdapterResult:
     if os.getpid() != 1 or not os.environ.get("TASK13_WORKER_NONCE"):
         raise PermissionError("v2 adapter requires inspected container worker PID1")
-    request = RemediationRequest.model_validate(request.model_dump(mode="json"))
+    if getattr(request, "schema_version", None) == "task13-remediation-worker-v3":
+        from evals.adapters.epoch_remediation import validate_epoch_worker
+
+        request = validate_epoch_worker(request, agent_dir)
+    else:
+        request = RemediationRequest.model_validate(request.model_dump(mode="json"))
     validate_binding(request, agent_dir, Path(os.environ["TASK13_SOURCE_DIR"]))
     budget_path = Path(os.environ["TASK13_BUDGET_DB"])
     require_existing_budget(budget_path, request.budget_identity)
