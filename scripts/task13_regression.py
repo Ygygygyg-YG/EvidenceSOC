@@ -17,8 +17,9 @@ from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
 
+from evals.adapters.retained_workflow import resource_fields
 from evals.contracts import CallBudget, ModelConfig, SeedPolicy, canonical_hash
-from evals.e_timing import build_e_timing_registration
+from evals.e_timing import _validate_replicate_source, build_e_timing_registration
 from evals.remediation import _summary, execute_bundle, prepare_bundle, validate_bundle
 from evals.runners.manifest import agent_input
 from evals.verification_v2 import observed_six_branch_max
@@ -291,10 +292,28 @@ class RegressionHost:
         for actual, registered in zip(
             receipt["trials"], expected["trials"], strict=True
         ):
-            if [row["request"]["request_id"] for row in actual["branches"]] != [
-                row["request_id"] for row in registered["branches"]
-            ]:
+            source = self._timing_source(data, expected, registered, actual)
+            if len(actual["branches"]) != len(registered["branches"]):
                 raise PermissionError("E timing branches differ from registered slots")
+            for branch, fixed in zip(
+                actual["branches"], registered["branches"], strict=True
+            ):
+                request = branch["request"]
+                if any(
+                    request.get(key) != fixed[key]
+                    for key in ("request_id", "namespace", "verification_enabled")
+                ) or (
+                    request.get("case_id") != registered["case_id"]
+                    or request.get("agent_sha256") != registered["agent_sha256"]
+                    or request.get("approved_state") != source["state"]
+                    or request.get("source_resources")
+                    != resource_fields(source["resources"])
+                    or request.get("approval_receipt_sha256")
+                    != actual["binding"]["approval_receipt_sha256"]
+                ):
+                    raise PermissionError(
+                        "actual E branch source or registered request binding differs"
+                    )
         identity = {
             "campaign_id": bundle["campaign_id"],
             "plan_sha256": core["f8_plan_sha256"],
@@ -307,6 +326,80 @@ class RegressionHost:
             raise PermissionError(
                 "E timing maximum differs from actual complete observations"
             )
+
+    def _timing_source(self, data, registration, registered, trial):
+        """Read original E blobs; never synthesize missing retained source proof."""
+        receipt = data["e_timing_receipt"]
+        pin = self._manifest["inputs"]["e_timing_receipt"]
+        path = _path(pin["path"], file=True)
+        if (
+            path.parent.name != "timings"
+            or path.name != canonical_hash(receipt) + ".json"
+            or _decode(_read_pin(pin)) != receipt
+        ):
+            raise PermissionError(
+                "original E timing source journal binding is required"
+            )
+        binding = trial["binding"]
+        digest = binding["source_sha256"]
+        if (
+            not isinstance(digest, str)
+            or len(digest) != 64
+            or any(c not in "0123456789abcdef" for c in digest)
+        ):
+            raise PermissionError("original E source binding digest is invalid")
+        try:
+            source_path = _path(
+                path.parent.parent / "sources" / (digest + ".json"), file=True
+            )
+            source = _decode(source_path.read_bytes())
+        except (OSError, ValueError) as error:
+            raise PermissionError(
+                "original E source blob is unavailable or invalid"
+            ) from error
+        if not isinstance(source, dict) or canonical_hash(source) != digest:
+            raise PermissionError("original E source blob hash differs")
+        _validate_replicate_source(registration, registered, source)
+        expected_source = {
+            key: receipt[key]
+            for key in (
+                "campaign_id",
+                "source_commit",
+                "source_sha256",
+                "config_sha256",
+            )
+        }
+        expected_source.update(
+            source_row_id=registered["source_row_id"],
+            case_id=registered["case_id"],
+            dataset=registered["dataset"],
+            analysis_manifest_sha256=registered["manifest_sha256"],
+            budget_source_receipt_sha256=registration["budget_source_receipt_sha256"],
+        )
+        state = source["state"]
+        expected_binding = {
+            "planning_slot_id": registered["planning_slot_id"],
+            "planning_request_sha256": registered["planning_request_sha256"],
+            "planning_registration_sha256": registration[
+                "planning_registration_sha256"
+            ],
+            "resources_sha256": source["resources_sha256"],
+            "retained_state_sha256": source["retained_state_sha256"],
+            "source_incident_id": state["incident_id"],
+            "source_run_id": registered["run_id"],
+            "approval_id": state["approval"]["approval_id"],
+            "approved_plan_sha256": state["approved_plan_sha256"],
+            "diagnostic_snapshot_sha256": state["diagnostic_snapshot_sha256"],
+        }
+        if (
+            any(source.get(key) != value for key, value in expected_source.items())
+            or any(binding.get(key) != value for key, value in expected_binding.items())
+            or not isinstance(binding.get("expires_at"), str)
+            or _time(binding["expires_at"])
+            != _time(state["response_plan"]["expires_at"])
+        ):
+            raise PermissionError("actual E source and retained trial binding differ")
+        return source
 
     def _source_binding(self, binding, data):
         if binding.get("git_head") != data["bundle"]["source_commit"]:

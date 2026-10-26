@@ -277,6 +277,11 @@ def fixture(tmp_path):
         "model_price_receipt": price,
     }
     refs = {key: pin(tmp_path / f"{key}.json", value) for key, value in values.items()}
+    timing_path = store.root / "timings" / (canonical_hash(timing) + ".json")
+    refs["e_timing_receipt"] = {
+        "path": str(timing_path.resolve()),
+        "sha256": sha256(timing_path.read_bytes()).hexdigest(),
+    }
     final = {
         "schema_version": "task13-regression-final-freeze-v1",
         "status": "frozen",
@@ -703,3 +708,84 @@ def test_rebound_formal_core_requires_standard_seed_and_budget(fixture, fault):
         host._fixed(
             {**f.values, "bundle": bundle, "core_config": core, "final_freeze": freeze}
         )
+
+
+def test_rebound_outer_epoch_cannot_admit_actual_old_e_sources(fixture):
+    from evals.e_timing import build_e_timing_registration
+    from evals.remediation import prepare_bundle
+
+    f = fixture
+    host = f.host()
+    timing = deepcopy(f.values["e_timing_receipt"])
+    branch_hash = canonical_hash([trial["branches"] for trial in timing["trials"]])
+    planning = timing["planning_registration"]
+    planning["epoch_binding"].update(
+        epoch_id="different-unmeasured-epoch", epoch_manifest_sha256="9" * 64
+    )
+    dispatch = timing["planning_dispatch_registration_receipt"]
+    dispatch["registration_sha256"] = canonical_hash(planning)
+    timing["planning_registration_sha256"] = canonical_hash(planning)
+    expected = build_e_timing_registration(
+        planning,
+        source_files=f.final["source_files"],
+        f8_plan_sha256=f.values["core_config"]["f8_plan_sha256"],
+        planning_dispatch_registration_receipt=dispatch,
+    )
+    timing["registration_sha256"] = canonical_hash(expected)
+    old = f.values["bundle"]
+    bundle = prepare_bundle(
+        f.values["registration"],
+        source_commit=old["source_commit"],
+        source_sha256=old["source_sha256"],
+        config=f.values["core_config"],
+        epoch_binding={
+            key: planning["epoch_binding"][key]
+            for key in ("epoch_id", "epoch_manifest_sha256")
+        },
+    )
+    path = f.root / "synthetic-timing/timings" / (canonical_hash(timing) + ".json")
+    host._manifest["inputs"]["e_timing_receipt"] = pin(path, timing)
+    assert branch_hash == canonical_hash(
+        [trial["branches"] for trial in timing["trials"]]
+    )
+    with pytest.raises(PermissionError, match="planning|retained|source|binding"):
+        host._timing(
+            {
+                **f.values,
+                "final_freeze": f.final,
+                "e_timing_receipt": timing,
+                "bundle": bundle,
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    "fault", ["missing_source", "changed_source", "slot", "resources", "approval"]
+)
+def test_timing_requires_original_source_blobs_and_exact_trial_binding(fixture, fault):
+    f = fixture
+    host = f.host()
+    timing = deepcopy(f.values["e_timing_receipt"])
+    binding = timing["trials"][0]["binding"]
+    path = f.root / "synthetic-timing/sources" / (binding["source_sha256"] + ".json")
+    if fault == "missing_source":
+        path.unlink()
+    elif fault == "changed_source":
+        source = json.loads(path.read_bytes())
+        source["planning_request"]["epoch_id"] = "changed-source-epoch"
+        pin(path, source)
+    else:
+        key = {
+            "slot": "planning_slot_id",
+            "resources": "resources_sha256",
+            "approval": "approval_id",
+        }[fault]
+        binding[key] = "substituted-binding"
+        new_path = (
+            f.root / "synthetic-timing/timings" / (canonical_hash(timing) + ".json")
+        )
+        host._manifest["inputs"]["e_timing_receipt"] = pin(new_path, timing)
+    with pytest.raises(
+        (PermissionError, OSError), match="source|binding|cannot find|No such"
+    ):
+        host._timing({**f.values, "final_freeze": f.final, "e_timing_receipt": timing})
