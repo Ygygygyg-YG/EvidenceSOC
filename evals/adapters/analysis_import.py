@@ -161,12 +161,205 @@ def _read_manifest(anchor):
     return manifest, blobs
 
 
+def _validator_syntax(raw, relative):
+    """Normalize only the reviewed optional response-audit metadata extension.
+
+    No original Python is executed. Every other statement, annotation, default,
+    validator and citation rule stays in the full-module comparison.
+    """
+    tree = ast.parse(raw)
+
+    def syntax(value):
+        return ast.dump(value, include_attributes=False)
+
+    if relative == "services/backend/src/evidencesoc/agents/models.py":
+        expected = ast.parse(
+            "no_plan_reason: str | None = Field(default=None, "
+            'description="Optional unverified model statement explaining a null response_plan.")'
+        ).body[0]
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef) and node.name == "ResponseOutput":
+                fields = [
+                    item
+                    for item in node.body
+                    if isinstance(item, ast.AnnAssign)
+                    and isinstance(item.target, ast.Name)
+                    and item.target.id == "no_plan_reason"
+                ]
+                if len(fields) > 1 or any(
+                    syntax(item) != syntax(expected) for item in fields
+                ):
+                    raise ValueError("unrecognized response audit field semantics")
+                if fields:
+                    position = node.body.index(fields[0])
+                    previous = node.body[position - 1] if position else None
+                    if not (
+                        isinstance(previous, ast.AnnAssign)
+                        and isinstance(previous.target, ast.Name)
+                        and previous.target.id == "response_plan"
+                    ):
+                        raise ValueError("response audit field position differs")
+                node.body = [item for item in node.body if item not in fields]
+    elif relative == "services/backend/src/evidencesoc/agents/nodes/__init__.py":
+        block = ast.parse(
+            'no_plan_reason = data.get("no_plan_reason")\n'
+            'if reason != "model_returned_null" or not (no_plan_reason and no_plan_reason.strip()):\n'
+            "    no_plan_reason = None\n"
+            'data["no_plan_reason"] = no_plan_reason\n'
+        ).body
+        missing = ast.parse(
+            'reason == "model_returned_null" and no_plan_reason is None',
+            mode="eval",
+        ).body
+        generation = ast.parse('generation = state.get("plan_generation", 0)').body[0]
+        for node in tree.body:
+            if not isinstance(node, ast.ClassDef) or node.name != "NodeHandlers":
+                continue
+            for method in node.body:
+                if (
+                    not isinstance(method, ast.AsyncFunctionDef)
+                    or method.name != "respond"
+                ):
+                    continue
+                normalized, index, count = [], 0, 0
+                while index < len(method.body):
+                    statement = method.body[index]
+                    if isinstance(statement, ast.Assign) and any(
+                        isinstance(target, ast.Name) and target.id == "no_plan_reason"
+                        for target in statement.targets
+                    ):
+                        candidate = method.body[index : index + len(block)]
+                        previous = method.body[index - 1] if index else None
+                        following = (
+                            method.body[index + len(block)]
+                            if index + len(block) < len(method.body)
+                            else None
+                        )
+                        if (
+                            len(candidate) != len(block)
+                            or [syntax(item) for item in candidate]
+                            != [syntax(item) for item in block]
+                            or count
+                            or not isinstance(previous, ast.Assign)
+                            or len(previous.targets) != 1
+                            or not isinstance(previous.targets[0], ast.Name)
+                            or previous.targets[0].id != "reason"
+                            or following is None
+                            or syntax(following) != syntax(generation)
+                        ):
+                            raise ValueError(
+                                "unrecognized response audit statement semantics"
+                            )
+                        count += 1
+                        index += len(block)
+                    else:
+                        normalized.append(statement)
+                        index += 1
+                method.body = normalized
+                early, final = set(), 0
+                for returned in ast.walk(method):
+                    if not isinstance(returned, ast.Return) or not isinstance(
+                        returned.value, ast.Dict
+                    ):
+                        continue
+                    expression = returned.value
+                    names = [
+                        key.value if isinstance(key, ast.Constant) else None
+                        for key in expression.keys
+                    ]
+                    metadata = [
+                        name
+                        for name in names
+                        if name in {"no_plan_reason", "no_plan_reason_missing"}
+                    ]
+                    if not metadata:
+                        continue
+                    if len(metadata) != len(set(metadata)):
+                        raise ValueError("duplicate response audit metadata")
+                    reasons = [
+                        value
+                        for name, value in zip(names, expression.values, strict=True)
+                        if name == "response_reason"
+                    ]
+                    if len(reasons) != 1:
+                        raise ValueError("response audit return position differs")
+                    reason = reasons[0]
+                    early_code = (
+                        reason.value if isinstance(reason, ast.Constant) else None
+                    )
+                    is_early = early_code in {
+                        "invalid_diagnosis_snapshot",
+                        "no_actionable_target",
+                    }
+                    is_final = (
+                        isinstance(reason, ast.Name)
+                        and reason.id == "reason"
+                        and any(
+                            key is None
+                            and isinstance(value, ast.Name)
+                            and value.id == "data"
+                            for key, value in zip(
+                                expression.keys, expression.values, strict=True
+                            )
+                        )
+                    )
+                    expected_names = (
+                        {"no_plan_reason", "no_plan_reason_missing"}
+                        if is_early
+                        else {"no_plan_reason_missing"}
+                    )
+                    if (not is_early and not is_final) or set(
+                        metadata
+                    ) != expected_names:
+                        raise ValueError("response audit return metadata differs")
+                    pairs = []
+                    for key, value in zip(
+                        expression.keys, expression.values, strict=True
+                    ):
+                        name = key.value if isinstance(key, ast.Constant) else None
+                        if name == "no_plan_reason":
+                            if (
+                                not isinstance(value, ast.Constant)
+                                or value.value is not None
+                            ):
+                                raise ValueError(
+                                    "unrecognized response audit reason semantics"
+                                )
+                        elif name == "no_plan_reason_missing":
+                            allowed = (
+                                isinstance(value, ast.Constant) and value.value is False
+                                if is_early
+                                else syntax(value) == syntax(missing)
+                            )
+                            if not allowed:
+                                raise ValueError(
+                                    "unrecognized response audit marker semantics"
+                                )
+                        else:
+                            pairs.append((key, value))
+                    expression.keys = [key for key, _ in pairs]
+                    expression.values = [value for _, value in pairs]
+                    if is_early:
+                        if early_code in early:
+                            raise ValueError("duplicate response audit return position")
+                        early.add(early_code)
+                    else:
+                        final += 1
+                if (count or early or final) and (
+                    count != 1
+                    or early != {"invalid_diagnosis_snapshot", "no_actionable_target"}
+                    or final != 1
+                ):
+                    raise ValueError("incomplete response audit metadata extension")
+    return syntax(tree)
+
+
 def _original_validator_equivalence(manifest, blobs, request, artifact_paths=None):
     """Compare source syntax only. Never import, evaluate or execute artifacts.
 
-    Identical ASTs establish the original validator semantics used by the local
-    replay. The only normalization is the pre-existing scope tuple extracted to
-    origin_scope.py; both literal tuples must equal the four fixed networks.
+    Identical full-module ASTs establish the analysis validator semantics.
+    Only exact optional response-audit metadata is normalized above; the scope
+    tuple extracted to origin_scope.py still has its separate fixed-value check.
     """
     if "source_receipt" not in blobs:
         raise ValueError("original validator source export missing")
@@ -209,14 +402,11 @@ def _original_validator_equivalence(manifest, blobs, request, artifact_paths=Non
     )
     project_root = Path(__file__).resolve().parents[2]
 
-    def syntax(raw):
-        return ast.dump(ast.parse(raw), include_attributes=False)
-
     for relative in same_modules:
         key = "original_source:" + relative
-        if key not in blobs or syntax(blobs[key]) != syntax(
-            (project_root / relative).read_bytes()
-        ):
+        if key not in blobs or _validator_syntax(
+            blobs[key], relative
+        ) != _validator_syntax((project_root / relative).read_bytes(), relative):
             raise ValueError(
                 "original validator is not equivalent to the controlled replay: "
                 + relative
@@ -540,7 +730,7 @@ def _verify_artifact_blobs(anchor, manifest, blobs, *, artifact_paths=None):
                 "services/backend/src/evidencesoc/agents/diagnosis.py",
             }
         },
-        "original_validator_equivalence": "ast-with-fixed-scope-tuple-v1",
+        "original_validator_equivalence": "ast-with-fixed-scope-and-response-audit-v2",
         "reconstruct_executed": False,
         "artifacts": {k: v.model_dump() for k, v in manifest.artifacts.items()},
     }

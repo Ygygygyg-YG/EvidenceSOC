@@ -67,7 +67,9 @@ async def test_model_input_marks_logs_as_untrusted_and_uses_schema(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_product_response_prompt_requests_optional_unverified_no_plan_reason(monkeypatch):
+async def test_product_response_prompt_requests_optional_unverified_no_plan_reason(
+    monkeypatch,
+):
     from evidencesoc.agents.models import ResponseOutput
 
     module = import_module("evidencesoc.agents.model")
@@ -83,7 +85,9 @@ async def test_product_response_prompt_requests_optional_unverified_no_plan_reas
             return {"response_plan": None}
 
     monkeypatch.setattr(module, "create_llm", lambda *args, **kwargs: Client())
-    model = module.DeepSeekStructuredModel(Settings(_env_file=None, llm_mode="deepseek"))
+    model = module.DeepSeekStructuredModel(
+        Settings(_env_file=None, llm_mode="deepseek")
+    )
     result = await model.structured("respond", ResponseOutput, {})
     instruction = captured["messages"][0][1]
     assert "no_plan_reason" in instruction

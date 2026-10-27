@@ -373,6 +373,18 @@ def frozen_product_source(tmp_path_factory):
         ("table", False),
         ("ttl", False),
         ("empty", False),
+        ("empty_reason", False),
+        ("empty_blank", False),
+        ("empty_close", False),
+        ("empty_cleanup", False),
+        ("empty_export", False),
+        ("empty_table", False),
+        ("empty_table_close", False),
+        ("empty_table_cleanup", False),
+        ("empty_table_checkpoint_close", False),
+        ("empty_table_all_cleanup", False),
+        ("empty_checkpoint", False),
+        ("empty_incident", False),
         ("tool_export", False),
         ("save", False),
         ("close", False),
@@ -440,6 +452,12 @@ async def test_worker_real_graph_retains_only_verified_persisted_pending(
             yield environment
         finally:
             environment.cleaned = not environment.retained
+            if mode in {
+                "empty_cleanup",
+                "empty_table_cleanup",
+                "empty_table_all_cleanup",
+            }:
+                raise RuntimeError("synthetic cleanup failure")
 
     class Services(ProductServices):
         def __init__(self, *args, **kwargs):
@@ -457,7 +475,9 @@ async def test_worker_real_graph_retains_only_verified_persisted_pending(
                     environment.plans[0].summary = "substitution"
 
         async def aclose(self):
-            if mode == "close":
+            if mode in {"empty_table_close", "empty_table_all_cleanup"}:
+                raise OSError("synthetic close failure with sensitive message")
+            if mode in {"close", "empty_close"}:
                 raise RuntimeError("synthetic close failure")
 
     class Tape(ProductTape):
@@ -471,6 +491,9 @@ async def test_worker_real_graph_retains_only_verified_persisted_pending(
                     "role": role,
                     "logical_call_id": "one-logical",
                     "physical_attempt": len(self.ledger) + 1,
+                    "request_ordinal": len(self.ledger) + 1,
+                    "request_id": "synthetic-provider-id",
+                    "physical_request_id": "synthetic-physical-id",
                     "parse_status": "not_received"
                     if mode == "transport"
                     else "schema_error"
@@ -487,13 +510,36 @@ async def test_worker_real_graph_retains_only_verified_persisted_pending(
                 raise RuntimeError("synthetic provider or schema failure")
             value = await super().structured(role, schema, state)
             data = value.model_dump(mode="json")
-            if mode == "empty":
+            if mode.startswith("empty"):
                 data["response_plan"] = None
+                if mode == "empty_reason":
+                    data["no_plan_reason"] = "No safe candidate"
+                elif mode == "empty_blank":
+                    data["no_plan_reason"] = "  "
             if mode == "ttl":
                 plan = data["response_plan"]
                 plan["expires_at"] = (
                     datetime.fromisoformat(plan["created_at"]) + timedelta(seconds=1799)
                 ).isoformat()
+            raw_content = json.dumps(data)
+            self.ledger[-1]["raw_response"] = {
+                "choices": [
+                    {"finish_reason": "stop", "message": {"content": raw_content}}
+                ]
+            }
+            payload = {"messages": [{"role": "user", "content": "{}"}]}
+            body = json.dumps(payload).encode()
+            from hashlib import sha256
+
+            self.ledger[-1]["request_sha256"] = canonical_hash(payload)
+            self.recorder(
+                {
+                    "physical_request_id": "synthetic-physical-id",
+                    "payload": payload,
+                    "http_body": body,
+                    "http_body_sha256": sha256(body).hexdigest(),
+                }
+            )
             return schema.model_validate(data)
 
     class FreeWorkflow(InvestigationWorkflow):
@@ -501,15 +547,36 @@ async def test_worker_real_graph_retains_only_verified_persisted_pending(
         async def _exclusive(self, incident_id):
             yield
 
+        async def import_analysis(self, *args):
+            state = await super().import_analysis(*args)
+            if mode.startswith("empty_table"):
+                environment.plans = [SimpleNamespace(response_plan_id="contradiction")]
+            if mode == "empty_incident":
+                environment.incident.status = "awaiting_approval"
+            if mode == "empty_checkpoint":
+                original = self.graph.aget_state
+
+                async def inconsistent(*args):
+                    snapshot = await original(*args)
+                    return SimpleNamespace(values=snapshot.values, next=("approval",))
+
+                self.graph.aget_state = inconsistent
+            return state
+
     @asynccontextmanager
     async def checkpointer(url):
-        yield InMemorySaver()
+        try:
+            yield InMemorySaver()
+        finally:
+            if mode in {"empty_table_checkpoint_close", "empty_table_all_cleanup"}:
+                raise ConnectionError("synthetic checkpointer close failure")
 
     model = Tape()
     calls = []
 
     def make(*args, **kwargs):
         calls.append("model")
+        model.recorder = kwargs["payload_sink"]
         return model
 
     async def probe(*args):
@@ -534,7 +601,7 @@ async def test_worker_real_graph_retains_only_verified_persisted_pending(
     monkeypatch.setattr(worker, "run_service_probe", probe)
 
     def export(*args):
-        if mode == "tool_export":
+        if mode in {"tool_export", "empty_export"}:
             raise RuntimeError("synthetic tool export failure")
         return []
 
@@ -549,7 +616,20 @@ async def test_worker_real_graph_retains_only_verified_persisted_pending(
     assert calls[0] == "probe"
     if mode == "probe":
         assert calls == ["probe"]
-    if retained:
+    if mode in {"empty", "empty_reason", "empty_blank"}:
+        assert result.execution_status == "completed"
+        assert result.diagnosis_status == "succeeded"
+        assert result.product_status == "manual_review"
+        assert result.verification["status"] == "no_plan"
+        assert result.verification["timing_eligible"] is False
+        assert result.verification["no_plan_reason"] == (
+            "No safe candidate" if mode == "empty_reason" else None
+        )
+        assert result.verification["no_plan_reason_missing"] is (mode != "empty_reason")
+        assert not result.errors
+        assert not (tmp_path / "case-resource.json").exists()
+        assert len(result.model_ledger) == 1
+    elif retained:
         assert result.execution_status == "completed"
         assert result.product_status == "awaiting_approval"
         state = json.loads(
@@ -572,6 +652,38 @@ async def test_worker_real_graph_retains_only_verified_persisted_pending(
         assert result.verification is None
     if mode == "transport":
         assert len(result.model_ledger) == 3
+    if mode.startswith("empty_table_"):
+        expected = [
+            {"stage": "e_planning", "type": "ValueError", "category": "application"}
+        ]
+        if mode in {"empty_table_checkpoint_close", "empty_table_all_cleanup"}:
+            expected.append(
+                {
+                    "stage": "checkpointer_close",
+                    "type": "ConnectionError",
+                    "category": "transport",
+                }
+            )
+        if mode in {"empty_table_close", "empty_table_all_cleanup"}:
+            expected.append(
+                {
+                    "stage": "workflow_service_close",
+                    "type": "OSError",
+                    "category": "infrastructure",
+                }
+            )
+        if mode in {"empty_table_cleanup", "empty_table_all_cleanup"}:
+            expected.append(
+                {
+                    "stage": "case_environment_cleanup",
+                    "type": "RuntimeError",
+                    "category": "application",
+                }
+            )
+        assert result.errors == expected
+        assert result.diagnosis_status == result.product_status == "failed"
+        assert not (tmp_path / "case-resource.json").exists()
+        assert len(result.model_ledger) == 1
 
 
 @pytest.mark.parametrize(

@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from contextlib import asynccontextmanager, contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -23,6 +24,7 @@ from sqlalchemy import select
 
 from evals.adapters.e_planning_contracts import EPlanningRequest
 from evals.adapters.e_planning_journal import EPlanningDispatchJournal
+from evals.adapters.e_planning_no_plan import verify_no_plan
 from evals.adapters.environment import case_environment
 from evals.adapters.evidencesoc import _complete_usage
 from evals.adapters.isolation_probe import run_service_probe
@@ -243,6 +245,59 @@ def _persisted_pending(environment, snapshot, provenance):
         return validate_persisted_pending(snapshot, rows[0], incident, provenance)
 
 
+def _persisted_no_plan(environment, snapshot):
+    """The no-plan proof additionally requires actual product persistence."""
+    with environment.sessions() as session:
+        rows = session.scalars(
+            select(ResponsePlanTable).where(
+                ResponsePlanTable.incident_id == environment.incident_id
+            )
+        ).all()
+        incident = session.get(IncidentTable, environment.incident_id)
+        if (
+            snapshot.next != ()
+            or incident is None
+            or incident.status != "manual_review"
+            or rows
+        ):
+            raise ValueError("no-plan actual checkpoint, incident or plan rows differ")
+    return dict(snapshot.values)
+
+
+@contextmanager
+def _audited_context(manager, fail, *, stage):
+    """Record a body failure before a context exit can replace it."""
+    entered = False
+    try:
+        with manager as value:
+            entered = True
+            try:
+                yield value
+            except Exception as error:
+                fail("e_planning", error)
+                raise
+    except Exception as error:
+        fail(stage + "_cleanup" if entered else stage, error)
+        raise
+
+
+@asynccontextmanager
+async def _audited_checkpointer(manager, fail):
+    """Keep the workflow exception even if checkpointer shutdown also fails."""
+    entered = False
+    try:
+        async with manager as value:
+            entered = True
+            try:
+                yield value
+            except Exception as error:
+                fail("e_planning", error)
+                raise
+    except Exception as error:
+        fail("checkpointer_close" if entered else "checkpointer_open", error)
+        raise
+
+
 async def run_e_planning(request: EPlanningRequest, agent_dir: Path) -> AdapterResult:
     request, source, journal, budget_path = validate_planning_inputs(request, agent_dir)
     # This durable one-shot claim is consumed on every later failure or crash.
@@ -259,7 +314,27 @@ async def run_e_planning(request: EPlanningRequest, agent_dir: Path) -> AdapterR
     result = AdapterResult(
         execution_status="failed", diagnosis_status="failed", product_status="failed"
     )
+    recorded_errors = []
+
+    def fail(stage, error):
+        # Keep exception identities only in memory, never raw messages in artifacts.
+        if any(error is recorded for recorded in recorded_errors):
+            return
+        recorded_errors.append(error)
+        result.execution_status = "failed"
+        result.diagnosis_status = "failed"
+        result.product_status = "failed"
+        result.verification = None
+        result.errors.append(
+            {
+                "stage": stage,
+                "type": type(error).__name__,
+                "category": exception_category(error),
+            }
+        )
+
     seed = None
+    no_plan = None
     try:
         spec = request.worker_spec()
         seed = development_seed(request, agent_dir)
@@ -267,7 +342,9 @@ async def run_e_planning(request: EPlanningRequest, agent_dir: Path) -> AdapterR
         policy = InvestigationCapabilities(
             allowed_tools=frozenset(), rag_mode="disabled", verification_enabled=False
         )
-        with case_environment(spec, seed) as environment:
+        with _audited_context(
+            case_environment(spec, seed), fail, stage="case_environment"
+        ) as environment:
             services = None
             try:
                 if environment.incident_id != request.incident_id:
@@ -295,8 +372,8 @@ async def run_e_planning(request: EPlanningRequest, agent_dir: Path) -> AdapterR
                 services.planner_model = model
                 provenance = admission.provenance_for(source, environment.incident_id)
                 with capability_scope(policy):
-                    async with open_checkpointer(
-                        environment.settings.database_url
+                    async with _audited_checkpointer(
+                        open_checkpointer(environment.settings.database_url), fail
                     ) as checkpointer:
                         workflow = InvestigationWorkflow.for_analysis_import(
                             imported_analysis=source,
@@ -317,48 +394,85 @@ async def run_e_planning(request: EPlanningRequest, agent_dir: Path) -> AdapterR
                         snapshot = await workflow.graph.aget_state(
                             workflow._config(environment.incident_id)
                         )
-                        state = _persisted_pending(environment, snapshot, provenance)
+                        is_no_plan = (
+                            snapshot.values.get("response_reason")
+                            == "model_returned_null"
+                        )
+                        if is_no_plan:
+                            state = _persisted_no_plan(environment, snapshot)
+                            no_plan = verify_no_plan(
+                                request=request,
+                                imported=source,
+                                expected_provenance=provenance,
+                                state=state,
+                                ledger=model.ledger,
+                                payloads=recorder.records,
+                                output_root=output,
+                            )
+                        else:
+                            state = _persisted_pending(
+                                environment, snapshot, provenance
+                            )
                         require_received_response(model.ledger)
                         result.tool_ledger = export_tool_ledger(environment)
                         # All immutable artifacts and ledger export must succeed before retention.
                         _write_json(output / "model-ledger.json", model.ledger)
                         _write_json(output / "tool-ledger.json", result.tool_ledger)
                         _write_json(output / "model-payloads.json", recorder.records)
-                        reference = {
-                            **environment.reference(),
-                            "planning_slot_id": request.planning_slot_id,
-                            "registration_sha256": request.registration_sha256,
-                            "request_sha256": canonical_hash(request),
-                            "source_identity": source.source_identity,
-                            "source_package_manifest_sha256": request.source_package_manifest_sha256,
-                            "plan_sha256": canonical_hash(state["response_plan"]),
-                            "snapshot_sha256": state["diagnostic_snapshot_sha256"],
-                            "state_sha256": canonical_hash(state),
-                            "input_sha256": seed["input_sha256"],
-                        }
+                        reference = (
+                            None
+                            if is_no_plan
+                            else {
+                                **environment.reference(),
+                                "planning_slot_id": request.planning_slot_id,
+                                "registration_sha256": request.registration_sha256,
+                                "request_sha256": canonical_hash(request),
+                                "source_identity": source.source_identity,
+                                "source_package_manifest_sha256": request.source_package_manifest_sha256,
+                                "plan_sha256": canonical_hash(state["response_plan"]),
+                                "snapshot_sha256": state["diagnostic_snapshot_sha256"],
+                                "state_sha256": canonical_hash(state),
+                                "input_sha256": seed["input_sha256"],
+                            }
+                        )
                 # Closing the checkpointer and service is also part of successful persistence.
-                await services.aclose()
-                services = None
-                _write_json(output / "case-resource.json", reference)
-                environment.retain()
+                try:
+                    await services.aclose()
+                except Exception as error:
+                    fail("workflow_service_close", error)
+                    raise
+                finally:
+                    services = None
+                if not is_no_plan:
+                    _write_json(output / "case-resource.json", reference)
+                    environment.retain()
                 result.diagnostic_snapshot = state["diagnostic_snapshot"]
-                result.diagnosis_status = "succeeded"
-                result.execution_status = "completed"
-                result.product_status = "awaiting_approval"
+                if not is_no_plan:
+                    result.diagnosis_status = "succeeded"
+                    result.execution_status = "completed"
+                    result.product_status = "awaiting_approval"
                 result.degradation = (
                     [{"kind": "bounded_rule_fallback"}]
                     if state.get("fallback_used")
                     else []
                 )
-                result.verification = {
-                    "status": "awaiting_human_approval",
-                    "case_reference": reference,
-                }
+                result.verification = (
+                    None
+                    if is_no_plan
+                    else {
+                        "status": "awaiting_human_approval",
+                        "case_reference": reference,
+                    }
+                )
                 result.artifact_hashes = {
                     "investigation_state": canonical_hash(state),
                     "import_provenance": canonical_hash(provenance),
-                    "case_resource": canonical_hash(reference),
                 }
+                if not is_no_plan:
+                    result.artifact_hashes["case_resource"] = canonical_hash(reference)
+            except Exception as error:
+                fail("e_planning", error)
+                raise
             finally:
                 if services is not None:
                     try:
@@ -366,23 +480,14 @@ async def run_e_planning(request: EPlanningRequest, agent_dir: Path) -> AdapterR
                         if not (output / "tool-ledger.json").exists():
                             _write_json(output / "tool-ledger.json", result.tool_ledger)
                     except Exception as error:  # noqa: BLE001 - preserve export failure alongside original failure.
-                        result.errors.append(
-                            {
-                                "stage": "tool_ledger_export",
-                                "type": type(error).__name__,
-                                "category": exception_category(error),
-                            }
-                        )
+                        fail("tool_ledger_export", error)
                     finally:
-                        await services.aclose()
+                        try:
+                            await services.aclose()
+                        except Exception as error:  # noqa: BLE001 - shutdown cannot replace the operation failure.
+                            fail("workflow_service_close", error)
     except Exception as error:  # noqa: BLE001 - sanitized failure; resources still clean in context finally.
-        result.errors.append(
-            {
-                "stage": "e_planning",
-                "type": type(error).__name__,
-                "category": exception_category(error),
-            }
-        )
+        fail("e_planning", error)
     finally:
         ledger = model.ledger if model else []
         result.model_ledger = ledger
@@ -418,5 +523,25 @@ async def run_e_planning(request: EPlanningRequest, agent_dir: Path) -> AdapterR
             ("model-payloads.json", recorder.records),
         ):
             if not (output / filename).exists():
-                _write_json(output / filename, value)
+                try:
+                    _write_json(output / filename, value)
+                except Exception as error:  # noqa: BLE001 -- actual export failures cannot be successful no-plan.
+                    result.execution_status = "failed"
+                    result.diagnosis_status = "failed"
+                    result.product_status = "failed"
+                    result.verification = None
+                    result.errors.append(
+                        {
+                            "stage": "artifact_export",
+                            "type": type(error).__name__,
+                            "category": exception_category(error),
+                        }
+                    )
+    # No-plan completion is granted only after service close, required exports
+    # and the case_environment cleanup have all returned successfully.
+    if no_plan is not None and not result.errors:
+        result.execution_status = "completed"
+        result.diagnosis_status = "succeeded"
+        result.product_status = "manual_review"
+        result.verification = no_plan
     return result

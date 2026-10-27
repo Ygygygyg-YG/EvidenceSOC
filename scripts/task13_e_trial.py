@@ -51,6 +51,10 @@ INPUTS = {
 HOST_ENTRYPOINT = "scripts/task13_e_trial.py"
 
 
+class PlanningBlocked(PermissionError):
+    """A verified no-candidate slot cannot authorize review or timing."""
+
+
 def _path(value, *, file=False):
     path = Path(value)
     if not path.is_absolute() or ".." in path.parts:
@@ -465,9 +469,16 @@ class ETrialController:
                 "resources",
                 "provenance",
                 "chat_record",
+                "no_plan_state",
+                "payload_index",
+                "model_ledger",
+                "tool_ledger",
             ):
                 if result.get(key):
                     _read_pin(result[key])
+            for pair in result.get("no_plan_payloads", []):
+                _read_pin(pair["payload"])
+                _read_pin(pair["http_body"])
             return result
         return (
             {"status": "unknown", "reason": "started_without_verified_terminal"}
@@ -541,10 +552,111 @@ class ETrialController:
                 "status",
                 "input_sha256",
                 "model_ledger",
+                "verification",
+                "artifact_hashes",
+                "errors",
+                "diagnosis_status",
+                "diagnostic_snapshot",
+                "resources",
+                "tool_ledger",
             )
         ):
             raise PermissionError("runtime result differs from original worker stdout")
         return captured, worker_output
+
+    def _blocker(self, request):
+        for current in self._requests[: request.ordinal]:
+            terminal = self._terminal(current, "plan")
+            if terminal and terminal.get("status") == "blocked":
+                return terminal
+        return None
+
+    def _require_candidate(self, request):
+        if self._blocker(request):
+            raise PlanningBlocked(
+                "planning blocked: model_returned_null; new scope and slots required"
+            )
+
+    def _no_plan(self, request, value, out, capture):
+        """Independently verify actual portable source, started claim and raw artifacts."""
+        from evidencesoc.agents.analysis_import import PlanningAdmission
+
+        from evals.adapters.analysis_package import verify_portable_analysis_package
+        from evals.adapters.e_planning_no_plan import verify_no_plan
+        from evals.adapters.e_planning_worker import _claim_binding
+
+        if (
+            value.get("product_status") != "manual_review"
+            or value.get("diagnosis_status") != "succeeded"
+            or value.get("errors") != []
+            or (out / "case-resource.json").exists()
+        ):
+            raise PermissionError("no-plan execution or cleanup claims differ")
+        artifacts = {}
+        for key, filename in (
+            ("no_plan_state", "investigation-state.json"),
+            ("provenance", "import-provenance.json"),
+            ("model_ledger", "model-ledger.json"),
+            ("tool_ledger", "tool-ledger.json"),
+            ("payload_index", "model-payloads.json"),
+        ):
+            raw = _path(out / filename, file=True).read_bytes()
+            capture[key] = self._save(key, raw)
+            artifacts[key] = _decode(raw)
+        state, provenance = artifacts["no_plan_state"], artifacts["provenance"]
+        if (
+            value.get("model_ledger") != artifacts["model_ledger"]
+            or value.get("tool_ledger") != artifacts["tool_ledger"]
+            or value.get("diagnostic_snapshot") != state.get("diagnostic_snapshot")
+            or value.get("artifact_hashes")
+            != {
+                "investigation_state": canonical_hash(state),
+                "import_provenance": canonical_hash(provenance),
+            }
+        ):
+            raise PermissionError("no-plan actual artifacts differ from worker stdout")
+        source = verify_portable_analysis_package(
+            _path(self._inputs["runtime_options"]["import_source_dir"]),
+            request.source_package_manifest_sha256,
+        )
+        journal = self._journal()
+        binding = _claim_binding(request, journal.validate_request(request))
+        admission = PlanningAdmission._from_existing_claim(
+            binding, lambda: _claim_binding(request, journal.validate_request(request))
+        )
+        expected = admission.provenance_for(source, request.incident_id)
+        if provenance != expected:
+            raise PermissionError(
+                "no-plan actual import provenance differs from current claim"
+            )
+        verification = verify_no_plan(
+            request=request,
+            imported=source,
+            expected_provenance=expected,
+            state=state,
+            ledger=artifacts["model_ledger"],
+            payloads=artifacts["payload_index"],
+            output_root=out,
+        )
+        if value.get("verification") != verification:
+            raise PermissionError(
+                "no-plan verification differs from actual raw response"
+            )
+        capture["no_plan_payloads"] = []
+        for item in artifacts["payload_index"]:
+            pair = {}
+            for key, index_key in (
+                ("payload", "payload_path"),
+                ("http_body", "http_body_path"),
+            ):
+                path = _path(out / item[index_key], file=True)
+                if not path.is_relative_to(out):
+                    raise PermissionError(
+                        "no-plan payload escapes actual worker output"
+                    )
+                pair[key] = self._save("no-plan-" + key, path.read_bytes())
+            capture["no_plan_payloads"].append(pair)
+        return verification
 
     async def plan(self, ordinal):
         """Explicitly dispatch one fixed planning request once; ambiguity consumes it."""
@@ -554,6 +666,9 @@ class ETrialController:
             prior = self._terminal(request, "plan")
             if prior:
                 return prior
+            blocked = self._blocker(request)
+            if blocked:
+                return blocked
             if binding["status"] == "started":
                 return {"status": "unknown", "reason": "worker_claim_already_started"}
             if ordinal > 1:
@@ -595,6 +710,19 @@ class ETrialController:
                 if value.get("execution_status") != "completed":
                     return self._finish(
                         request, "plan", started, status="failed", **capture
+                    )
+                if (value.get("verification") or {}).get("status") == "no_plan":
+                    verification = self._no_plan(request, value, out, capture)
+                    return self._finish(
+                        request,
+                        "plan",
+                        started,
+                        status="blocked",
+                        reason="model_returned_null",
+                        no_plan_reason=verification["no_plan_reason"],
+                        no_plan_reason_missing=verification["no_plan_reason_missing"],
+                        requires_new_scope_and_slots=True,
+                        **capture,
                     )
                 if value.get("product_status") != "awaiting_approval":
                     raise PermissionError(
@@ -639,6 +767,7 @@ class ETrialController:
                 )
 
     def _retained(self, request):
+        self._require_candidate(request)
         plan = self._terminal(request, "plan")
         if not plan or plan["status"] != "awaiting_approval":
             raise PermissionError("verified original pending worker retention required")
@@ -724,6 +853,7 @@ class ETrialController:
     async def read(self, ordinal):
         """Read the live zero-model packet and save the actual inspected response."""
         request = self._request(ordinal)
+        self._require_candidate(request)
         self._preflight(request, review=True)
         with self._lock():
             value, captured = await self._review(request)
@@ -756,6 +886,7 @@ class ETrialController:
     async def decision(self, ordinal, *, packet_sha256, chat_record):
         """Apply only the supplied actual user's exact current packet decision."""
         request = self._request(ordinal)
+        self._require_candidate(request)
         self._preflight(request, review=True)
         with self._lock():
             previous = self._terminal(request, "decision")
@@ -905,6 +1036,7 @@ class ETrialController:
     async def trial(self, ordinal):
         """Explicit timing v2 trial; six requests and lifecycle policy remain in ETimingCampaign."""
         request = self._request(ordinal)
+        self._require_candidate(request)
         self._preflight(request, review=True)
         with self._lock():
             decided = self._terminal(request, "decision")
@@ -1035,10 +1167,23 @@ def main(argv=None):
             )
         else:
             result = asyncio.run(getattr(host, args.operation)(args.ordinal))
+    except PlanningBlocked:
+        result = {
+            "status": "blocked",
+            "reason": "model_returned_null",
+            "requires_new_scope_and_slots": True,
+            "scope": SCOPE,
+        }
     except (OSError, ValueError, PermissionError, KeyError, TypeError) as error:
         result = {"status": "PENDING", "reason": type(error).__name__, "scope": SCOPE}
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
-    return 0 if result.get("status") != "PENDING" else 2
+    return (
+        3
+        if result.get("status") == "blocked"
+        else 2
+        if result.get("status") == "PENDING"
+        else 0
+    )
 
 
 if __name__ == "__main__":

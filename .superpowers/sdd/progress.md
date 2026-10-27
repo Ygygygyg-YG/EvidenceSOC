@@ -1,5 +1,20 @@
 # Task13 stage E progress — 2026-10-25
 
+## Current continuation — 2026-10-27 (takes precedence over historical entries below)
+
+Continue in `D:/传智杯/.backups/task13-null-plan`, branch `codex/task13-null-plan`, base4953a40. The stage-e frozen controlled source and actual registrations remain unchanged. User chose “先完善后验证再进入真实计时”; no new provider dispatch is authorized for the changed source.
+
+- Actual original E plan1 received a valid HTTP200 null at Oct26 19:29 Beijing, consumed one physical request, cost0.013663; latest audited supplementary development total0.34352132 CNY, physical50, unknown0/inflight0. Original3350prefix unchanged. Do not replay original slots or registration helper.
+- Actual timing remains0/3. Null is not timing credit. Old4953 replacement proposal is held and not authorized. Original scope reply cannot authorize changed schema/prompt/source.
+- Product optional reason/audit implementation committed5352091 and independently reviewed. Recorded original null replay passed without external calls, retry or fallback.
+- Worker/host/shared no-plan proof first full groups135passed. Shared verifier uses product `_plan_hash` for diagnostic seal (ensure_ascii=True), canonical hashes for artifact/state pins. Strict no-plan proof joins actual raw payload/ledger/source/seal and persisted zero-plan/manual_review checkpoint. Host persists blocked and prevents subsequent start/claim/call/timing.
+- Analysis replay only normalizes exact approved optional audit metadata at exact positions;19tests pass after two independently found position gaps closed. Intermediate refreshed package `analysis-portable-slot9-no-plan-20261027-f02d2f3a` predates final position tightening and is not the final candidate. Reexport after stable final code; original114nonmanifestfiles must remain identical.
+- Prior joint run `BASE/audit/no-plan-joint-20261026T163936Z-9248963c` was interrupted with partial log and no completed receipt/junit. It provides no whole-suite pass. New stable joint verification required.
+- Current independent review found primary validation exceptions can be masked by service/context cleanup exceptions. Dedicated agent fixes worker/test only with dual-fault RED/GREEN. Separate agent owns free actual PG/OS null acceptance tests only; synthetic model, no API key/outbound/budget. Another read-only agent reviews remaining host/source verifier changes.
+- Root owns final package reexport, joint receipt, documentation, local commit and a concrete new scope proposal after verification. No merges/publish. Before actual short-TTL plans, retain agreed19:00–00:00 Beijing window and separate actual per-plan approvals. Formal176 and F8 new sends remain outside current scope.
+
+---
+
 Keep the old frozen worktree `D:/传智杯/.backups/task13-remediation` at b1666d3 unchanged. All new code lives in `D:/传智杯/.backups/task13-stage-e`, branch `codex/task13-stage-e`; changes remain uncommitted pending review/integration. Main user's four modified docs remain untouched.
 
 BASE = `D:/传智杯/data/task13/supplements/task13-repair-202610-v2`.

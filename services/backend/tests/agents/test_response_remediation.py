@@ -138,16 +138,22 @@ async def test_eval_response_rejects_unsealed_or_invalid_diagnosis_without_model
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("extra,expected_reason", [
-    ({}, None),
-    ({"no_plan_reason": None}, None),
-    ({"no_plan_reason": ""}, None),
-    ({"no_plan_reason": " \t\n"}, None),
-    ({"no_plan_reason": "  Target evidence is insufficient.  "},
-     "  Target evidence is insufficient.  "),
-])
+@pytest.mark.parametrize(
+    "extra,expected_reason",
+    [
+        ({}, None),
+        ({"no_plan_reason": None}, None),
+        ({"no_plan_reason": ""}, None),
+        ({"no_plan_reason": " \t\n"}, None),
+        (
+            {"no_plan_reason": "  Target evidence is insufficient.  "},
+            "  Target evidence is insufficient.  ",
+        ),
+    ],
+)
 async def test_valid_model_null_keeps_observed_reason_and_does_not_invoke_fallback(
-    extra, expected_reason,
+    extra,
+    expected_reason,
 ):
     model = Tape({"response_plan": None, **extra})
     result = await handlers(model).respond(response_state())
@@ -165,7 +171,8 @@ async def test_valid_model_null_keeps_observed_reason_and_does_not_invoke_fallba
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "branch", ["model_plan", "rule_plan", "benign", "unknown", "invalid_seal", "no_target"],
+    "branch",
+    ["model_plan", "rule_plan", "benign", "unknown", "invalid_seal", "no_target"],
 )
 async def test_response_clears_previous_no_plan_reason_outside_valid_model_null(
     branch,
@@ -293,11 +300,17 @@ async def test_unusable_observed_targets_have_explicit_no_actionable_target(raw)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("extra,expected_reason", [
-    ({}, None),
-    ({"no_plan_reason": " \n\t"}, None),
-    ({"no_plan_reason": "No traceable action is supported."}, "No traceable action is supported."),
-])
+@pytest.mark.parametrize(
+    "extra,expected_reason",
+    [
+        ({}, None),
+        ({"no_plan_reason": " \n\t"}, None),
+        (
+            {"no_plan_reason": "No traceable action is supported."},
+            "No traceable action is supported.",
+        ),
+    ],
+)
 async def test_b3_a4_fixed_http_tape_has_identical_preverification_requests_and_seal(
     tmp_path, monkeypatch, extra, expected_reason
 ):
@@ -400,7 +413,10 @@ async def test_b3_a4_fixed_http_tape_has_identical_preverification_requests_and_
         assert recorded["raw_source"] == "model_ledger"
         assert recorded["ledger_request_ordinal"] == 3
         assert recorded["ledger_request_id"] == "tape-3"
-        assert recorded["raw_content_sha256"] == sha256(json.dumps(tape[2]).encode()).hexdigest()
+        assert (
+            recorded["raw_content_sha256"]
+            == sha256(json.dumps(tape[2]).encode()).hexdigest()
+        )
         assert services.verifications == 0
         assert len(captured) == len(tape)
         assert result["approval"] is None

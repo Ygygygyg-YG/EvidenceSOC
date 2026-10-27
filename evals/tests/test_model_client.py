@@ -23,11 +23,16 @@ class Answer(BaseModel):
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "extra",
-    [{}, {"no_plan_reason": ""}, {"no_plan_reason": " \n"},
-     {"no_plan_reason": "Insufficient evidence."}],
+    [
+        {},
+        {"no_plan_reason": ""},
+        {"no_plan_reason": " \n"},
+        {"no_plan_reason": "Insufficient evidence."},
+    ],
 )
 async def test_tracked_response_prompt_and_valid_null_need_one_physical_request(
-    tmp_path, extra,
+    tmp_path,
+    extra,
 ):
     from evidencesoc.agents.models import ResponseOutput
 
@@ -38,19 +43,26 @@ async def test_tracked_response_prompt_and_valid_null_need_one_physical_request(
         return httpx.Response(
             200,
             json={
-                "id": "offline-null", "model": "offline-model",
-                "choices": [{
-                    "finish_reason": "stop",
-                    "message": {"content": json.dumps({"response_plan": None, **extra})},
-                }],
+                "id": "offline-null",
+                "model": "offline-model",
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {
+                            "content": json.dumps({"response_plan": None, **extra})
+                        },
+                    }
+                ],
                 "usage": {"prompt_tokens": 10, "completion_tokens": 10},
             },
         )
 
     model = TrackedModel(
-        ModelConfig(), api_key="synthetic",
+        ModelConfig(),
+        api_key="synthetic",
         account=BudgetAccount(tmp_path / "synthetic.sqlite"),
-        phase="development", transport=httpx.MockTransport(respond),
+        phase="development",
+        transport=httpx.MockTransport(respond),
     )
     result = await model.structured("respond", ResponseOutput, {})
     assert result.response_plan is None

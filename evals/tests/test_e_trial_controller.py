@@ -26,7 +26,7 @@ def pin(path, value):
 
 
 @pytest.fixture
-def host(tmp_path):
+def host(tmp_path, monkeypatch):
     from evals.adapters.e_planning_journal import register_planning_slots
     from evals.adapters.retained_workflow import build_approval_packet
     from scripts.task13_e_trial import SCOPE, ETrialController, FreeDependencies
@@ -126,6 +126,36 @@ def host(tmp_path):
     calls = []
     live = {"state": deepcopy(source["retained_state"])}
     faults = {}
+    no_plan_artifacts = {}
+
+    def portable_source(root, digest):
+        from evidencesoc.agents.analysis_import import ImportedAnalysis
+
+        from evals.e_planning import planning_requests
+
+        request = planning_requests(planning)[0]
+        provenance = request.source.model_dump(mode="json")
+        provenance.pop("source_identity")
+        values = {
+            key: deepcopy(source["retained_state"].get(key))
+            for key in (
+                "diagnosis",
+                "origin",
+                "classification",
+                "attack_steps",
+                "claims",
+                "evidence",
+                "knowledge",
+            )
+        }
+        return ImportedAnalysis._from_verified_artifacts(
+            values, provenance, lambda: (values, provenance)
+        )
+
+    monkeypatch.setattr(
+        "evals.adapters.analysis_package.verify_portable_analysis_package",
+        portable_source,
+    )
 
     def capture(value, request, options, *, planning_worker=False):
         nonce = f"{len(calls):032x}"
@@ -153,6 +183,13 @@ def host(tmp_path):
                 ("case-resource.json", source["resources"]),
             ):
                 pin(out / filename, content)
+            if no_plan_artifacts:
+                (out / "case-resource.json").unlink()
+                for filename, content in no_plan_artifacts.items():
+                    if isinstance(content, bytes):
+                        (out / filename).write_bytes(content)
+                    else:
+                        pin(out / filename, content)
         raw = json.dumps(value).encode()
         folder = out.with_name(out.name + ".controller")
         folder.mkdir()
@@ -183,7 +220,7 @@ def host(tmp_path):
             expected_registration_sha256=request.registration_sha256,
             expected_authority_sha256=options["planning_authority_sha256"],
         )
-        journal.claim_planning_slot(request)
+        claim = journal.claim_planning_slot(request)
         observed = planning["core_config"]["original_observed_model_binding"]
         model_call = {
             "synthetic": True,
@@ -217,7 +254,132 @@ def host(tmp_path):
             source["retained_state"]["analysis_import_provenance"]["source_row_id"] = (
                 "substituted"
             )
+        if faults.get("no_plan"):
+            from evidencesoc.agents.analysis_import import PlanningAdmission
+            from evidencesoc.agents.graph import _plan_hash
+
+            from evals.adapters.e_planning_worker import _claim_binding
+
+            imported = portable_source(None, None)
+            bound = _claim_binding(request, claim)
+            provenance = PlanningAdmission._from_existing_claim(
+                bound, lambda: bound
+            ).provenance_for(imported, request.incident_id)
+            state = {
+                **imported.product_values(),
+                "incident_id": request.incident_id,
+                "analysis_import_provenance": provenance,
+                "status": "manual_review",
+                "response_reason": "model_returned_null",
+                "stop_reason": "model_returned_null",
+                "plan_source": "model",
+                "response_plan": None,
+                "approval": None,
+                "errors": [],
+                "no_plan_reason": None,
+                "no_plan_reason_missing": True,
+            }
+            seal = {
+                key: deepcopy(state[key])
+                for key in (
+                    "diagnosis",
+                    "origin",
+                    "classification",
+                    "attack_steps",
+                    "claims",
+                    "evidence",
+                    "knowledge",
+                    "analysis_import_provenance",
+                )
+            }
+            seal["sealed_after"] = "analysis_import"
+            state.update(
+                diagnostic_snapshot=seal, diagnostic_snapshot_sha256=_plan_hash(seal)
+            )
+            raw = {"response_plan": None}
+            if "reason" in faults:
+                raw["no_plan_reason"] = faults["reason"]
+                state["no_plan_reason"] = (
+                    faults["reason"] if faults["reason"].strip() else None
+                )
+                state["no_plan_reason_missing"] = state["no_plan_reason"] is None
+            content = json.dumps(raw)
+            state["response_attempts"] = [
+                {
+                    "status": "valid",
+                    "raw_source": "model_ledger",
+                    "attempt": 1,
+                    "ledger_logical_call_id": "logical",
+                    "ledger_request_id": "provider",
+                    "ledger_request_ordinal": 1,
+                    "raw_content_sha256": sha256(content.encode()).hexdigest(),
+                }
+            ]
+            payload = {"messages": [{"role": "user", "content": "{}"}]}
+            body = json.dumps(payload).encode()
+            model_call.update(
+                role="respond",
+                logical_call_id="logical",
+                request_id="provider",
+                request_ordinal=1,
+                physical_request_id="physical",
+                physical_attempt=1,
+                parse_status="valid",
+                request_sha256=canonical_hash(payload),
+            )
+            model_call["raw_response"]["choices"] = [
+                {"finish_reason": "stop", "message": {"content": content}}
+            ]
+            no_plan_artifacts.update(
+                {
+                    "investigation-state.json": state,
+                    "import-provenance.json": provenance,
+                    "model-ledger.json": [model_call],
+                    "tool-ledger.json": [],
+                    "payload.json": payload,
+                    "body.json": body,
+                    "model-payloads.json": [
+                        {
+                            "physical_request_id": "physical",
+                            "payload_path": "payload.json",
+                            "http_body_path": "body.json",
+                            "request_sha256": canonical_hash(payload),
+                            "http_body_sha256": sha256(body).hexdigest(),
+                            "messages_sha256": canonical_hash(payload["messages"]),
+                        }
+                    ],
+                }
+            )
+            value.update(
+                product_status="manual_review",
+                diagnosis_status="succeeded",
+                errors=[],
+                diagnostic_snapshot=seal,
+                model_ledger=[model_call],
+                tool_ledger=[],
+                resources={"planning_slot_id": request.planning_slot_id},
+                verification={
+                    "status": "no_plan",
+                    "response_reason": "model_returned_null",
+                    "no_plan_reason": state["no_plan_reason"],
+                    "no_plan_reason_missing": state["no_plan_reason_missing"],
+                    "timing_eligible": False,
+                    "source_state_sha256": canonical_hash(state),
+                },
+                artifact_hashes={
+                    "investigation_state": canonical_hash(state),
+                    "import_provenance": canonical_hash(provenance),
+                },
+            )
+            if faults.get("no_plan_state"):
+                state["origin"] = "forged"
+                seal["origin"] = "forged"
+                state["diagnostic_snapshot_sha256"] = _plan_hash(seal)
+                value["artifact_hashes"]["investigation_state"] = canonical_hash(state)
+                value["verification"]["source_state_sha256"] = canonical_hash(state)
         result = capture(value, request, options, planning_worker=True)
+        if faults.get("wrapper_field"):
+            result[faults["wrapper_field"]] = {"wrapper_only": True}
         if faults.get("bad_stdout"):
             Path(result["isolation_evidence"]["raw_stdout"]["path"]).write_bytes(
                 b"changed"
@@ -361,6 +523,71 @@ async def test_plan_once_preserves_pending_bytes_and_full_request(host):
         json.loads(Path(first["retained_state"]["path"]).read_bytes())
         == host.source["retained_state"]
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reason", [None, "No safe candidate", "  "])
+async def test_verified_no_plan_is_permanently_blocked_without_trial_credit(
+    host, reason
+):
+    from scripts.task13_e_trial import ETrialController
+
+    host.faults["no_plan"] = True
+    if reason is not None:
+        host.faults["reason"] = reason
+    first = await host.controller.plan(1)
+    assert first["status"] == "blocked"
+    assert first["reason"] == "model_returned_null"
+    assert first["requires_new_scope_and_slots"] is True
+    assert first["no_plan_reason"] == (reason if reason and reason.strip() else None)
+    assert first["no_plan_reason_missing"] is not bool(reason and reason.strip())
+    assert "retained_state" not in first and "resources" not in first
+    assert first["no_plan_state"] and first["payload_index"] and first["model_ledger"]
+    reopened = ETrialController(
+        host.binding["path"], host.binding["sha256"], free_dependencies=host.deps
+    )
+    assert await reopened.plan(1) == first
+    assert (await reopened.plan(2))["status"] == "blocked"
+    assert (await reopened.plan(3))["status"] == "blocked"
+    with pytest.raises(PermissionError, match="blocked"):
+        await reopened.read(1)
+    with pytest.raises(PermissionError, match="blocked"):
+        await reopened.decision(1, packet_sha256="0" * 64, chat_record={})
+    with pytest.raises(PermissionError, match="blocked"):
+        await reopened.trial(1)
+    status = reopened.status()
+    assert status["slots"][0]["planning_status"] == "blocked"
+    assert status["timing"] is None
+    root = Path(host.manifest["output_dir"])
+    assert not (root / "timing").exists()
+    assert len(list((root / "slots").glob("*/plan-started.json"))) == 1
+    assert [call[0] for call in host.calls] == ["plan"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "field",
+    [
+        "verification",
+        "artifact_hashes",
+        "errors",
+        "diagnosis_status",
+        "diagnostic_snapshot",
+        "resources",
+        "tool_ledger",
+    ],
+)
+async def test_wrapper_only_no_plan_claims_are_unknown(host, field):
+    host.faults.update(no_plan=True, wrapper_field=field)
+    assert (await host.controller.plan(1))["status"] == "unknown"
+    assert host.controller.status()["timing"] is None
+
+
+@pytest.mark.asyncio
+async def test_forged_rehashed_no_plan_state_is_not_a_blocked_terminal(host):
+    host.faults.update(no_plan=True, no_plan_state=True)
+    assert (await host.controller.plan(1))["status"] == "unknown"
+    assert host.controller.status()["timing"] is None
 
 
 @pytest.mark.asyncio
