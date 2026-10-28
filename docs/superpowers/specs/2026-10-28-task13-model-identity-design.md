@@ -14,11 +14,15 @@
 
 manifest不包含其完整authority或后续确认单摘要，以避免自引用。外部authority包含最终manifest摘要、采用决定和具体确认单摘要，数据库追加链同时绑定两者。工程A决定的类型与真实采用authority严格不同，不能混用。
 
+冻结依赖顺序为core/source receipt/source epoch → identity manifest → 具体确认单 → 外部采用authority → 最终host manifest。确认单不能直接或间接引用最终authority摘要；它只固定身份manifest并描述所需采用权限。只有后生成的host manifest固定authority摘要，从而避免确认单与authority的第二类摘要循环。
+
 core_config可选model_identity描述符为{id,response_model,fingerprint}；保留original_observed_model_binding作为历史锚点。最终identity manifest摘要位于独立的可选model_identity_binding={model_epoch_id,model_identity_sha256}，随源epoch执行绑定/请求显式传入，不能放回被manifest绑定的core形成环。无该可选字段的旧序列化和哈希完全不变。source v1 manifest不增字段、不改历史。
 
 ## 账本与停机
 
 BudgetAccount只增加事务内派发守卫扩展点，原总额/开发限额预留逻辑继续复用。SupplementBudgetAccount显式身份模式要求已存在的source与model登记；构造只读，每次预留事务检查二者为最新、身份hash/用途匹配、无新身份停机。结算仍接受已退役但原映射正确的请求，不能因退役或停机丢费用。请求到model记录的映射与原预留、source映射同一事务追加，禁止UPDATE/DELETE；物理稳定键保留旧形状，身份归属独立映射并进入审计，防止换身份绕过语义重放。
+
+require_model_identity_in_transaction及其只读入口显式接收purpose；host、worker和账户传入实际用途，预留事务内重新检查。用途不由manifest自动选择或扩展。
 
 新身份只允许在显式采用记录中限定地承接原observable model version changed停机；原config身份和halt不删除、不替换。余额/认证/403/超出费用上界/未知原因等全局停机不可承接。SQL持久事件捕获全局非身份停机，防止旧进程随后写身份停机掩盖前因；缺失或篡改所需schema/链时显式身份路径拒绝。
 

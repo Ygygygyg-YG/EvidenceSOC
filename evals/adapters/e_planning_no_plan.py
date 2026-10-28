@@ -1,7 +1,8 @@
 """Static no-plan proof shared by the worker and independently admitting host.
 
 Callers supply a trusted portable source and provenance from the actual existing
-started claim. This module neither registers nor claims slots or reads budgets.
+started claim. Explicit identity mode reads the adopted identity and reservation
+mapping from the budget. This module never mutates budgets or claims slots.
 """
 
 from __future__ import annotations
