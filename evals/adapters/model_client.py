@@ -188,6 +188,18 @@ class BudgetAccount:
         ):
             raise ValueError("settlement requires the bound supplement account")
 
+    def _check_dispatch_in_transaction(self, db):
+        halt = db.execute("SELECT value FROM config WHERE key='halt'").fetchone()
+        if halt:
+            raise RuntimeError("campaign halted: " + halt[0])
+        if (
+            db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='budget_halt_events'"
+            ).fetchone()
+            and db.execute("SELECT 1 FROM budget_halt_events LIMIT 1").fetchone()
+        ):
+            raise RuntimeError("campaign halted: durable global blocker")
+
     def reserve(
         self,
         request_key: str,
@@ -207,9 +219,7 @@ class BudgetAccount:
             raise ValueError("invalid reservation")
         with self._db() as db:
             db.execute("BEGIN IMMEDIATE")
-            halt = db.execute("SELECT value FROM config WHERE key='halt'").fetchone()
-            if halt:
-                raise RuntimeError("campaign halted: " + halt[0])
+            self._check_dispatch_in_transaction(db)
             if db.execute(
                 "SELECT 1 FROM reservations WHERE request_key=?", (request_key,)
             ).fetchone():
@@ -272,7 +282,9 @@ class BudgetAccount:
             )
             self._settle_in_transaction(db, reservation, actual, metadata)
 
-    def bind_model(self, response_model: str, fingerprint: str | None):
+    def bind_model(
+        self, response_model: str, fingerprint: str | None, *, reservation_id=None
+    ):
         with self._db() as db:
             db.execute("BEGIN IMMEDIATE")
             for key, value in [
@@ -586,9 +598,15 @@ class TrackedModel:
             )
             actual = cost_cny(data.get("usage"), start)
             record["cost_cny"] = actual
-            if not data.get("model"):
+            if not data.get("model") and not getattr(
+                self.account, "_model_epoch_id", None
+            ):
                 raise ValueError("missing response model identity")
-            self.account.bind_model(data["model"], data.get("system_fingerprint"))
+            self.account.bind_model(
+                data.get("model"),
+                data.get("system_fingerprint"),
+                reservation_id=reservation,
+            )
             choice = data["choices"][0]
             if choice.get("finish_reason") != "stop":
                 record["parse_status"] = "incomplete"

@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import json
 import re
+import uuid
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
@@ -103,6 +104,8 @@ class SupplementBudgetAccount(BudgetAccount):
         total_cny: float = 100,
         dev_cny: float = 15,
         epoch_id: str | None = None,
+        model_epoch_id: str | None = None,
+        model_identity_sha256: str | None = None,
     ):
         if (
             campaign_id != CAMPAIGN_ID
@@ -121,6 +124,17 @@ class SupplementBudgetAccount(BudgetAccount):
         )
         self._stable_keys: dict[str, tuple[str, int]] = {}
         self._epoch_id = epoch_id
+        self._model_epoch_id = model_epoch_id
+        self._model_identity_sha256 = model_identity_sha256
+        if (model_epoch_id is None) != (model_identity_sha256 is None) or (
+            model_epoch_id is not None
+            and (
+                epoch_id is None
+                or not _identity(model_epoch_id)
+                or not _sha256(model_identity_sha256)
+            )
+        ):
+            raise ValueError("model identity requires a paired pin and source epoch")
         if epoch_id is not None:
             from evals.adapters.source_epochs import require_registered_epoch
 
@@ -145,6 +159,20 @@ class SupplementBudgetAccount(BudgetAccount):
             )
             self._epoch_manifest_sha256 = canonical_hash(manifest)
             self._epoch_budget_identity = manifest["budget_identity"]
+            if model_epoch_id is not None:
+                from evals.adapters.model_identities import (
+                    require_registered_model_identity,
+                )
+
+                require_registered_model_identity(
+                    self.path,
+                    model_epoch_id,
+                    epoch_id=epoch_id,
+                    source_sha256=source_sha256,
+                    config_sha256=config_sha256,
+                    purpose=purpose,
+                    manifest_sha256=model_identity_sha256,
+                )
             return
         super().__init__(path, total_cny=total_cny, dev_cny=dev_cny)
         with self._db() as db:
@@ -194,7 +222,85 @@ class SupplementBudgetAccount(BudgetAccount):
         value = asdict(self._binding)
         if self._epoch_id is not None:
             value["epoch_id"] = self._epoch_id
+        if self._model_epoch_id is not None:
+            value["model_epoch_id"] = self._model_epoch_id
+            value["model_identity_sha256"] = self._model_identity_sha256
         return value
+
+    def _require_model(self, db, *, latest=False):
+        from evals.adapters.model_identities import (
+            require_model_identity_in_transaction,
+        )
+
+        return require_model_identity_in_transaction(
+            db,
+            self._model_epoch_id,
+            epoch_id=self._epoch_id,
+            source_sha256=self._binding.source_sha256,
+            config_sha256=self._binding.config_sha256,
+            purpose=self._binding.purpose,
+            manifest_sha256=self._model_identity_sha256,
+            latest=latest,
+        )
+
+    def _check_dispatch_in_transaction(self, db):
+        if self._model_epoch_id is None:
+            return super()._check_dispatch_in_transaction(db)
+        from evals.adapters.model_identities import IDENTITY_HALT
+
+        self._require_epoch(db, latest=True)
+        m = self._require_model(db, latest=True)
+        config = dict(db.execute("SELECT key,value FROM config"))
+        if (
+            any(config.get(k) != v for k, v in m["inherited_global"].items())
+            or config.get("halt") != IDENTITY_HALT
+        ):
+            raise RuntimeError("campaign halted: inherited identity differs")
+        if (
+            db.execute("SELECT 1 FROM budget_halt_events LIMIT 1").fetchone()
+            or db.execute(
+                "SELECT 1 FROM supplement_model_halts WHERE model_epoch_id=? LIMIT 1",
+                (self._model_epoch_id,),
+            ).fetchone()
+        ):
+            raise RuntimeError("campaign halted: durable blocker")
+
+    def bind_model(self, response_model, fingerprint, *, reservation_id=None):
+        if self._model_epoch_id is None:
+            return super().bind_model(
+                response_model, fingerprint, reservation_id=reservation_id
+            )
+        with self._db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            m = self._require_model(db)
+            if reservation_id is not None:
+                row = db.execute(
+                    "SELECT model_epoch_id,identity_manifest_sha256 FROM supplement_request_models WHERE reservation_id=?",
+                    (reservation_id,),
+                ).fetchone()
+                if row != (self._model_epoch_id, self._model_identity_sha256):
+                    raise ValueError("response identity mapping differs")
+            expected = m["expected_model"]
+            if (
+                response_model != expected["response_model"]
+                or fingerprint != expected["fingerprint"]
+            ):
+                evidence = canonical_hash([response_model, fingerprint, reservation_id])
+                db.execute(
+                    "INSERT INTO supplement_model_halts VALUES (?,?,?,?,?,?,?,?)",
+                    (
+                        uuid.uuid4().hex,
+                        self._model_epoch_id,
+                        reservation_id,
+                        "response_identity_mismatch",
+                        response_model,
+                        fingerprint,
+                        evidence,
+                        datetime.now(UTC).isoformat(),
+                    ),
+                )
+                db.commit()
+                raise RuntimeError("response model identity differs")
 
     def _require_epoch(self, db, *, latest=False):
         if self._epoch_id is not None:
@@ -229,7 +335,10 @@ class SupplementBudgetAccount(BudgetAccount):
         # A stable call ID is supplied by the trusted controller, never inferred.
         if not _identity(explicit_call_id):
             raise ValueError("supplement requires an explicit stable model call ID")
-        key = canonical_hash([self.request_binding(), logical_key, physical_attempt])
+        binding = asdict(self._binding)
+        if self._epoch_id is not None:
+            binding["epoch_id"] = self._epoch_id
+        key = canonical_hash([binding, logical_key, physical_attempt])
         # The legacy alias also needs this hint after epoch zero is registered:
         # TrackedModel's persisted logical_call_id is random on reopen.
         self._stable_keys[key] = (logical_key, physical_attempt)
@@ -378,6 +487,12 @@ class SupplementBudgetAccount(BudgetAccount):
                 (reservation, self._epoch_id),
             )
 
+        if self._model_epoch_id is not None:
+            db.execute(
+                "INSERT INTO supplement_request_models VALUES (?,?,?)",
+                (reservation, self._model_epoch_id, self._model_identity_sha256),
+            )
+
     def _settle_in_transaction(self, db, reservation, actual, metadata) -> None:
         if not isinstance(metadata, dict) or set(metadata) != _END_FIELDS:
             raise ValueError("complete physical settlement metadata is required")
@@ -389,6 +504,24 @@ class SupplementBudgetAccount(BudgetAccount):
         if row is None or tuple(row[:7]) != tuple(asdict(self._binding).values()):
             raise ValueError("settlement does not match the bound supplement binding")
         self._require_epoch(db)
+        if self._model_epoch_id is not None:
+            self._require_model(db)
+            mapping = db.execute(
+                "SELECT model_epoch_id,identity_manifest_sha256 FROM supplement_request_models WHERE reservation_id=?",
+                (reservation,),
+            ).fetchone()
+            if mapping != (self._model_epoch_id, self._model_identity_sha256):
+                raise ValueError("settlement model identity mapping differs")
+        elif (
+            db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='supplement_request_models'"
+            ).fetchone()
+            and db.execute(
+                "SELECT 1 FROM supplement_request_models WHERE reservation_id=?",
+                (reservation,),
+            ).fetchone()
+        ):
+            raise ValueError("settlement model identity mapping differs")
         if db.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='supplement_request_epochs'"
         ).fetchone():
@@ -456,6 +589,11 @@ class SupplementBudgetAccount(BudgetAccount):
                 (self._binding.campaign_id,),
             ).fetchall()
             config = dict(db.execute("SELECT key,value FROM config").fetchall())
+            try:
+                self._check_dispatch_in_transaction(db)
+                effective_halted = False
+            except (RuntimeError, ValueError):
+                effective_halted = True
             total, dev = db.execute(
                 "SELECT COALESCE(SUM(COALESCE(actual,upper)),0),"
                 "COALESCE(SUM(CASE WHEN phase='development' THEN COALESCE(actual,upper) ELSE 0 END),0) "
@@ -501,8 +639,15 @@ class SupplementBudgetAccount(BudgetAccount):
             else max(0, item["remaining_cny"])
             for purpose, item in purposes.items()
         )
+        if self._model_epoch_id is not None:
+            purpose_available = max(0, purposes[self._binding.purpose]["remaining_cny"])
+            if self._binding.purpose == "development":
+                purpose_available = min(purpose_available, dev_available)
         return {
             "campaign_id": self._binding.campaign_id,
+            "model_epoch_id": self._model_epoch_id,
+            "model_identity_sha256": self._model_identity_sha256,
+            "effective_halted": effective_halted,
             "limit_cny": SUPPLEMENT_LIMIT,
             "accounted_cny": amount,
             "known_cny": sum(item["known_cny"] for item in purposes.values()),
@@ -518,7 +663,7 @@ class SupplementBudgetAccount(BudgetAccount):
             "held_contingency_cny": HELD_CONTINGENCY,
             "halted": bool(config.get("halt")),
             "dispatchable_cny": 0
-            if config.get("halt")
+            if effective_halted
             else min(
                 total_available,
                 max(0, SUPPLEMENT_LIMIT - HELD_CONTINGENCY - amount),
