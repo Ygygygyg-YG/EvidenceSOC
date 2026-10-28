@@ -284,6 +284,12 @@ def validate_e_planning_host(
     if (
         options["phase"] != ("verification" if review else "development")
         or options.get("budget_identity") != request.budget_identity
+        or options.get("model_identity_binding")
+        != (
+            request.model_identity_binding.model_dump(mode="json")
+            if request.model_identity_binding is not None
+            else None
+        )
     ):
         raise ValueError("planning phase or original budget identity differs")
     validate_exported_source(
@@ -303,6 +309,10 @@ def validate_e_planning_host(
         manifest_sha256=request.epoch_manifest_sha256,
         latest=True,
     )
+    if request.model_identity_binding is not None:
+        from evals.adapters.model_identity_runtime import require_dispatch_identity
+
+        require_dispatch_identity(budget_path, request)
     actual_runtime = e_planning_runtime_binding(options, dependency_receipt)
     if (
         epoch["source_commit"] != request.source_commit
@@ -320,6 +330,19 @@ def validate_e_planning_host(
         "evals/adapters/analysis_import.py",
         "evals/e_planning.py",
         "evals/adapters/e_planning_review.py",
+        *(
+            {
+                "evals/adapters/model_identity_runtime.py",
+                "evals/adapters/model_identities.py",
+                "evals/adapters/model_client.py",
+                "evals/adapters/e_planning_no_plan.py",
+                "evals/contracts.py",
+                "evals/adapters/budget_v2.py",
+                "evals/adapters/source_epochs.py",
+            }
+            if request.model_identity_binding is not None
+            else set()
+        ),
         "evals/adapters/verification_worker.py",
     }
     if not required_entries.issubset(epoch["entrypoints"]) or any(
@@ -349,6 +372,10 @@ def e_planning_worker_probe(request) -> dict:
     from evals.adapters.e_planning_journal import EPlanningDispatchJournal
     from evals.contracts import canonical_hash
 
+    if request.model_identity_binding is not None:
+        from evals.adapters.model_identity_runtime import require_dispatch_identity
+
+        require_dispatch_identity(Path(os.environ["TASK13_BUDGET_DB"]), request)
     source = Path(os.environ["TASK13_IMPORT_SOURCE_DIR"])
     imported = verify_portable_analysis_package(
         source, request.source_package_manifest_sha256
@@ -1063,6 +1090,12 @@ async def run_container(spec: dict, agent_dir: Path, options: dict) -> dict:
     if epoch_regression:
         from evals.adapters.epoch_remediation import validate_epoch_runtime
 
+        if options.get("model_identity_binding") != (
+            request.model_identity_binding.model_dump(mode="json")
+            if request.model_identity_binding is not None
+            else None
+        ):
+            raise ValueError("regression runtime model identity differs")
         epoch_runtime = e_planning_runtime_binding(options, dependency_receipt)
         epoch_manifest = validate_epoch_runtime(
             request,
@@ -1414,6 +1447,12 @@ def main() -> None:
             if request.schema_version == E_PLANNING_REVIEW_SCHEMA
             else request
         )
+    elif os.environ.get("TASK13_EPOCH_HOST_BUDGET_PATH"):
+        request = _worker_request(json.loads(Path("/app/spec.json").read_bytes()))
+        if request.model_identity_binding is not None:
+            from evals.adapters.model_identity_runtime import require_dispatch_identity
+
+            require_dispatch_identity(Path(os.environ["TASK13_BUDGET_DB"]), request)
     sys.stderr.write(PROBE_PREFIX + json.dumps(probe, sort_keys=True) + "\n")
     sys.stderr.flush()
     if sys.stdin.readline().strip() != "GO:" + nonce:

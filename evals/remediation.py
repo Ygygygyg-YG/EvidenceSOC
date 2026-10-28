@@ -74,10 +74,35 @@ def prepare_bundle(
         if (
             purpose != "regression"
             or not isinstance(epoch_binding, dict)
-            or set(epoch_binding) != {"epoch_id", "epoch_manifest_sha256"}
+            or set(epoch_binding)
+            not in (
+                {"epoch_id", "epoch_manifest_sha256"},
+                {"epoch_id", "epoch_manifest_sha256", "model_identity_binding"},
+            )
         ):
             raise ValueError("complete explicit regression epoch binding is required")
         request_class = EpochRemediationRequest
+        reference = epoch_binding.get("model_identity_binding")
+        if "model_identity_binding" in epoch_binding and reference is None:
+            raise ValueError("explicit null model identity reference is invalid")
+        descriptor = config.get("model_identity")
+        if (reference is None) != (descriptor is None):
+            raise ValueError(
+                "model identity descriptor and reference must both be present"
+            )
+        if reference is not None:
+            from evals.adapters.e_planning_contracts import ModelIdentityBinding
+
+            parsed = ModelIdentityBinding.model_validate(reference)
+            if (
+                not isinstance(descriptor, dict)
+                or set(descriptor) != {"id", "response_model", "fingerprint"}
+                or any(
+                    not isinstance(v, str) or not v.strip() for v in descriptor.values()
+                )
+                or descriptor["id"] != parsed.model_epoch_id
+            ):
+                raise ValueError("model identity descriptor differs from reference")
     if (
         not isinstance(config.get("budget_identity"), dict)
         or config["budget_identity"].get("baseline_count", 0) < 3350
@@ -233,6 +258,38 @@ def validate_bundle(bundle):
     ):
         raise ValueError("original budget identity differs")
     requests = [request_class.model_validate(row["request"]) for row in bundle["rows"]]
+    if epoch_bound:
+        reference = bundle.get("model_identity_binding")
+        if "model_identity_binding" in bundle and reference is None:
+            raise ValueError("explicit null model identity reference is invalid")
+        descriptor = bundle["config"].get("model_identity")
+        if (reference is None) != (descriptor is None):
+            raise ValueError(
+                "model identity descriptor and reference must both be present"
+            )
+        if reference is not None:
+            from evals.adapters.e_planning_contracts import ModelIdentityBinding
+
+            parsed = ModelIdentityBinding.model_validate(reference)
+            if (
+                not isinstance(descriptor, dict)
+                or set(descriptor) != {"id", "response_model", "fingerprint"}
+                or any(
+                    not isinstance(v, str) or not v.strip() for v in descriptor.values()
+                )
+                or descriptor["id"] != parsed.model_epoch_id
+            ):
+                raise ValueError("model identity descriptor differs from reference")
+        if any(
+            (
+                r.model_identity_binding.model_dump(mode="json")
+                if r.model_identity_binding is not None
+                else None
+            )
+            != reference
+            for r in requests
+        ):
+            raise ValueError("regression request model identity differs from bundle")
     if len(requests) != (36 if bundle["purpose"] == "development" else 176):
         raise ValueError("complete supplemental matrix required")
     if len({request.slot_id for request in requests}) != len(requests):

@@ -277,3 +277,126 @@ def test_no_plan_rejects_contradictory_or_forged_proofs(proof, tamper):
         state["plan_source"] = "rule_fallback"
     with pytest.raises((ValueError, PermissionError)):
         verify(proof)
+
+
+def test_explicit_no_plan_requires_independent_budget_authority(proof):
+    from evals.adapters.e_planning_no_plan import verify_no_plan
+
+    proof["request"] = proof["request"].model_copy(
+        update={
+            "model_identity_binding": {
+                "model_epoch_id": "model-1",
+                "model_identity_sha256": "9" * 64,
+            }
+        }
+    )
+    with pytest.raises(ValueError, match="budget"):
+        verify_no_plan(**proof)
+
+
+@pytest.fixture
+def explicit_identity_proof(proof, tmp_path):
+    from evals.adapters.budget_v2 import SupplementBudgetAccount
+    from evals.adapters.e_planning_contracts import (
+        EPlanningRequest,
+        ModelIdentityBinding,
+    )
+    from evals.adapters.source_epochs import require_registered_epoch
+    from evals.tests.test_budget_v2 import finished, started
+    from evals.tests.test_model_identities import adopt, fixture
+
+    path, manifest = fixture(tmp_path / "identity-budget")
+    adopt(path, manifest)
+    source = require_registered_epoch(
+        path,
+        manifest["epoch_id"],
+        source_sha256=manifest["source_sha256"],
+        config_sha256=manifest["config_sha256"],
+    )
+    identity = {
+        "model_epoch_id": manifest["model_epoch_id"],
+        "model_identity_sha256": canonical_hash(manifest),
+    }
+    value = proof["request"].model_dump(mode="json")
+    value.update(
+        epoch_id=manifest["epoch_id"],
+        epoch_manifest_sha256=manifest["source_manifest_sha256"],
+        source_commit=source["source_commit"],
+        source_sha256=manifest["source_sha256"],
+        budget_source_receipt_sha256=manifest["source_sha256"],
+        config_sha256=manifest["config_sha256"],
+        core_config_sha256=manifest["config_sha256"],
+        budget_identity=manifest["budget_identity"],
+        model_identity_binding=identity,
+    )
+    request = EPlanningRequest.model_validate(value)
+    assert isinstance(request.model_identity_binding, ModelIdentityBinding)
+    proof["request"] = request
+    proof["budget_path"] = path
+    provenance = proof["expected_provenance"]
+    claim = provenance["planning_admission"]
+    claim.update(
+        request_sha256=canonical_hash(request),
+        epoch_id=request.epoch_id,
+        epoch_manifest_sha256=request.epoch_manifest_sha256,
+        budget_source_receipt_sha256=request.budget_source_receipt_sha256,
+        model_identity_binding=identity,
+    )
+    state = proof["state"]
+    state["analysis_import_provenance"] = deepcopy(provenance)
+    state["diagnostic_snapshot"]["analysis_import_provenance"] = deepcopy(provenance)
+    state["diagnostic_snapshot_sha256"] = _plan_hash(state["diagnostic_snapshot"])
+    record = proof["ledger"][0]
+    hint = "e-planning-respond-" + canonical_hash(request.planning_slot_id)
+    logical_key = canonical_hash(["respond", "ResponseOutput", hint])
+    account = SupplementBudgetAccount(path, **request.budget_binding())
+    physical = account.physical_request_key(logical_key, 1, explicit_call_id=hint)
+    metadata = started(
+        physical,
+        role="respond",
+        logical_call_id=record["logical_call_id"],
+        request_sha256=record["request_sha256"],
+    )
+    reservation = account.reserve(physical, 0.1, "development", metadata=metadata)
+    account.settle(
+        reservation,
+        0.01,
+        metadata=finished(
+            physical,
+            parse_status="valid",
+            provider_request_id=record["request_id"],
+            error_type=None,
+            usage_missing_reason=None,
+        ),
+    )
+    record.update(
+        **identity,
+        reservation_id=reservation,
+        physical_request_id=physical,
+        response_model=manifest["expected_model"]["response_model"],
+        system_fingerprint=manifest["expected_model"]["fingerprint"],
+    )
+    record["raw_response"].update(
+        model=manifest["expected_model"]["response_model"],
+        system_fingerprint=manifest["expected_model"]["fingerprint"],
+    )
+    proof["payloads"][0]["physical_request_id"] = physical
+    return proof
+
+
+def test_explicit_identity_null_proof_requires_adopted_raw_and_mapping(
+    explicit_identity_proof,
+):
+    from evals.adapters.e_planning_no_plan import verify_no_plan
+
+    result = verify_no_plan(**explicit_identity_proof)
+    assert result["status"] == "no_plan"
+    assert result["timing_eligible"] is False
+    for mutation in ("model_epoch_id", "reservation_id", "raw_fingerprint"):
+        altered = deepcopy(explicit_identity_proof)
+        if mutation == "raw_fingerprint":
+            altered["ledger"][0]["raw_response"]["system_fingerprint"] = "other"
+        else:
+            altered["ledger"][0][mutation] = "other"
+        with pytest.raises(ValueError):
+            verify_no_plan(**altered)

@@ -84,6 +84,15 @@ def require_received_response(ledger):
 def _claim_binding(request, receipt):
     return {
         **receipt,
+        **(
+            {
+                "model_identity_binding": request.model_identity_binding.model_dump(
+                    mode="json"
+                )
+            }
+            if request.model_identity_binding is not None
+            else {}
+        ),
         **{
             key: getattr(request, key)
             for key in (
@@ -124,6 +133,10 @@ def validate_planning_inputs(request, agent_dir):
         manifest_sha256=request.epoch_manifest_sha256,
         latest=True,
     )
+    if request.model_identity_binding is not None:
+        from evals.adapters.model_identity_runtime import require_dispatch_identity
+
+        require_dispatch_identity(budget_path, request)
     if epoch["source_commit"] != request.source_commit or epoch[
         "runtime_binding"
     ] != json.loads(os.environ["TASK13_RUNTIME_BINDING"]):
@@ -140,6 +153,18 @@ def validate_planning_inputs(request, agent_dir):
         "evals/adapters/analysis_import.py",
         "evals/e_planning.py",
     }
+    if request.model_identity_binding is not None:
+        required.update(
+            {
+                "evals/adapters/model_identity_runtime.py",
+                "evals/adapters/model_identities.py",
+                "evals/adapters/model_client.py",
+                "evals/adapters/e_planning_no_plan.py",
+                "evals/contracts.py",
+                "evals/adapters/budget_v2.py",
+                "evals/adapters/source_epochs.py",
+            }
+        )
     entries, files = epoch["entrypoints"], receipt["files"]
     if (
         not required <= entries.keys()
@@ -408,6 +433,7 @@ async def run_e_planning(request: EPlanningRequest, agent_dir: Path) -> AdapterR
                                 ledger=model.ledger,
                                 payloads=recorder.records,
                                 output_root=output,
+                                budget_path=budget_path,
                             )
                         else:
                             state = _persisted_pending(

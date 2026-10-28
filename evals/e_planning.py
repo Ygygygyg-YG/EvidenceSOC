@@ -13,6 +13,7 @@ from evals.adapters.e_planning_contracts import (
     EPlanningRequest,
     EPlanningSource,
     ESelectedSourceLineage,
+    ModelIdentityBinding,
     OriginalBudgetIdentity,
     build_selected_source_lineage,
     slot_identity,
@@ -44,6 +45,9 @@ class EpochBinding(Contract):
     source_commit: str = Field(pattern=r"^[0-9a-f]{40}$")
     source_sha256: str = Field(pattern=SHA256)
     budget_identity: OriginalBudgetIdentity
+    model_identity_binding: ModelIdentityBinding | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 def _selected_source(selection):
@@ -133,6 +137,19 @@ class EPlanningRegistration(Contract):
 
     @model_validator(mode="after")
     def fixed_registration(self) -> Self:
+        descriptor = self.core_config.get("model_identity")
+        reference = self.epoch_binding.model_identity_binding
+        if (descriptor is None) != (reference is None):
+            raise ValueError(
+                "model identity descriptor and reference must both be present"
+            )
+        if reference is not None and (
+            not isinstance(descriptor, dict)
+            or set(descriptor) != {"id", "response_model", "fingerprint"}
+            or any(not isinstance(v, str) or not v.strip() for v in descriptor.values())
+            or descriptor["id"] != reference.model_epoch_id
+        ):
+            raise ValueError("model identity descriptor differs from reference")
         first, count = _selected_source(self.source_selection_receipt)
         if (
             canonical_hash(self.source_selection_receipt)

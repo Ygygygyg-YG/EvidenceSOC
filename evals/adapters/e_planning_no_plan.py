@@ -48,11 +48,25 @@ def _artifact(root, name):
 
 
 def verify_no_plan(
-    *, request, imported, expected_provenance, state, ledger, payloads, output_root
+    *,
+    request,
+    imported,
+    expected_provenance,
+    state,
+    ledger,
+    payloads,
+    output_root,
+    budget_path=None,
 ):
     """Reparse raw null and bind source, exact admission, attempts and HTTP bodies."""
     from scripts.task13_worker_runtime import _validate_planning_source
 
+    if request.model_identity_binding is not None:
+        if budget_path is None:
+            raise ValueError("independent budget identity authority required")
+        from evals.adapters.model_identity_runtime import verify_identity_ledger
+
+        verify_identity_ledger(Path(budget_path), request, ledger)
     imported.revalidate()
     _validate_planning_source(request, imported)
     seal = state.get("diagnostic_snapshot")

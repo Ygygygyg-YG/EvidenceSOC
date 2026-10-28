@@ -414,6 +414,11 @@ def _validate_replicate_source(registration, registered, source):
     request = registered["planning_request"]
     dispatch = registration["planning_dispatch_registration_receipt"]
     admission = {
+        **(
+            {"model_identity_binding": request["model_identity_binding"]}
+            if "model_identity_binding" in request
+            else {}
+        ),
         "planning_slot_id": request["planning_slot_id"],
         "request_sha256": registered["planning_request_sha256"],
         "registration_sha256": registration["planning_registration_sha256"],

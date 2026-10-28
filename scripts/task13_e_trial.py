@@ -284,6 +284,12 @@ class ETrialController:
             options.get("phase") != "development"
             or options.get("source_commit") != request.source_commit
             or options.get("budget_identity") != request.budget_identity
+            or options.get("model_identity_binding")
+            != (
+                request.model_identity_binding.model_dump(mode="json")
+                if request.model_identity_binding is not None
+                else None
+            )
             or options.get("planning_authority_sha256") != canonical_hash(authority)
             or str(_path(options["import_dispatch_path"])) != authority["journal_path"]
         ):
@@ -353,9 +359,25 @@ class ETrialController:
             raise PermissionError(
                 "model runtime halted after observed identity rejection"
             )
+        options = self._inputs["runtime_options"]
+        request = self._requests[0]
+        if request.model_identity_binding is not None:
+            from evals.adapters.model_identity_runtime import require_dispatch_identity
+
+            manifest = require_dispatch_identity(
+                _path(Path(options["budget_dir"]) / "campaign.sqlite", file=True),
+                request,
+            )
+            if manifest["expected_model"] != self._planning["core_config"].get(
+                "model_identity"
+            ) or self._observed_model != {
+                key: manifest["inherited_global"][key]
+                for key in ("response_model", "fingerprint")
+            }:
+                raise PermissionError("adopted model identity descriptor differs")
+            return
         from evals.adapters.remediation_worker import _budget_snapshot
 
-        options = self._inputs["runtime_options"]
         values, _ = _budget_snapshot(
             _path(Path(options["budget_dir"]) / "campaign.sqlite", file=True),
             self._requests[0].budget_identity["baseline_max_rowid"],
@@ -368,10 +390,37 @@ class ETrialController:
                 "model runtime account halted or original binding differs"
             )
 
-    def _verify_model_result(self, value, capture):
+    def _verify_model_result(self, value, capture, request=None):
         """Keep every physical result/fee; only matching received identities pass."""
         ledger = value.get("model_ledger")
         invalid = not isinstance(ledger, list)
+        request = request or self._requests[0]
+        observed = self._observed_model
+        if request.model_identity_binding is not None:
+            from evals.adapters.model_identity_runtime import verify_identity_ledger
+
+            descriptor = self._planning["core_config"]["model_identity"]
+            observed = {
+                key: descriptor[key] for key in ("response_model", "fingerprint")
+            }
+            try:
+                manifest = (
+                    verify_identity_ledger(
+                        _path(
+                            Path(self._inputs["runtime_options"]["budget_dir"])
+                            / "campaign.sqlite",
+                            file=True,
+                        ),
+                        request,
+                        ledger,
+                    )
+                    if ledger
+                    else None
+                )
+                if manifest is not None and manifest["expected_model"] != descriptor:
+                    invalid = True
+            except (ValueError, RuntimeError):
+                invalid = True
         received = 0
         for call in ledger if isinstance(ledger, list) else []:
             if not isinstance(call, dict):
@@ -382,11 +431,11 @@ class ETrialController:
                 continue
             received += 1
             if (
-                call.get("response_model") != self._observed_model["response_model"]
-                or call.get("system_fingerprint") != self._observed_model["fingerprint"]
+                call.get("response_model") != observed["response_model"]
+                or call.get("system_fingerprint") != observed["fingerprint"]
                 or not isinstance(raw, dict)
-                or raw.get("model") != self._observed_model["response_model"]
-                or raw.get("system_fingerprint") != self._observed_model["fingerprint"]
+                or raw.get("model") != observed["response_model"]
+                or raw.get("system_fingerprint") != observed["fingerprint"]
             ):
                 invalid = True
         if invalid or (value.get("execution_status") == "completed" and not received):
@@ -396,7 +445,7 @@ class ETrialController:
                     {
                         "schema_version": "task13-e-model-runtime-halt-v1",
                         "reason": "received_model_identity_differs_or_missing",
-                        "expected": self._observed_model,
+                        "expected": observed,
                         **capture,
                     }
                 ),
@@ -410,7 +459,14 @@ class ETrialController:
         try:
             for request in self._requests:
                 self._preflight(request)
-        except (OSError, ValueError, PermissionError, KeyError, TypeError) as error:
+        except (
+            OSError,
+            ValueError,
+            PermissionError,
+            RuntimeError,
+            KeyError,
+            TypeError,
+        ) as error:
             return {"status": "PENDING", "reason": type(error).__name__, "scope": SCOPE}
         return {
             "status": "verified",
@@ -637,6 +693,10 @@ class ETrialController:
             ledger=artifacts["model_ledger"],
             payloads=artifacts["payload_index"],
             output_root=out,
+            budget_path=_path(
+                Path(self._inputs["runtime_options"]["budget_dir"]) / "campaign.sqlite",
+                file=True,
+            ),
         )
         if value.get("verification") != verification:
             raise PermissionError(
@@ -706,7 +766,7 @@ class ETrialController:
                 try:
                     _, out = self._capture(value, options, request, capture=capture)
                 finally:
-                    self._verify_model_result(value, capture)
+                    self._verify_model_result(value, capture, request)
                 if value.get("execution_status") != "completed":
                     return self._finish(
                         request, "plan", started, status="failed", **capture

@@ -10,6 +10,7 @@ from typing import Literal
 
 from pydantic import Field
 
+from evals.adapters.e_planning_contracts import ModelIdentityBinding
 from evals.adapters.remediation_contracts import RemediationRequest
 from evals.contracts import SHA256
 
@@ -32,9 +33,15 @@ class EpochRemediationRequest(RemediationRequest):
     purpose: Literal["regression"] = "regression"
     epoch_id: str = Field(pattern=r"^[A-Za-z0-9_.:-]{1,256}$")
     epoch_manifest_sha256: str = Field(pattern=SHA256)
+    model_identity_binding: ModelIdentityBinding | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     def budget_binding(self) -> dict:
-        return {**super().budget_binding(), "epoch_id": self.epoch_id}
+        binding = {**super().budget_binding(), "epoch_id": self.epoch_id}
+        if self.model_identity_binding is not None:
+            binding.update(self.model_identity_binding.model_dump(mode="json"))
+        return binding
 
 
 def validate_epoch_runtime(
@@ -76,6 +83,10 @@ def validate_epoch_runtime(
         manifest_sha256=request.epoch_manifest_sha256,
         latest=True,
     )
+    if request.model_identity_binding is not None:
+        from evals.adapters.model_identity_runtime import require_dispatch_identity
+
+        require_dispatch_identity(budget_path, request)
     # The worker's Linux path differs from the original Windows host path.
     # The inspected host wrapper passes the exact independently checked pin.
     if (
@@ -90,9 +101,20 @@ def validate_epoch_runtime(
         raise ValueError("registered regression epoch runtime binding differs")
     receipt = json.loads((source / "source_receipt.json").read_text(encoding="utf-8"))
     files, entries = receipt["files"], epoch["entrypoints"]
+    required = WORKER_ENTRYPOINTS | (
+        {
+            "evals/adapters/model_identity_runtime.py",
+            "evals/adapters/model_identities.py",
+            "evals/adapters/model_client.py",
+            "evals/contracts.py",
+            "evals/adapters/e_planning_contracts.py",
+        }
+        if request.model_identity_binding is not None
+        else set()
+    )
     if (
-        not WORKER_ENTRYPOINTS <= entries.keys()
-        or not WORKER_ENTRYPOINTS <= files.keys()
+        not required <= entries.keys()
+        or not required <= files.keys()
         or any(files[name] != entries[name] for name in entries.keys() & files.keys())
     ):
         raise ValueError("registered regression epoch worker entrypoint differs")

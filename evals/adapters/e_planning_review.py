@@ -179,7 +179,7 @@ def validate_review_state(request, state, imported, binding):
 
 
 def validate_review_inputs(request, agent_dir):
-    """All validation is read-only; neither account constructors nor secrets are used."""
+    """All validation is read-only and uses no secrets."""
     from evals.adapters.analysis_package import verify_portable_analysis_package
     from evals.adapters.e_planning_worker import _claim_binding
 
@@ -197,6 +197,10 @@ def validate_review_inputs(request, agent_dir):
         manifest_sha256=planning.epoch_manifest_sha256,
         latest=True,
     )
+    if planning.model_identity_binding is not None:
+        from evals.adapters.model_identity_runtime import require_dispatch_identity
+
+        require_dispatch_identity(budget, planning)
     if epoch["source_commit"] != planning.source_commit or epoch[
         "runtime_binding"
     ] != json.loads(os.environ["TASK13_RUNTIME_BINDING"]):

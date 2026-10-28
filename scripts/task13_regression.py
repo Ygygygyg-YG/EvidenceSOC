@@ -189,7 +189,13 @@ class RegressionHost:
             source_sha256=b["source_sha256"],
             config=core,
             epoch_binding={
-                key: b[key] for key in ("epoch_id", "epoch_manifest_sha256")
+                key: b[key]
+                for key in (
+                    "epoch_id",
+                    "epoch_manifest_sha256",
+                    "model_identity_binding",
+                )
+                if key in b
             },
         )
         if (
@@ -239,7 +245,17 @@ class RegressionHost:
                 raise PermissionError("frozen E source file changed")
         if not self._manifest["synthetic"]:
             root = actual_host.parents[1]
-            for relative in HOST_ENTRIES:
+            required_host_entries = HOST_ENTRIES | (
+                {
+                    "evals/adapters/model_identity_runtime.py",
+                    "evals/adapters/model_identities.py",
+                    "evals/adapters/model_client.py",
+                    "evals/adapters/e_planning_contracts.py",
+                }
+                if b.get("model_identity_binding") is not None
+                else set()
+            )
+            for relative in required_host_entries:
                 digest = sha256(
                     _path(root / relative, file=True).read_bytes()
                 ).hexdigest()
@@ -282,6 +298,8 @@ class RegressionHost:
                 )
             )
             or planning["epoch_binding"]["budget_identity"] != core["budget_identity"]
+            or planning["epoch_binding"].get("model_identity_binding")
+            != bundle.get("model_identity_binding")
             or len(receipt.get("trials", [])) != 3
             or [trial["trial_id"] for trial in receipt["trials"]]
             != [trial["trial_id"] for trial in expected["trials"]]
@@ -575,7 +593,14 @@ class RegressionHost:
             or price.get("status") != "verified"
             or price.get("model") != core["model"]
             or price.get("observed_model_binding")
-            != core.get("original_observed_model_binding")
+            != (
+                {
+                    key: core["model_identity"][key]
+                    for key in ("response_model", "fingerprint")
+                }
+                if core.get("model_identity") is not None
+                else core.get("original_observed_model_binding")
+            )
             or not isinstance(checks, dict)
             or len(checks) < 8
             or any(value is not True for value in checks.values())
@@ -601,6 +626,8 @@ class RegressionHost:
             or options.get("source_commit") != bundle["source_commit"]
             or options.get("budget_identity") != core["budget_identity"]
             or budget != _path(core["active_budget_path"])
+            or options.get("model_identity_binding")
+            != bundle.get("model_identity_binding")
         ):
             raise PermissionError(
                 "formal runtime must retain the original budget/source identity"
@@ -625,23 +652,36 @@ class RegressionHost:
         source = _path(options["source_dir"])
         _validate_source(source, bundle["source_commit"])
         require_existing_budget(budget, core["budget_identity"])
-        account, _ = _budget_snapshot(
-            budget, core["budget_identity"]["baseline_max_rowid"]
-        )
-        observed = core.get("original_observed_model_binding")
-        if (
-            not isinstance(observed, dict)
-            or set(observed) != {"response_model", "fingerprint"}
-            or any(
-                not isinstance(value, str) or not value.strip()
-                for value in observed.values()
+        request = EpochRemediationRequest.model_validate(bundle["rows"][0]["request"])
+        if request.model_identity_binding is not None:
+            from evals.adapters.model_identity_runtime import require_dispatch_identity
+
+            manifest = require_dispatch_identity(budget, request)
+            if manifest["expected_model"] != core.get("model_identity") or core.get(
+                "original_observed_model_binding"
+            ) != {
+                key: manifest["inherited_global"][key]
+                for key in ("response_model", "fingerprint")
+            }:
+                raise PermissionError("adopted regression model descriptor differs")
+        else:
+            account, _ = _budget_snapshot(
+                budget, core["budget_identity"]["baseline_max_rowid"]
             )
-            or account.get("halt")
-            or any(account.get(key) != value for key, value in observed.items())
-        ):
-            raise PermissionError(
-                "existing model account halted or original identity differs"
-            )
+            observed = core.get("original_observed_model_binding")
+            if (
+                not isinstance(observed, dict)
+                or set(observed) != {"response_model", "fingerprint"}
+                or any(
+                    not isinstance(value, str) or not value.strip()
+                    for value in observed.values()
+                )
+                or account.get("halt")
+                or any(account.get(key) != value for key, value in observed.items())
+            ):
+                raise PermissionError(
+                    "existing model account halted or original identity differs"
+                )
         dependencies = _path(options["dependencies_dir"])
         dependency_receipt = _decode(
             _path(dependencies / "task13_dependencies.json", file=True).read_bytes()
@@ -705,7 +745,14 @@ class RegressionHost:
         """SELECT/read only. Missing future approvals never initialize runtime or DB."""
         try:
             data = self._preflight()
-        except (OSError, ValueError, PermissionError, KeyError, TypeError) as error:
+        except (
+            OSError,
+            ValueError,
+            PermissionError,
+            RuntimeError,
+            KeyError,
+            TypeError,
+        ) as error:
             return {"status": "PENDING", "reason": type(error).__name__, "scope": SCOPE}
         return {
             "status": "verified",
@@ -774,9 +821,31 @@ class RegressionHost:
             return
         result_path = self._root / row["slot_id"] / "result.json"
         value = _decode(_path(result_path, file=True).read_bytes())
-        observed = data["core_config"]["original_observed_model_binding"]
+        core = data["core_config"]
         ledger = value.get("model_ledger", [])
         invalid = not isinstance(ledger, list)
+        observed = core["original_observed_model_binding"]
+        if data["bundle"].get("model_identity_binding") is not None:
+            from evals.adapters.epoch_remediation import EpochRemediationRequest
+            from evals.adapters.model_identity_runtime import verify_identity_ledger
+
+            request = EpochRemediationRequest.model_validate(row["request"])
+            descriptor = core["model_identity"]
+            observed = {
+                key: descriptor[key] for key in ("response_model", "fingerprint")
+            }
+            try:
+                manifest = (
+                    verify_identity_ledger(
+                        _path(core["active_budget_path"], file=True), request, ledger
+                    )
+                    if ledger
+                    else None
+                )
+                if manifest is not None and manifest["expected_model"] != descriptor:
+                    invalid = True
+            except (ValueError, RuntimeError):
+                invalid = True
         for call in ledger if isinstance(ledger, list) else []:
             if not isinstance(call, dict):
                 invalid = True

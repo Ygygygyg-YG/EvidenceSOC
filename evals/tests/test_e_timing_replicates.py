@@ -148,6 +148,10 @@ def approved_source(store, index, clock):
             ),
         },
     }
+    if request.model_identity_binding is not None:
+        provenance["planning_admission"]["model_identity_binding"] = (
+            request.model_identity_binding.model_dump(mode="json")
+        )
     state["analysis_import_provenance"] = provenance
     state["diagnostic_snapshot"] = None
     state.update(_seal_diagnosis(state, "analysis_import"))
@@ -654,3 +658,54 @@ async def test_missing_independent_host_proof_never_completes_or_replays(
         assert len(called) == 1
     with pytest.raises(PermissionError, match="three"):
         store.export_timing_receipt()
+
+
+def test_explicit_identity_timing_rejects_crossed_admission(tmp_path):
+    from types import SimpleNamespace
+
+    from evidencesoc.agents.graph import _plan_hash
+
+    from evals.e_timing import _validate_replicate_source, build_e_timing_registration
+
+    base = registration(tmp_path)
+    planning = deepcopy(base["planning_registration"])
+    reference = {"model_epoch_id": "model-1", "model_identity_sha256": "9" * 64}
+    planning["core_config"]["model_identity"] = {
+        "id": "model-1",
+        "response_model": "synthetic",
+        "fingerprint": "synthetic-fp",
+    }
+    planning["core_config_sha256"] = canonical_hash(planning["core_config"])
+    planning["epoch_binding"]["model_identity_binding"] = reference
+    dispatch = deepcopy(base["planning_dispatch_registration_receipt"])
+    dispatch["registration_sha256"] = canonical_hash(planning)
+    reg = build_e_timing_registration(
+        planning,
+        source_files=base["source_files"],
+        f8_plan_sha256=base["f8_plan_sha256"],
+        planning_dispatch_registration_receipt=dispatch,
+    )
+    clock = Clock()
+    store = SimpleNamespace(
+        registration=reg,
+        identity={
+            "campaign_id": reg["campaign_id"],
+            "source_commit": reg["source_commit"],
+            "source_sha256": canonical_hash(reg["source_files"]),
+            "config_sha256": canonical_hash(reg["core_config"]),
+        },
+    )
+    source = approved_source(store, 0, clock)
+    _validate_replicate_source(reg, reg["trials"][0], source)
+    for current in (source["state"], source["retained_state"]):
+        current["analysis_import_provenance"]["planning_admission"][
+            "model_identity_binding"
+        ]["model_identity_sha256"] = "8" * 64
+        current["diagnostic_snapshot"]["analysis_import_provenance"] = deepcopy(
+            current["analysis_import_provenance"]
+        )
+        current["diagnostic_snapshot_sha256"] = _plan_hash(
+            current["diagnostic_snapshot"]
+        )
+    with pytest.raises(PermissionError):
+        _validate_replicate_source(reg, reg["trials"][0], source)

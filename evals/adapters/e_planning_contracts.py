@@ -137,6 +137,11 @@ class ResponseCallLimit(Contract):
     physical: Literal[3] = 3
 
 
+class ModelIdentityBinding(Contract):
+    model_epoch_id: str = Field(pattern=r"^[A-Za-z0-9_.:-]{1,256}$")
+    model_identity_sha256: str = Field(pattern=SHA256)
+
+
 class EPlanningRequest(Contract):
     schema_version: Literal["task13-e-planning-worker-v1"] = (
         "task13-e-planning-worker-v1"
@@ -178,6 +183,9 @@ class EPlanningRequest(Contract):
     config_sha256: str = Field(pattern=SHA256)
     core_config_sha256: str = Field(pattern=SHA256)
     budget_identity: dict
+    model_identity_binding: ModelIdentityBinding | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     model: ModelConfig = Field(default_factory=ModelConfig)
     seed: SeedPolicy = Field(default_factory=SeedPolicy)
     budget: CallBudget = Field(default_factory=lambda: CallBudget(max_model_calls=1))
@@ -243,7 +251,7 @@ class EPlanningRequest(Contract):
         )
 
     def budget_binding(self) -> dict:
-        return {
+        binding = {
             key: getattr(self, key)
             for key in (
                 "campaign_id",
@@ -256,3 +264,6 @@ class EPlanningRequest(Contract):
                 "epoch_id",
             )
         }
+        if self.model_identity_binding is not None:
+            binding.update(self.model_identity_binding.model_dump(mode="json"))
+        return binding
