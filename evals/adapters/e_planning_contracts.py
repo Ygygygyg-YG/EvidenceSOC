@@ -67,9 +67,19 @@ class EPlanningSource(Contract):
     imported_values_sha256: str = Field(pattern=SHA256)
     source_identity: str = Field(pattern=SHA256)
     source_package_manifest_sha256: str = Field(pattern=SHA256)
+    source_kind: Literal["additional-development-v1"] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    source_registration_sha256: str | None = Field(
+        default=None, pattern=SHA256, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def original_identity(self) -> Self:
+        if (self.source_kind is None) != (self.source_registration_sha256 is None):
+            raise ValueError("additional source kind and registration must be paired")
+        if self.source_kind is not None and self.order_index != 0:
+            raise ValueError("additional source requires its single registered row")
         if not self.case_id.startswith(self.dataset + "-") or self.source_identity != (
             canonical_hash([self.case_id, self.source_row_id, self.request_sha256])
         ):
@@ -93,6 +103,12 @@ class ESelectedSourceLineageEntry(Contract):
     source_package_manifest_sha256: str = Field(pattern=SHA256)
     source_analysis_output_sha256: str = Field(pattern=SHA256)
     imported_values_sha256: str = Field(pattern=SHA256)
+    source_kind: Literal["additional-development-v1"] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    source_registration_sha256: str | None = Field(
+        default=None, pattern=SHA256, exclude_if=lambda value: value is None
+    )
 
 
 class ESelectedSourceLineage(Contract):
@@ -127,6 +143,14 @@ def build_selected_source_lineage(
                 source_package_manifest_sha256=source.source_package_manifest_sha256,
                 source_analysis_output_sha256=source.analysis_output_sha256,
                 imported_values_sha256=source.imported_values_sha256,
+                **(
+                    {
+                        "source_kind": source.source_kind,
+                        "source_registration_sha256": source.source_registration_sha256,
+                    }
+                    if source.source_kind is not None
+                    else {}
+                ),
             ),
         ),
     )
@@ -147,7 +171,9 @@ class EPlanningRequest(Contract):
         "task13-e-planning-worker-v1"
     )
     campaign_id: Literal["task13-repair-202610-v2"] = CAMPAIGN
-    mode: Literal["same-source-replicates-v1"] = "same-source-replicates-v1"
+    mode: Literal[
+        "same-source-replicates-v1", "additional-development-replicates-v1"
+    ] = "same-source-replicates-v1"
     registration_id: str = Field(pattern=HEX32)
     registration_sha256: str = Field(pattern=SHA256)
     ordinal: int = Field(ge=1, le=3, strict=True)
@@ -200,6 +226,11 @@ class EPlanningRequest(Contract):
     @model_validator(mode="after")
     def frozen_bindings(self) -> Self:
         OriginalBudgetIdentity.model_validate(self.budget_identity)
+        additional = self.source.source_kind is not None
+        if (self.mode == "additional-development-replicates-v1") != additional:
+            raise ValueError("planning mode differs from its explicit source kind")
+        if additional and self.model_identity_binding is None:
+            raise ValueError("additional source requires an adopted model identity")
         identities = slot_identity(self.registration_id, self.ordinal, self.case_id)
         if any(getattr(self, key) != value for key, value in identities.items()):
             raise ValueError("planning slot/request/incident/trial identity differs")

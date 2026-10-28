@@ -637,9 +637,9 @@ class ETrialController:
         """Independently verify actual portable source, started claim and raw artifacts."""
         from evidencesoc.agents.analysis_import import PlanningAdmission
 
-        from evals.adapters.analysis_package import verify_portable_analysis_package
         from evals.adapters.e_planning_no_plan import verify_no_plan
         from evals.adapters.e_planning_worker import _claim_binding
+        from evals.adapters.planning_analysis import verify_planning_analysis
 
         if (
             value.get("product_status") != "manual_review"
@@ -671,9 +671,13 @@ class ETrialController:
             }
         ):
             raise PermissionError("no-plan actual artifacts differ from worker stdout")
-        source = verify_portable_analysis_package(
+        source = verify_planning_analysis(
+            request,
             _path(self._inputs["runtime_options"]["import_source_dir"]),
-            request.source_package_manifest_sha256,
+            _path(
+                Path(self._inputs["runtime_options"]["budget_dir"]) / "campaign.sqlite",
+                file=True,
+            ),
         )
         journal = self._journal()
         binding = _claim_binding(request, journal.validate_request(request))

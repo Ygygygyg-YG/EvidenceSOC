@@ -40,6 +40,7 @@ EXPORT_PATHS = [
     "services/backend/src",
     "evals/contracts.py",
     "evals/e_planning.py",
+    "evals/additional_source_selection.py",
     "evals/adapters",
     "scripts/dedale_task12_runtime.py",
     "scripts/task13_worker_runtime.py",
@@ -273,8 +274,12 @@ def validate_e_planning_host(
     request, agent_dir: Path, options: dict, dependency_receipt: dict, *, review=False
 ) -> dict:
     """Read-only admission checks run before creating a container or passing a key."""
-    from evals.adapters.analysis_package import verify_portable_analysis_package
     from evals.adapters.e_planning_journal import EPlanningDispatchJournal
+    from evals.adapters.planning_analysis import (
+        ADDITIONAL_ENTRYPOINTS,
+        validate_additional_export,
+        verify_planning_analysis,
+    )
     from evals.adapters.remediation_worker import (
         require_existing_budget,
         validate_exported_source,
@@ -346,6 +351,9 @@ def validate_e_planning_host(
         ),
         "evals/adapters/verification_worker.py",
     }
+    if request.source.source_kind == "additional-development-v1":
+        required_entries.update(ADDITIONAL_ENTRYPOINTS)
+        validate_additional_export(epoch, Path(options["source_dir"]))
     if not required_entries.issubset(epoch["entrypoints"]) or any(
         file_hash(root / relative) != digest
         for relative, digest in epoch["entrypoints"].items()
@@ -353,8 +361,8 @@ def validate_e_planning_host(
         raise ValueError(
             "planning actual controller entrypoints differ from source epoch"
         )
-    imported = verify_portable_analysis_package(
-        Path(options["import_source_dir"]), request.source_package_manifest_sha256
+    imported = verify_planning_analysis(
+        request, Path(options["import_source_dir"]), budget_path
     )
     _validate_planning_source(request, imported)
     journal_path = _planning_journal_path(Path(options["import_dispatch_path"]))
@@ -369,8 +377,8 @@ def validate_e_planning_host(
 
 def e_planning_worker_probe(request) -> dict:
     """Inspect actual read-only source and existing metadata journal before GO."""
-    from evals.adapters.analysis_package import verify_portable_analysis_package
     from evals.adapters.e_planning_journal import EPlanningDispatchJournal
+    from evals.adapters.planning_analysis import verify_planning_analysis
     from evals.contracts import canonical_hash
 
     if request.model_identity_binding is not None:
@@ -378,8 +386,11 @@ def e_planning_worker_probe(request) -> dict:
 
         require_dispatch_identity(Path(os.environ["TASK13_BUDGET_DB"]), request)
     source = Path(os.environ["TASK13_IMPORT_SOURCE_DIR"])
-    imported = verify_portable_analysis_package(
-        source, request.source_package_manifest_sha256
+    imported = verify_planning_analysis(
+        request,
+        source,
+        Path(os.environ["TASK13_BUDGET_DB"]),
+        mounted_host_budget_path=os.environ.get("TASK13_EPOCH_HOST_BUDGET_PATH"),
     )
     _validate_planning_source(request, imported)
     journal_path = _planning_journal_path(Path(os.environ["TASK13_IMPORT_DISPATCH_DB"]))
@@ -1230,6 +1241,12 @@ async def run_container(spec: dict, agent_dir: Path, options: dict) -> dict:
             passed["TASK13_RUNTIME_BINDING"] = json.dumps(epoch_runtime, sort_keys=True)
             passed["TASK13_EPOCH_HOST_BUDGET_PATH"] = epoch_manifest["budget_path"]
         if planning:
+            if planning_request.source.source_kind == "additional-development-v1":
+                # validate_e_planning_host already checked this exact registered
+                # original account location before any container was created.
+                passed["TASK13_EPOCH_HOST_BUDGET_PATH"] = str(
+                    (Path(options["budget_dir"]) / "campaign.sqlite").resolve()
+                )
             passed.update(
                 {
                     "TASK13_IMPORT_SOURCE_DIR": "/app/import-source",

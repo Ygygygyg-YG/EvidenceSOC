@@ -180,8 +180,8 @@ def validate_review_state(request, state, imported, binding):
 
 def validate_review_inputs(request, agent_dir):
     """All validation is read-only and uses no secrets."""
-    from evals.adapters.analysis_package import verify_portable_analysis_package
     from evals.adapters.e_planning_worker import _claim_binding
+    from evals.adapters.planning_analysis import verify_planning_analysis
 
     request = EPlanningReviewRequest.model_validate(request.model_dump(mode="json"))
     planning = request.planning_request
@@ -205,11 +205,15 @@ def validate_review_inputs(request, agent_dir):
         "runtime_binding"
     ] != json.loads(os.environ["TASK13_RUNTIME_BINDING"]):
         raise ValueError("review registered source epoch runtime differs")
+    if planning.source.source_kind == "additional-development-v1":
+        from evals.adapters.planning_analysis import validate_additional_export
+
+        validate_additional_export(epoch, Path(os.environ["TASK13_SOURCE_DIR"]))
     journal = EPlanningDispatchJournal.open_existing(
         Path(os.environ["TASK13_IMPORT_DISPATCH_DB"]),
         expected_registration_sha256=planning.registration_sha256,
         expected_authority_sha256=os.environ["TASK13_IMPORT_AUTHORITY_SHA256"],
-        mounted_host_journal_path=os.environ["TASK13_IMPORT_HOST_JOURNAL_PATH"],
+        mounted_host_journal_path=os.environ.get("TASK13_IMPORT_HOST_JOURNAL_PATH"),
     )
 
     def claim():
@@ -220,9 +224,11 @@ def validate_review_inputs(request, agent_dir):
         raise PermissionError(
             "review requires its actual previously claimed planning slot"
         )
-    imported = verify_portable_analysis_package(
+    imported = verify_planning_analysis(
+        planning,
         Path(os.environ["TASK13_IMPORT_SOURCE_DIR"]),
-        planning.source_package_manifest_sha256,
+        budget,
+        mounted_host_budget_path=os.environ.get("TASK13_EPOCH_HOST_BUDGET_PATH"),
     )
     admission = PlanningAdmission._from_existing_claim(binding, claim)
     admission.provenance_for(imported, request.incident_id)

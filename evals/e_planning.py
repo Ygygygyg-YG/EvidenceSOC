@@ -50,7 +50,16 @@ class EpochBinding(Contract):
     )
 
 
-def _selected_source(selection):
+def _selected_source(selection, mode="same-source-replicates-v1"):
+    if mode == "additional-development-replicates-v1":
+        from evals.additional_source_selection import (
+            validate_additional_source_selection,
+        )
+
+        selection = validate_additional_source_selection(selection)
+        return selection["source"], 1
+    if mode != "same-source-replicates-v1":
+        raise ValueError("unknown planning source mode")
     if not isinstance(selection, dict):
         raise ValueError("original source selection receipt is required")  # noqa: TRY004 - invalid external receipt.
     rule = "first-three-qualified-original-36-v1"
@@ -117,7 +126,7 @@ class EPlanningRegistration(Contract):
     campaign_id: Literal["task13-repair-202610-v2"]
     registration_id: str = Field(pattern=HEX32)
     synthetic: bool = Field(strict=True)
-    mode: Literal["same-source-replicates-v1"]
+    mode: Literal["same-source-replicates-v1", "additional-development-replicates-v1"]
     source_selection_receipt: dict
     source_selection_receipt_sha256: str = Field(pattern=SHA256)
     source: EPlanningSource
@@ -150,7 +159,32 @@ class EPlanningRegistration(Contract):
             or descriptor["id"] != reference.model_epoch_id
         ):
             raise ValueError("model identity descriptor differs from reference")
-        first, count = _selected_source(self.source_selection_receipt)
+        first, count = _selected_source(self.source_selection_receipt, self.mode)
+        if (self.mode == "additional-development-replicates-v1") != (
+            self.source.source_kind == "additional-development-v1"
+        ):
+            raise ValueError("planning mode differs from selected source kind")
+        if self.mode == "additional-development-replicates-v1":
+            additional = self.source_selection_receipt["additional_registration"]
+            original = additional["request"]
+            if (
+                self.synthetic is not additional["synthetic"]
+                or self.core_config_sha256 != additional["core_sha256"]
+                or any(
+                    self.epoch_binding.model_dump(mode="json").get(key) != original[key]
+                    for key in (
+                        "epoch_id",
+                        "epoch_manifest_sha256",
+                        "source_commit",
+                        "source_sha256",
+                        "budget_identity",
+                        "model_identity_binding",
+                    )
+                )
+            ):
+                raise ValueError(
+                    "planning additional analysis epoch/core/model/synthetic differs"
+                )
         if (
             canonical_hash(self.source_selection_receipt)
             != self.source_selection_receipt_sha256
@@ -186,9 +220,14 @@ def build_e_planning_registration(
     budget_source_receipt_sha256,
     core_config,
     synthetic,
+    mode="same-source-replicates-v1",
 ) -> dict:
     """Build a proposal, preserving shortage; this does not approve/register it."""
-    first, count = _selected_source(selection_receipt)
+    first, count = _selected_source(selection_receipt, mode)
+    if mode == "additional-development-replicates-v1" and (
+        first["source_package_manifest_sha256"] != source_package_manifest_sha256
+    ):
+        raise ValueError("additional selected package manifest pin differs")
     source = {
         **first,
         "source_identity": canonical_hash(
@@ -204,7 +243,7 @@ def build_e_planning_registration(
         "campaign_id": CAMPAIGN,
         "registration_id": registration_id,
         "synthetic": synthetic,
-        "mode": "same-source-replicates-v1",
+        "mode": mode,
         "source_selection_receipt": deepcopy(selection_receipt),
         "source_selection_receipt_sha256": canonical_hash(selection_receipt),
         "source": source,
@@ -239,6 +278,7 @@ def planning_requests(registration: dict) -> tuple[EPlanningRequest, ...]:
             **{key: value for key, value in slot.items() if key != "branches"},
             **r["epoch_binding"],
             "registration_id": r["registration_id"],
+            "mode": r["mode"],
             "registration_sha256": canonical_hash(r),
             "source": source,
             **{

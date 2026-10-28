@@ -165,6 +165,10 @@ def validate_planning_inputs(request, agent_dir):
                 "evals/adapters/source_epochs.py",
             }
         )
+    if request.source.source_kind == "additional-development-v1":
+        from evals.adapters.planning_analysis import ADDITIONAL_ENTRYPOINTS
+
+        required.update(ADDITIONAL_ENTRYPOINTS)
     entries, files = epoch["entrypoints"], receipt["files"]
     if (
         not required <= entries.keys()
@@ -181,12 +185,13 @@ def validate_planning_inputs(request, agent_dir):
         mounted_host_journal_path=os.environ.get("TASK13_IMPORT_HOST_JOURNAL_PATH"),
     )
     journal.validate_request(request)
-    # Import locally so the portable verifier remains the one source authority.
-    from evals.adapters.analysis_package import verify_portable_analysis_package
+    from evals.adapters.planning_analysis import verify_planning_analysis
 
-    source = verify_portable_analysis_package(
+    source = verify_planning_analysis(
+        request,
         Path(os.environ["TASK13_IMPORT_SOURCE_DIR"]),
-        request.source_package_manifest_sha256,
+        budget_path,
+        mounted_host_budget_path=os.environ.get("TASK13_EPOCH_HOST_BUDGET_PATH"),
     )
     expected = {
         "case_id": request.case_id,

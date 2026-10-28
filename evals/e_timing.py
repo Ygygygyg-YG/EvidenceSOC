@@ -160,6 +160,14 @@ def _replicate_registration(
                         "source_package_manifest_sha256",
                     )
                 },
+                **(
+                    {
+                        key: source[key]
+                        for key in ("source_kind", "source_registration_sha256")
+                    }
+                    if source.get("source_kind") == "additional-development-v1"
+                    else {}
+                ),
                 **{
                     key: getattr(q, key)
                     for key in (
@@ -371,6 +379,9 @@ def _validate_imported_state(state, selected):
             provenance.get(key) != selected[key]
             for key in SOURCE_KEYS + ("order_index",)
         )
+        or provenance.get("source_kind") != selected.get("source_kind")
+        or provenance.get("source_registration_sha256")
+        != selected.get("source_registration_sha256")
     ):
         raise PermissionError("import provenance differs from fixed source selection")
     seal = state.get("diagnostic_snapshot")
@@ -412,6 +423,12 @@ def _validate_replicate_source(registration, registered, source):
     from evals.adapters.verification_worker import SourceResources
 
     request = registered["planning_request"]
+    additional = request["source"].get("source_kind") == "additional-development-v1"
+    package_schema = (
+        "task13-additional-analysis-package-v1"
+        if additional
+        else "task13-analysis-artifacts-v2"
+    )
     dispatch = registration["planning_dispatch_registration_receipt"]
     admission = {
         **(
@@ -468,8 +485,7 @@ def _validate_replicate_source(registration, registered, source):
                 or provenance.get("planning_admission") != admission
                 or canonical_hash(provenance.get("planning_admission"))
                 != canonical_hash(admission)
-                or provenance.get("source_package_schema_version")
-                != "task13-analysis-artifacts-v2"
+                or provenance.get("source_package_schema_version") != package_schema
                 or provenance.get("source_package_manifest_sha256")
                 != request["source_package_manifest_sha256"]
                 or provenance.get("original_manifest_sha256")
@@ -478,6 +494,32 @@ def _validate_replicate_source(registration, registered, source):
                 != provenance
             ):
                 raise ValueError("sealed original source/planning admission differs")
+            if additional and (
+                type(provenance.get("source_synthetic")) is not bool
+                or any(
+                    provenance.get(key) != value
+                    for key, value in {
+                        "source_kind": request["source"]["source_kind"],
+                        "source_registration_sha256": request["source"][
+                            "source_registration_sha256"
+                        ],
+                        "source_core_sha256": request["core_config_sha256"],
+                        "source_epoch_id": request["epoch_id"],
+                        "source_epoch_manifest_sha256": request[
+                            "epoch_manifest_sha256"
+                        ],
+                        "source_model_identity_binding": request[
+                            "model_identity_binding"
+                        ],
+                        "source_synthetic": registration["synthetic"],
+                        "source_commit": request["source_commit"],
+                        "source_sha256": request["source_sha256"],
+                    }.items()
+                )
+            ):
+                raise ValueError(
+                    "sealed additional source registration/epoch/core/model differs"
+                )
         if (
             retained.get("status") != "awaiting_approval"
             or retained.get("approval") is not None
@@ -831,11 +873,20 @@ class ETimingCampaign:
             source.get(key) != value for key, value in expected.items()
         ):
             raise PermissionError("source selection/core/config binding differs")
-        selected = next(
-            row
-            for row in self.registration["source_selection_receipt"]["selected_sources"]
-            if row["source_row_id"] == registered["source_row_id"]
-        )
+        if (
+            self.registration["schema_version"] == "task13-e-timing-registration-v2"
+            and registered["planning_request"]["source"].get("source_kind")
+            == "additional-development-v1"
+        ):
+            selected = self.registration["planning_registration"]["source"]
+        else:
+            selected = next(
+                row
+                for row in self.registration["source_selection_receipt"][
+                    "selected_sources"
+                ]
+                if row["source_row_id"] == registered["source_row_id"]
+            )
         _validate_imported_state(source.get("state"), selected)
         if self.registration["schema_version"] == "task13-e-timing-registration-v2":
             _validate_replicate_source(self.registration, registered, source)
