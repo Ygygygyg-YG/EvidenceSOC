@@ -489,59 +489,228 @@ def test_failed_regression_before_any_call_does_not_create_identity_halt(tmp_pat
     assert not (tmp_path / "model-runtime-halt.json").exists()
 
 
-def test_planning_physical_ledger_cannot_cross_slots(tmp_path):
-    from types import SimpleNamespace
+def planning_model_fixture(tmp_path, response_content):
+    import httpx
 
     from evals.adapters.budget_v2 import SupplementBudgetAccount
-    from evals.adapters.model_identity_runtime import verify_identity_ledger
-    from evals.tests.test_budget_v2 import started
+    from evals.adapters.e_planning_worker import RespondOnlyModel
+    from evals.adapters.model_client import TrackedModel
+    from evals.adapters.remediation_worker import StableCallModel
     from evals.tests.test_model_identities import adopt, fixture
 
     path, manifest = fixture(tmp_path)
     adopt(path, manifest)
-    reference = {
-        "model_epoch_id": manifest["model_epoch_id"],
-        "model_identity_sha256": canonical_hash(manifest),
-    }
-    binding = {
-        "campaign_id": manifest["campaign_id"],
-        "case_id": "ait-001",
-        "group": "B3",
-        "attempt": 1,
-        "purpose": "development",
-        "source_sha256": manifest["source_sha256"],
-        "config_sha256": manifest["config_sha256"],
-        "epoch_id": manifest["epoch_id"],
-        **reference,
-    }
-    request = SimpleNamespace(
-        model_identity_binding=reference,
-        budget_binding=lambda: binding,
-        planning_slot_id="slot-1",
+    requests = []
+    for original in planning_requests(explicit_registration()):
+        value = original.model_dump(mode="json")
+        value.update(
+            epoch_id=manifest["epoch_id"],
+            epoch_manifest_sha256=manifest["source_manifest_sha256"],
+            source_sha256=manifest["source_sha256"],
+            budget_source_receipt_sha256=manifest["source_sha256"],
+            config_sha256=manifest["config_sha256"],
+            core_config_sha256=manifest["config_sha256"],
+            budget_identity=manifest["budget_identity"],
+            model_identity_binding={
+                "model_epoch_id": manifest["model_epoch_id"],
+                "model_identity_sha256": canonical_hash(manifest),
+            },
+        )
+        requests.append(EPlanningRequest.model_validate(value))
+    request = requests[0]
+    contents = iter(response_content)
+
+    def respond(http_request):
+        return httpx.Response(
+            200,
+            json={
+                "id": "synthetic-identity-response",
+                "model": manifest["expected_model"]["response_model"],
+                "system_fingerprint": manifest["expected_model"]["fingerprint"],
+                "choices": [
+                    {"finish_reason": "stop", "message": {"content": next(contents)}}
+                ],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 10},
+            },
+        )
+
+    tracked = TrackedModel(
+        request.model,
+        api_key="synthetic",
+        account=SupplementBudgetAccount(path, **request.budget_binding()),
+        phase="development",
+        transport=httpx.MockTransport(respond),
+        max_calls=3,
+        max_logical_calls=1,
     )
-    hint = "e-planning-respond-" + canonical_hash(request.planning_slot_id)
-    logical_key = canonical_hash(["respond", "ResponseOutput", hint])
-    account = SupplementBudgetAccount(path, **binding)
-    physical = account.physical_request_key(logical_key, 1, explicit_call_id=hint)
-    metadata = started(physical, role="respond")
-    reservation = account.reserve(physical, 0.1, "development", metadata=metadata)
-    record = {
-        **reference,
-        **{
-            key: metadata[key]
-            for key in ("role", "logical_call_id", "physical_attempt", "request_sha256")
-        },
-        "reservation_id": reservation,
-        "physical_request_id": physical,
-        "response_model": "approved",
-        "system_fingerprint": "approved-fp",
-        "http_status": 200,
-        "raw_response": {"model": "approved", "system_fingerprint": "approved-fp"},
+    wrapped = RespondOnlyModel(
+        StableCallModel(tracked, request.slot_id, request.run_id),
+        request.planning_slot_id,
+    )
+    return path, manifest, requests, wrapped
+
+
+def planning_response_content(has_plan):
+    import json
+
+    from evals.tests.test_e_planning_worker import pending_state
+
+    if not has_plan:
+        return json.dumps({"response_plan": None})
+    plan = pending_state()["response_plan"]
+    action = plan["actions"][0]
+    action.update(
+        type=action["action"],
+        expected_effect="Synthetic block only",
+        rollback_ref="RB-1",
+    )
+    plan.update(
+        risk_level="low",
+        risk_reason="Synthetic identity test",
+        business_impact="Simulation only",
+        affected_assets=[action["target"]],
+        rollback_steps=[
+            {
+                "step_id": "RB-1",
+                "description": "Remove synthetic block",
+                "target": action["target"],
+                "expected_result": "Synthetic block absent",
+                "evidence_ids": ["EV-1"],
+            }
+        ],
+        validation_checks=[
+            {
+                "check_id": "VC-1",
+                "description": "Observe synthetic target",
+                "target": action["target"],
+                "expected_result": "Synthetic events available",
+                "query": action["verification_query"],
+                "evidence_ids": ["EV-1"],
+            }
+        ],
+    )
+    return json.dumps({"response_plan": plan})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("has_plan", [False, True], ids=["null", "plan"])
+@pytest.mark.parametrize("attempts", [1, 3])
+async def test_planning_physical_ledger_accepts_real_wrapper_chain(
+    tmp_path, has_plan, attempts
+):
+    from evidencesoc.agents.models import ResponseOutput
+    from pydantic import ValidationError
+
+    from evals.adapters.model_identity_runtime import verify_identity_ledger
+
+    contents = ['{"invalid":true}'] * (attempts - 1)
+    contents.append(planning_response_content(has_plan))
+    path, manifest, requests, wrapped = planning_model_fixture(tmp_path, contents)
+    request = requests[0]
+    for index in range(attempts - 1):
+        with pytest.raises(ValidationError):
+            await wrapped.structured(
+                "respond", ResponseOutput, {"_model_call_id": f"retry-{index}"}
+            )
+    output = await wrapped.structured(
+        "respond", ResponseOutput, {"_model_call_id": "final-product-hint"}
+    )
+    assert (output.response_plan is not None) == has_plan
+    assert [row["physical_attempt"] for row in wrapped.ledger] == list(
+        range(1, attempts + 1)
+    )
+    assert [row["parse_status"] for row in wrapped.ledger] == ["schema_error"] * (
+        attempts - 1
+    ) + ["valid"]
+    assert len({row["logical_call_id"] for row in wrapped.ledger}) == 1
+    assert {row["stable_logical_call_id"] for row in wrapped.ledger} == {
+        "v2-" + canonical_hash([request.slot_id, "respond", 1])
     }
-    verify_identity_ledger(path, request, [record])
-    request.planning_slot_id = "slot-2"
+    assert verify_identity_ledger(path, request, wrapped.ledger) == manifest
+    with pytest.raises(PermissionError, match="at most three attempts"):
+        if attempts == 3:
+            await wrapped.structured("respond", ResponseOutput, {})
+        else:
+            await wrapped.structured("analyze", ResponseOutput, {})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        "another_slot",
+        "stable_hint",
+        "reservation_id",
+        "physical_request_id",
+        "logical_call_id",
+        "physical_attempt",
+        "request_sha256",
+        "response_model",
+        "system_fingerprint",
+        "raw_model",
+        "raw_fingerprint",
+        "duplicate_reservation",
+    ],
+)
+async def test_planning_real_wrapper_ledger_rejects_tampering(tmp_path, tamper):
+    from evidencesoc.agents.models import ResponseOutput
+
+    from evals.adapters.model_identity_runtime import verify_identity_ledger
+
+    path, _, requests, wrapped = planning_model_fixture(
+        tmp_path, [planning_response_content(False)]
+    )
+    await wrapped.structured("respond", ResponseOutput, {})
+    request = requests[0]
+    ledger = deepcopy(wrapped.ledger)
+    if tamper == "another_slot":
+        request = requests[1]
+        # Relabeling a genuine response cannot move its stored physical ID.
+        ledger[0]["stable_logical_call_id"] = "v2-" + canonical_hash(
+            [request.slot_id, "respond", 1]
+        )
+    elif tamper == "stable_hint":
+        ledger[0]["stable_logical_call_id"] = "forged-stable-hint"
+    elif tamper == "physical_attempt":
+        ledger[0]["physical_attempt"] = 2
+    elif tamper in {"raw_model", "raw_fingerprint"}:
+        key = "model" if tamper == "raw_model" else "system_fingerprint"
+        ledger[0]["raw_response"][key] = "wrong"
+    elif tamper == "duplicate_reservation":
+        ledger.append(deepcopy(ledger[0]))
+    else:
+        ledger[0][tamper] = "wrong"
     with pytest.raises(ValueError):
-        verify_identity_ledger(path, request, [record])
+        verify_identity_ledger(path, request, ledger)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("forgery", ["inner_hint", "relabeled_inner_hint", "role"])
+async def test_planning_rejects_wrong_registered_physical_identity(tmp_path, forgery):
+    from evidencesoc.agents.models import ResponseOutput
+
+    from evals.adapters.model_identity_runtime import verify_identity_ledger
+
+    path, _, requests, wrapped = planning_model_fixture(
+        tmp_path, [planning_response_content(False)]
+    )
+    request = requests[0]
+    if forgery != "role":
+        wrapped.model._calls[("respond", wrapped.hint)] = "v2-" + canonical_hash(
+            [request.slot_id, "respond", 2]
+        )
+        await wrapped.structured("respond", ResponseOutput, {})
+        if forgery == "relabeled_inner_hint":
+            # A claimed valid hint cannot legitimize a different stored physical ID.
+            wrapped.ledger[0]["stable_logical_call_id"] = "v2-" + canonical_hash(
+                [request.slot_id, "respond", 1]
+            )
+    else:
+        await wrapped.model.structured(
+            "analyze", ResponseOutput, {"_model_call_id": "wrong-role"}
+        )
+    with pytest.raises(ValueError, match="another planning slot"):
+        verify_identity_ledger(path, request, wrapped.ledger)
 
 
 def test_review_admission_rechecks_adopted_identity_before_journal(

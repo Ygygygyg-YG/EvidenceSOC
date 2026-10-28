@@ -347,7 +347,7 @@ def explicit_identity_proof(proof, tmp_path):
     state["diagnostic_snapshot"]["analysis_import_provenance"] = deepcopy(provenance)
     state["diagnostic_snapshot_sha256"] = _plan_hash(state["diagnostic_snapshot"])
     record = proof["ledger"][0]
-    hint = "e-planning-respond-" + canonical_hash(request.planning_slot_id)
+    hint = "v2-" + canonical_hash([request.slot_id, "respond", 1])
     logical_key = canonical_hash(["respond", "ResponseOutput", hint])
     account = SupplementBudgetAccount(path, **request.budget_binding())
     physical = account.physical_request_key(logical_key, 1, explicit_call_id=hint)
@@ -371,6 +371,7 @@ def explicit_identity_proof(proof, tmp_path):
     )
     record.update(
         **identity,
+        stable_logical_call_id=hint,
         reservation_id=reservation,
         physical_request_id=physical,
         response_model=manifest["expected_model"]["response_model"],

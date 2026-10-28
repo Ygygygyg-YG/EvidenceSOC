@@ -81,11 +81,17 @@ def verify_identity_ledger(path, request, ledger):
             ):
                 raise ValueError("physical ledger reservation mapping differs")
             if hasattr(request, "planning_slot_id"):
-                hint = "e-planning-respond-" + canonical_hash(request.planning_slot_id)
+                # StableCallModel replaces the outer respond hint before accounting.
+                hint = "v2-" + canonical_hash([request.slot_id, "respond", 1])
                 logical_key = canonical_hash(["respond", "ResponseOutput", hint])
-                if call.get("role") != "respond" or account.physical_request_key(
-                    logical_key, call.get("physical_attempt"), explicit_call_id=hint
-                ) != call.get("physical_request_id"):
+                if (
+                    call.get("role") != "respond"
+                    or call.get("stable_logical_call_id") != hint
+                    or account.physical_request_key(
+                        logical_key, call.get("physical_attempt"), explicit_call_id=hint
+                    )
+                    != call.get("physical_request_id")
+                ):
                     raise ValueError("physical ledger belongs to another planning slot")
             raw = call.get("raw_response")
             if (call.get("http_status") == 200 or isinstance(raw, dict)) and (
