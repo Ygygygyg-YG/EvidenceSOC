@@ -53,6 +53,21 @@ def validate_epoch_runtime(
     source_commit,
     worker=False,
 ) -> dict:
+    request = EpochRemediationRequest.model_validate(request.model_dump(mode="json"))
+    return _validate_registered_epoch_runtime(
+        request, agent_dir, source, budget_path, runtime_binding, source_commit, worker
+    )
+
+
+def _validate_registered_epoch_runtime(
+    request,
+    agent_dir,
+    source,
+    budget_path,
+    runtime_binding,
+    source_commit,
+    worker=False,
+) -> dict:
     """SELECT-only admission; caller supplies independently observed runtime identity.
 
     The host also verifies the Git archive via its existing runtime validator.
@@ -65,12 +80,29 @@ def validate_epoch_runtime(
     )
     from evals.adapters.source_epochs import require_registered_epoch
 
-    request = EpochRemediationRequest.model_validate(request.model_dump(mode="json"))
+    # Authority comes from the exact validated contract, never caller phase/schema
+    # parameters. Public v3 and v4 entrypoints each revalidate their own contract.
+    if type(request) is EpochRemediationRequest:
+        request = EpochRemediationRequest.model_validate(
+            request.model_dump(mode="json")
+        )
+        phase, scope = "formal", "regression"
+        required = WORKER_ENTRYPOINTS
+    else:
+        from evals.adapters.epoch_development import EpochDevelopmentRequest
+
+        if type(request) is not EpochDevelopmentRequest:
+            raise ValueError("exact registered epoch worker request required")
+        request = EpochDevelopmentRequest.model_validate(
+            request.model_dump(mode="json")
+        )
+        phase, scope = "development", "development"
+        required = WORKER_ENTRYPOINTS | {"evals/adapters/epoch_development.py"}
     if worker:
         if os.getpid() != 1 or not os.environ.get("TASK13_WORKER_NONCE"):
-            raise PermissionError("epoch regression requires inspected worker PID1")
-        if os.environ.get("TASK13_PHASE") != "formal":
-            raise ValueError("epoch regression worker phase must be formal")
+            raise PermissionError(f"epoch {scope} requires inspected worker PID1")
+        if os.environ.get("TASK13_PHASE") != phase:
+            raise ValueError(f"epoch {scope} worker phase must be {phase}")
     source, budget_path = Path(source), Path(budget_path)
     validate_exported_source(request, agent_dir, source, source_commit=source_commit)
     require_existing_budget(budget_path, request.budget_identity)
@@ -101,7 +133,7 @@ def validate_epoch_runtime(
         raise ValueError("registered regression epoch runtime binding differs")
     receipt = json.loads((source / "source_receipt.json").read_text(encoding="utf-8"))
     files, entries = receipt["files"], epoch["entrypoints"]
-    required = WORKER_ENTRYPOINTS | (
+    required = required | (
         {
             "evals/adapters/model_identity_runtime.py",
             "evals/adapters/model_identities.py",

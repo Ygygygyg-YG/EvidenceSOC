@@ -35,6 +35,7 @@ WRITABLE_MOUNTS = {"/app/budget", "/app/output"}
 E_PLANNING_SCHEMA = "task13-e-planning-worker-v1"
 E_PLANNING_REVIEW_SCHEMA = "task13-e-planning-review-worker-v1"
 EPOCH_REGRESSION_SCHEMA = "task13-remediation-worker-v3"
+EPOCH_DEVELOPMENT_SCHEMA = "task13-remediation-worker-v4"
 EXPORT_PATHS = [
     "services/backend/src",
     "evals/contracts.py",
@@ -821,6 +822,10 @@ def preflight_runtime(options: dict, controller: dict) -> None:
 
 
 def _worker_request(spec: dict):
+    if spec.get("schema_version") == EPOCH_DEVELOPMENT_SCHEMA:
+        from evals.adapters.epoch_development import EpochDevelopmentRequest
+
+        return EpochDevelopmentRequest.model_validate(spec)
     if spec.get("schema_version") == EPOCH_REGRESSION_SCHEMA:
         from evals.adapters.epoch_remediation import EpochRemediationRequest
 
@@ -855,6 +860,10 @@ def _worker_request(spec: dict):
 
 
 async def _invoke_adapter(request, agent_dir: Path):
+    if getattr(request, "schema_version", None) == EPOCH_DEVELOPMENT_SCHEMA:
+        from evals.adapters.epoch_development import run_epoch_development
+
+        return await run_epoch_development(request, agent_dir)
     if getattr(request, "schema_version", None) == EPOCH_REGRESSION_SCHEMA:
         from evals.adapters.epoch_remediation import run_epoch_remediation
 
@@ -952,6 +961,7 @@ async def run_remediation_container(request, agent_dir: Path, options: dict) -> 
     if spec.get("schema_version") not in {
         "task13-remediation-worker-v2",
         EPOCH_REGRESSION_SCHEMA,
+        EPOCH_DEVELOPMENT_SCHEMA,
     }:
         raise ValueError("remediation requires its dedicated versioned worker schema")
     return await run_container(spec, agent_dir, options)
@@ -978,6 +988,9 @@ async def run_container(spec: dict, agent_dir: Path, options: dict) -> dict:
     request = _worker_request(spec)
     epoch_regression = (
         getattr(request, "schema_version", None) == EPOCH_REGRESSION_SCHEMA
+    )
+    epoch_development = (
+        getattr(request, "schema_version", None) == EPOCH_DEVELOPMENT_SCHEMA
     )
     planning_review = (
         getattr(request, "schema_version", None) == E_PLANNING_REVIEW_SCHEMA
@@ -1010,8 +1023,10 @@ async def run_container(spec: dict, agent_dir: Path, options: dict) -> dict:
             getattr(request, "schema_version", None) == "task13-source-review-worker-v1"
         )
     )
-    remediation = epoch_regression or (
-        getattr(request, "schema_version", None) == "task13-remediation-worker-v2"
+    remediation = (
+        epoch_regression
+        or epoch_development
+        or (getattr(request, "schema_version", None) == "task13-remediation-worker-v2")
     )
     if (
         verification or source_review or planning
@@ -1087,17 +1102,24 @@ async def run_container(spec: dict, agent_dir: Path, options: dict) -> dict:
     )
     epoch_manifest = None
     epoch_runtime = None
-    if epoch_regression:
-        from evals.adapters.epoch_remediation import validate_epoch_runtime
+    if epoch_regression or epoch_development:
+        if epoch_development:
+            from evals.adapters.epoch_development import (
+                validate_epoch_development_runtime as epoch_validator,
+            )
+        else:
+            from evals.adapters.epoch_remediation import (
+                validate_epoch_runtime as epoch_validator,
+            )
 
         if options.get("model_identity_binding") != (
             request.model_identity_binding.model_dump(mode="json")
             if request.model_identity_binding is not None
             else None
         ):
-            raise ValueError("regression runtime model identity differs")
+            raise ValueError("epoch runtime model identity differs")
         epoch_runtime = e_planning_runtime_binding(options, dependency_receipt)
-        epoch_manifest = validate_epoch_runtime(
+        epoch_manifest = epoch_validator(
             request,
             agent_dir,
             source,
@@ -1204,7 +1226,7 @@ async def run_container(spec: dict, agent_dir: Path, options: dict) -> dict:
         )
         if remediation or remediation_review or planning:
             passed["TASK13_SOURCE_DIR"] = "/app/source"
-        if epoch_regression:
+        if epoch_regression or epoch_development:
             passed["TASK13_RUNTIME_BINDING"] = json.dumps(epoch_runtime, sort_keys=True)
             passed["TASK13_EPOCH_HOST_BUDGET_PATH"] = epoch_manifest["budget_path"]
         if planning:

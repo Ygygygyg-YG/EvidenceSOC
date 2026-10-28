@@ -126,7 +126,13 @@ def validate_binding(
     source_commit: str | None = None,
 ) -> None:
     """Recheck mounted bytes in-worker; the controller also validates the Git archive."""
-    if getattr(request, "schema_version", None) == "task13-remediation-worker-v3":
+    if getattr(request, "schema_version", None) == "task13-remediation-worker-v4":
+        from evals.adapters.epoch_development import EpochDevelopmentRequest
+
+        request = EpochDevelopmentRequest.model_validate(
+            request.model_dump(mode="json")
+        )
+    elif getattr(request, "schema_version", None) == "task13-remediation-worker-v3":
         from evals.adapters.epoch_remediation import EpochRemediationRequest
 
         request = EpochRemediationRequest.model_validate(
@@ -562,7 +568,11 @@ async def run_remediation(
 ) -> AdapterResult:
     if os.getpid() != 1 or not os.environ.get("TASK13_WORKER_NONCE"):
         raise PermissionError("v2 adapter requires inspected container worker PID1")
-    if getattr(request, "schema_version", None) == "task13-remediation-worker-v3":
+    if getattr(request, "schema_version", None) == "task13-remediation-worker-v4":
+        from evals.adapters.epoch_development import validate_epoch_development_worker
+
+        request = validate_epoch_development_worker(request, agent_dir)
+    elif getattr(request, "schema_version", None) == "task13-remediation-worker-v3":
         from evals.adapters.epoch_remediation import validate_epoch_worker
 
         request = validate_epoch_worker(request, agent_dir)
