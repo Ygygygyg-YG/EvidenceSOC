@@ -329,3 +329,152 @@ def test_identity_halt_does_not_prevent_settlement(tmp_path):
         assert db.execute(
             "SELECT actual,settled FROM reservations WHERE id=?", (reservation,)
         ).fetchone() == (0.05, 1)
+
+
+@pytest.mark.parametrize(
+    "table",
+    [
+        "supplement_model_epochs",
+        "supplement_request_models",
+        "supplement_model_halts",
+        "budget_halt_events",
+    ],
+)
+def test_replace_cannot_overwrite_any_immutable_record(tmp_path, table):
+    path, manifest = fixture(tmp_path)
+    adopt(path, manifest)
+    scoped = account(path, manifest)
+    reservation = scoped.reserve("new", 0.1, "development", metadata=started())
+    with pytest.raises(RuntimeError):
+        scoped.bind_model("bad", "approved-fp", reservation_id=reservation)
+    scoped.settle(reservation, None, metadata=finished())
+    with sqlite3.connect(path) as db:
+        db.execute("INSERT OR REPLACE INTO config VALUES ('halt','provider HTTP 401')")
+    with sqlite3.connect(path) as db:
+        assert db.execute("PRAGMA recursive_triggers").fetchone()[0] == 0
+        with pytest.raises(sqlite3.IntegrityError):
+            db.execute(f"INSERT OR REPLACE INTO {table} SELECT * FROM {table} LIMIT 1")
+
+
+@pytest.mark.parametrize("key", ["model_epoch_number", "predecessor_model_epoch_id"])
+def test_replace_cannot_overwrite_secondary_model_unique_keys(tmp_path, key):
+    path, manifest = fixture(tmp_path)
+    adopt(path, manifest)
+    successor = {
+        **manifest,
+        "model_epoch_id": "model-1",
+        "model_epoch_number": 1,
+        "predecessor_model_epoch_id": "model-0",
+        "expected_model": {**manifest["expected_model"], "id": "model-1"},
+    }
+    adopt(path, successor)
+    with sqlite3.connect(path) as db:
+        columns = [
+            x[1] for x in db.execute("PRAGMA table_info(supplement_model_epochs)")
+        ]
+        row = list(
+            db.execute(
+                "SELECT * FROM supplement_model_epochs WHERE model_epoch_id='model-1'"
+            ).fetchone()
+        )
+        row[columns.index("model_epoch_id")] = "other"
+        if key == "predecessor_model_epoch_id":
+            row[columns.index("model_epoch_number")] = 2
+        placeholders = ",".join("?" for _ in row)
+        with pytest.raises(sqlite3.IntegrityError):
+            db.execute(
+                f"INSERT OR REPLACE INTO supplement_model_epochs VALUES ({placeholders})",
+                row,
+            )
+
+
+@pytest.mark.parametrize(
+    "column,value",
+    [("event_id", "other"), ("model_epoch_id", "other"), ("created_at", "altered")],
+)
+def test_model_halt_digest_binds_immutable_fields(tmp_path, column, value):
+    path, manifest = fixture(tmp_path)
+    adopt(path, manifest)
+    scoped = account(path, manifest)
+    with pytest.raises(RuntimeError):
+        scoped.bind_model("bad", "approved-fp")
+    with sqlite3.connect(path) as db:
+        sql = db.execute(
+            "SELECT sql FROM sqlite_master WHERE name='supplement_model_halts_no_update'"
+        ).fetchone()[0]
+        db.execute("DROP TRIGGER supplement_model_halts_no_update")
+        db.execute(f"UPDATE supplement_model_halts SET {column}=?", (value,))
+        db.execute(sql)
+    with pytest.raises(ValueError):
+        account(path, manifest)
+
+
+def test_retired_and_successor_compete_against_shared_ledger(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    from evals.adapters.model_client import BudgetLimit
+
+    path, manifest = fixture(tmp_path)
+    adopt(path, manifest)
+    old = account(path, manifest)
+    reservation = old.reserve("old", 2, "development", metadata=started("old"))
+    old.settle(reservation, 2, metadata=finished("old", usage_missing_reason=None))
+    successor = {
+        **manifest,
+        "model_epoch_id": "model-1",
+        "model_epoch_number": 1,
+        "predecessor_model_epoch_id": "model-0",
+        "expected_model": {**manifest["expected_model"], "id": "model-1"},
+    }
+    adopt(path, successor)
+    new = account(path, successor)
+
+    def reserve(pair):
+        bound, name = pair
+        try:
+            return bound.reserve(
+                name, 4, "development", metadata=started(name, logical_call_id=name)
+            )
+        except (ValueError, BudgetLimit):
+            return None
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        retired, current = list(pool.map(reserve, [(old, "retired"), (new, "current")]))
+    assert retired is None and current is not None
+    with pytest.raises(BudgetLimit):
+        new.reserve(
+            "exceeds",
+            0.01,
+            "development",
+            metadata=started("exceeds", logical_call_id="exceeds"),
+        )
+    with sqlite3.connect(path) as db:
+        assert (
+            db.execute("SELECT COUNT(*) FROM supplement_request_models").fetchone()[0]
+            == 2
+        )
+
+
+def test_halt_digest_rejects_reassignment_to_registered_successor(tmp_path):
+    path, manifest = fixture(tmp_path)
+    adopt(path, manifest)
+    old = account(path, manifest)
+    with pytest.raises(RuntimeError):
+        old.bind_model("bad", "approved-fp")
+    successor = {
+        **manifest,
+        "model_epoch_id": "model-1",
+        "model_epoch_number": 1,
+        "predecessor_model_epoch_id": "model-0",
+        "expected_model": {**manifest["expected_model"], "id": "model-1"},
+    }
+    adopt(path, successor)
+    with sqlite3.connect(path) as db:
+        trigger = db.execute(
+            "SELECT sql FROM sqlite_master WHERE name='supplement_model_halts_no_update'"
+        ).fetchone()[0]
+        db.execute("DROP TRIGGER supplement_model_halts_no_update")
+        db.execute("UPDATE supplement_model_halts SET model_epoch_id='model-1'")
+        db.execute(trigger)
+    with pytest.raises(ValueError, match="halt evidence"):
+        account(path, manifest)

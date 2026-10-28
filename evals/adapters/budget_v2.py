@@ -285,18 +285,31 @@ class SupplementBudgetAccount(BudgetAccount):
                 response_model != expected["response_model"]
                 or fingerprint != expected["fingerprint"]
             ):
-                evidence = canonical_hash([response_model, fingerprint, reservation_id])
+                event_id = uuid.uuid4().hex
+                reason = "response_identity_mismatch"
+                created_at = datetime.now(UTC).isoformat()
+                evidence = canonical_hash(
+                    [
+                        event_id,
+                        self._model_epoch_id,
+                        reservation_id,
+                        reason,
+                        response_model,
+                        fingerprint,
+                        created_at,
+                    ]
+                )
                 db.execute(
                     "INSERT INTO supplement_model_halts VALUES (?,?,?,?,?,?,?,?)",
                     (
-                        uuid.uuid4().hex,
+                        event_id,
                         self._model_epoch_id,
                         reservation_id,
-                        "response_identity_mismatch",
+                        reason,
                         response_model,
                         fingerprint,
                         evidence,
-                        datetime.now(UTC).isoformat(),
+                        created_at,
                     ),
                 )
                 db.commit()

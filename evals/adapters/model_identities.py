@@ -124,6 +124,19 @@ def _authority(m, a, digest):
         )
 
 
+CONFLICT_PREDICATES = {
+    "supplement_model_epochs": "model_epoch_id=NEW.model_epoch_id OR (campaign_id=NEW.campaign_id AND model_epoch_number=NEW.model_epoch_number) OR (NEW.predecessor_model_epoch_id IS NOT NULL AND predecessor_model_epoch_id=NEW.predecessor_model_epoch_id)",
+    "supplement_request_models": "reservation_id=NEW.reservation_id",
+    "supplement_model_halts": "event_id=NEW.event_id",
+    "budget_halt_events": "event_id=NEW.event_id",
+}
+
+
+def _conflict_trigger(table):
+    name = f"{table}_no_replace"
+    return f"CREATE TRIGGER {name} BEFORE INSERT ON {table} WHEN EXISTS (SELECT 1 FROM {table} WHERE {CONFLICT_PREDICATES[table]}) BEGIN SELECT RAISE(ABORT,'model identity records are append-only'); END"
+
+
 def _schema(db):
     db.execute(
         "CREATE TABLE IF NOT EXISTS supplement_model_epochs (model_epoch_id TEXT PRIMARY KEY, campaign_id TEXT NOT NULL, model_epoch_number INTEGER NOT NULL, predecessor_model_epoch_id TEXT, manifest_json TEXT NOT NULL, manifest_sha256 TEXT NOT NULL, authority_json TEXT NOT NULL, authority_sha256 TEXT NOT NULL, registered_at TEXT NOT NULL, chain_sha256 TEXT NOT NULL, UNIQUE(campaign_id,model_epoch_number), UNIQUE(predecessor_model_epoch_id))"
@@ -142,6 +155,12 @@ def _schema(db):
             db.execute(
                 f"CREATE TRIGGER IF NOT EXISTS {table}_no_{op.lower()} BEFORE {op} ON {table} BEGIN SELECT RAISE(ABORT,'model identity records are append-only'); END"
             )
+    for table in TABLES:
+        db.execute(
+            _conflict_trigger(table).replace(
+                "CREATE TRIGGER ", "CREATE TRIGGER IF NOT EXISTS ", 1
+            )
+        )
     for op in ("INSERT", "UPDATE"):
         db.execute(
             f"CREATE TRIGGER IF NOT EXISTS budget_capture_halt_{op.lower()} AFTER {op} ON config WHEN NEW.key='halt' AND NEW.value<>'observable model version changed' BEGIN INSERT INTO budget_halt_events(reason) VALUES (NEW.value); END"
@@ -160,6 +179,8 @@ def _check_schema(db):
             expected[name] = (
                 f"CREATE TRIGGER {name} BEFORE {op} ON {table} BEGIN SELECT RAISE(ABORT,'model identity records are append-only'); END"
             )
+    for table in TABLES:
+        expected[f"{table}_no_replace"] = _conflict_trigger(table)
     for op in ("INSERT", "UPDATE"):
         name = f"budget_capture_halt_{op.lower()}"
         expected[name] = (
@@ -218,13 +239,33 @@ def _chain(db):
         values.append(m)
         previous = row
     ids = {m["model_epoch_id"] for m in values}
-    for model_id, reservation, reason, observed, fingerprint, evidence in db.execute(
-        "SELECT model_epoch_id,reservation_id,reason,observed_model,observed_fingerprint,evidence_sha256 FROM supplement_model_halts"
+    for (
+        event_id,
+        model_id,
+        reservation,
+        reason,
+        observed,
+        fingerprint,
+        evidence,
+        created_at,
+    ) in db.execute(
+        "SELECT event_id,model_epoch_id,reservation_id,reason,observed_model,observed_fingerprint,evidence_sha256,created_at FROM supplement_model_halts"
     ):
         if (
             model_id not in ids
             or reason != "response_identity_mismatch"
-            or evidence != canonical_hash([observed, fingerprint, reservation])
+            or evidence
+            != canonical_hash(
+                [
+                    event_id,
+                    model_id,
+                    reservation,
+                    reason,
+                    observed,
+                    fingerprint,
+                    created_at,
+                ]
+            )
         ):
             raise ValueError("model halt evidence altered")
     return values, previous
