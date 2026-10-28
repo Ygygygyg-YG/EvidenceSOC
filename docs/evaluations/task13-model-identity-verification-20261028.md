@@ -25,7 +25,7 @@
 
 工程目录为 `data/task13/supplements/task13-repair-202610-v2/development/model-identity-engineering-20261028`。恢复时只读观察仍为 51 次补充开发物理请求、累计 0.35657016 元；原 3350 行前缀、来源 epoch0/1/2、旧身份与停机、旧槽 started/unclaimed/unclaimed 均保留。
 
-`original-artifacts-before.json` 固定 122 份原工件。`original-logical-before.json` 固定原预算 6 张表及旧规划日志 3 张表的全部逻辑行与 schema 摘要。最终验收须生成对应 after 记录并完全一致，才报告保全通过。
+`original-artifacts-before.json` 固定 122 份原工件。`original-logical-before.json` 固定原预算 6 张表及旧规划日志 3 张表的全部逻辑行与 schema 摘要。最终对应 after 记录已生成并完全一致，原始证据保全通过。
 
 ## 运行时接入与联合验证
 
@@ -35,7 +35,15 @@ Task2 已提交 `5c517fe`：显式引用贯穿 E 请求、worker、独立宿主�
 
 审查后的唯一生产文件变化是修正 no_plan 模块说明：显式模式确实只读预算映射，但不改写预算或认领槽。审查者确认去掉模块 docstring 的 AST 完全一致；最终 `task13-identity-final-noplan-20261028` 的 41 项针对性验证通过。预算与身份四文件也已换为精确 Git blob 字节，并以 `task13-identity-task1-committed-bytes-20261028` 再次验证 130 项通过。
 
-本机 PG/OS 免费验收首次 3 项通过，全部专属资源清理，模型响应为合成数据。最终冻结源码后的 R1/R2、Linux 导出、原件 after 比对及候选回执尚待记录；源码提交与后续仅证据文档提交分开记录，不能把合成验证计作真实计时。
+最终冻结源码为 `ef46d664aa4727a21e03cd71e218df50de77e3e8`，实际 Git archive 导出 111 个源码文件。本机 PG/OS 最终免费验收 3 项通过，全部专属资源清理，模型响应为合成数据；R1/R2 均通过。Linux 在固定镜像、无网络、只读根与三个只读挂载下通过原分析重验、导入、旧请求往返及实际符号链接拒绝，精确测试容器已清理。Windows 的唯一跳过项由该 Linux 证据补齐。
+
+R1/R2 首次包装脚本没有把项目 PYTHONPATH 传给 MCP 子进程，因模块导入失败终止；失败材料保留，修改包装器一行后重新通过，冻结源码未改。失败与成功两次门禁的指定数据库及索引均已独立只读确认为不存在。源码提交与后续仅证据文档提交分开记录，不能把合成验证计作真实计时。
+
+机器验收回执位于工程目录的 `verification.json`，原字节 SHA256 为 `90dda1c4033a50cb26a41bfcfa8c9a1901aa97ef5962e4a798a71a708a167a78`。其中固定联合测试、针对性测试、本机验收、R1/R2、Linux、审查和原件比对的精确文件摘要。
+
+新候选位于 `data/task13/supplements/task13-repair-202610-v2/development/identity-candidate-20261028-2ad5f363`，`candidate.json` 原字节 SHA256 为 `f66d15f1462978ed65b3aa99915a27493be28670039f110bae437d5da33f9545`。该目录含最终导出、core、来源及身份提案、拟用槽和中文说明；所有实际授权标志均为 false。固定依赖和知识库摘要已重新核对。身份提案明确列出 development/regression/f8 的身份可用范围，以便后续独立授权的阶段核对同一身份；发送提案仍只含三次 E 规划，不授予 176 或 F8 权限。
+
+本轮 A 的免费工程、验证、独立审查和新候选准备已完成。保留独立分支及工作树供后续采用；主工作区及旧冻结树不合并、不改写。新增供应商请求、真实来源/身份/槽登记、真实批准和计时信用均为 0。
 
 ## 权限与证据限制
 

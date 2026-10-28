@@ -66,10 +66,10 @@ def _check_dispatch_in_transaction(self, db):
 
 **Files:** docs/evaluations/task13-model-identity-verification-20261028.md、此计划及.superpowers/sdd/progress.md；主工作区活动根下全新候选/审计目录。工程辅助脚本放主工作区.tmp，不写原候选。
 
-- [ ] 固定最终受检源码，适当相关联合回归和必要免费本机服务/真实Linux只读导出验收；不因旧通过的无关范围重复全量测试，源码变化则重测覆盖范围。
-- [ ] 全分支独立审查关闭Critical/Important，覆盖权限、核算、真实环境边界、null/fallback、旧兼容；修复后仅重测必要覆盖组。
-- [ ] 本地提交最终源码并导出实际Git archive，重新执行该提交必要R1/R2和最小Linux导入/原便携分析重验；需补齐被忽略fixture时按权威hash复制，原件不改。
-- [ ] 只读复核原账本及旧工件前后不变，51次/0.35657016元、原halt、epoch0/1/2、旧槽及0/3信用不变。
-- [ ] 准备新候选的确切source/core/源epoch提案/model manifest提案和具体发送确认单。旧bc19仅作拟采用值，明确尚未真实采用；外部采用authority和发送决定均待用户，不制造实际批准、不运行登记CLI。新规划限额须另列新增3逻辑/最多9物理以及此前实际2次，共最多11规划物理，费用仍计开发6元。
-- [ ] 候选依赖顺序固定为core/source epoch → identity manifest → 具体确认单 → 外部采用authority → host manifest；确认单不直接或间接固定authority摘要。
-- [ ] 工程报告、精确hash机器回执和进度清楚区分完成工程与待真实采用/发送/三次批准计时/TTL/176正式准入；不标整体Task13已完成。
+- [x] 固定最终受检源码，适当相关联合回归和必要免费本机服务/真实Linux只读导出验收；不因旧通过的无关范围重复全量测试，源码变化则重测覆盖范围。
+- [x] 全分支独立审查关闭Critical/Important，覆盖权限、核算、真实环境边界、null/fallback、旧兼容；修复后仅重测必要覆盖组。
+- [x] 本地提交最终源码并导出实际Git archive，重新执行该提交必要R1/R2和最小Linux导入/原便携分析重验；需补齐被忽略fixture时按权威hash复制，原件不改。
+- [x] 只读复核原账本及旧工件前后不变，51次/0.35657016元、原halt、epoch0/1/2、旧槽及0/3信用不变。
+- [x] 准备新候选的确切source/core/源epoch提案/model manifest提案和具体发送确认单。旧bc19仅作拟采用值，明确尚未真实采用；外部采用authority和发送决定均待用户，不制造实际批准、不运行登记CLI。新规划限额须另列新增3逻辑/最多9物理以及此前实际2次，共最多11规划物理，费用仍计开发6元。
+- [x] 候选依赖顺序固定为core/source epoch → identity manifest → 具体确认单 → 外部采用authority → host manifest；确认单不直接或间接固定authority摘要。
+- [x] 工程报告、精确hash机器回执和进度清楚区分完成工程与待真实采用/发送/三次批准计时/TTL/176正式准入；不标整体Task13已完成。
