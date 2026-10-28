@@ -536,6 +536,25 @@ def _verify_artifact_blobs(anchor, manifest, blobs, *, artifact_paths=None):
         raise ValueError(
             "original slot/request/attempt binding differs or did not succeed"
         )
+    return _replay_verified_analysis(
+        anchor,
+        manifest,
+        blobs,
+        request,
+        original_receipt,
+        artifact_paths=artifact_paths,
+    )
+
+
+def _replay_verified_analysis(
+    anchor, manifest, blobs, request, original_receipt, *, artifact_paths=None
+):
+    """Scientific replay after the caller has verified its versioned authority.
+
+    The original entry above still requires the original 36 rows and v2 request.
+    Additional development uses its independently pinned v4 registration instead.
+    """
+    value = lambda key: json.loads(blobs[key])
     result = AdapterResult.model_validate_json(blobs["result"])
     original = AdapterResult.model_validate_json(blobs["stdout"])
     # Controller adds isolation receipts to stdout; it must not replace any
