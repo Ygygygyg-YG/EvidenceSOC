@@ -69,5 +69,12 @@ The new candidate copies identical selection-policy bytes locally. Its frozen
 scope packet is `3ee457d67c7f261e3db9d57c55d9c832cfd820935e349c554646efb98e8ee900`
 under `development/cold-terminal-candidate-20261030-facd10e2`. It explicitly
 replaces the unused 6b5 scope without increasing its maximum 12 requests. New
-exact-source adoption is pending; original sending bounds persist. Actual
-analysis, plan approvals and three timing trials remain pending.
+exact-source adoption was actually approved via
+`call_1ba004a856204c05afaed80aea532af5` and source5/model2 were registered once in
+the original account. The original rows/schema remain intact. Actual local
+launch bindings, source/dependency/knowledge hashes and registered identity
+checks passed; midday dispatch and E derivation without a real analysis package
+were refused. Resume instructions are saved in the candidate's
+`activation/resume-boundary.json`. Original sending bounds persist. Actual
+analysis, individual plan approvals and three timing trials remain pending the
+19:00–00:00 window with the user present. No new provider request or fee.
