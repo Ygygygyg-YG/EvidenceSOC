@@ -53,3 +53,21 @@ Finish and review the concrete successor before requesting that adoption delta.
 6. Verify candidate paths and operator interfaces before requesting adoption.
    No actual provider dispatch, E slot registration, plan approval or timing is
    credited by this engineering work.
+
+## Verified result
+
+Production commit: `facd10e2f378fbebbcc8acfe0746e63a15a947dc`.
+Related regression: 268 passed, 2 Windows symlink-privilege skips. Actual native
+Linux symlink/hardlink/directory-symlink checks passed separately. Three RED
+rounds cover the original protocol mismatch, unknown-protocol fallback, and
+incomplete finalization/mixed protocols. Independent review: C0/I0. Actual
+32-root admission passed; all 64 locks released, all 12 original output files
+and all three original SQLite logical states unchanged. The old 6b5 candidate
+was not registered and made no provider request.
+
+The new candidate copies identical selection-policy bytes locally. Its frozen
+scope packet is `3ee457d67c7f261e3db9d57c55d9c832cfd820935e349c554646efb98e8ee900`
+under `development/cold-terminal-candidate-20261030-facd10e2`. It explicitly
+replaces the unused 6b5 scope without increasing its maximum 12 requests. New
+exact-source adoption is pending; original sending bounds persist. Actual
+analysis, plan approvals and three timing trials remain pending.
