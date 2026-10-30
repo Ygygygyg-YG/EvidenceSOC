@@ -337,6 +337,191 @@ def require_registered_epoch(path, epoch_id, **bindings):
         return manifest
 
 
+def _additional_file(root, path):
+    """Read only canonical, singly linked regular files under this output root."""
+    if not isinstance(path, (str, Path)):
+        raise TypeError("additional terminal file path is invalid")
+    path = Path(path)
+    if (
+        not path.is_absolute()
+        or not path.is_relative_to(root)
+        or str(path) != str(path.resolve(strict=True))
+        or any(p.is_symlink() or p.is_junction() for p in (path, *path.parents))
+        or not path.is_file()
+        or path.stat().st_nlink != 1
+    ):
+        raise ValueError("additional terminal file is missing, linked or outside root")
+    return path, path.read_bytes()
+
+
+def _additional_launch_terminal(root, binding, result, *, failed):
+    """Require final controller evidence, beyond the earlier worker attempt receipt."""
+    receipt = json.loads(_additional_file(root, root / "launch-receipt.json")[1])
+    context = json.loads(_additional_file(root, root / "started-context.json")[1])
+    if not isinstance(receipt, dict) or not isinstance(context, dict):
+        raise TypeError("additional terminal launcher records must be objects")
+    records = [receipt]
+    times = [receipt["started_at"]]
+    if failed:
+        stop = json.loads(_additional_file(root, root / "stop.json")[1])
+        if (
+            not isinstance(stop, dict)
+            or stop.get("no_replay") is not True
+            or {k: v for k, v in stop.items() if k not in {"stopped_at", "no_replay"}}
+            != {
+                k: v
+                for k, v in receipt.items()
+                if k not in {"finished_at", "preserved_output_inventory"}
+            }
+        ):
+            raise ValueError("additional terminal stop binding differs")
+        records.append(stop)
+        times.append(stop["stopped_at"])
+    elif (root / "stop.json").exists():
+        # Post-attempt failures/not-qualified runs need separate reconciliation.
+        raise ValueError("additional completed launcher has a stop record")
+    times.append(receipt["finished_at"])
+    stable = (
+        *binding,
+        "schema_version",
+        "started_at",
+        "source_commit",
+        "candidate_sha256",
+        "activation_plan_sha256",
+        "scope_packet_sha256",
+        "actual_user_reply_sha256",
+        "core_config_sha256",
+        "synthetic",
+        "automatic_retry",
+        "package_verified",
+        "plan_approval_credit",
+        "timing_credit",
+    )
+    if (
+        any(context.get(key) != receipt.get(key) for key in stable)
+        or context.get("status") != "unknown"
+        or any(
+            record.get("schema_version")
+            != "task13-additional-analysis-launch-receipt-v1"
+            or record.get("status")
+            != (
+                "failed" if failed else "completed_awaiting_strict_package_verification"
+            )
+            or record.get("actual_execution_status")
+            != ("failed" if failed else "completed")
+            or record.get("automatic_retry") is not False
+            or record.get("synthetic") is not False
+            or record.get("package_verified") is not False
+            or any(record.get(key) != value for key, value in binding.items())
+            for record in records
+        )
+        or not isinstance(receipt.get("source_commit"), str)
+        or re.fullmatch(r"[0-9a-f]{40}", receipt["source_commit"]) is None
+        or any(
+            not _sha256(receipt.get(key)) for key in stable if key.endswith("sha256")
+        )
+        or any(
+            type(receipt.get(key)) is not int or receipt[key] != 0
+            for key in ("plan_approval_credit", "timing_credit")
+        )
+    ):
+        raise ValueError("additional terminal launcher binding differs")
+    times = [datetime.fromisoformat(value) for value in times]
+    if any(value.utcoffset() is None for value in times) or times != sorted(times):
+        raise ValueError("additional terminal launcher chronology differs")
+    resources, isolation = result.get("resources"), result.get("isolation_evidence")
+    if failed and (
+        result.get("execution_status") != "failed"
+        or result.get("model_ledger") != []
+        or not isinstance(resources, dict)
+        or not isinstance(isolation, dict)
+        or any(
+            type(record.get(key)) is not int or record[key] != 0
+            for record, key in (
+                (resources, "model_logical_calls"),
+                (resources, "model_physical_attempts"),
+                (isolation, "real_model_invocations"),
+                (isolation, "model_physical_attempts"),
+            )
+        )
+        or not isinstance(resources.get("development"), dict)
+        or resources["development"].get("payloads") != []
+        or resources["development"].get("slot_id") != binding["slot_id"]
+    ):
+        raise ValueError(
+            "additional terminal failure has unknown or nonzero model calls"
+        )
+    inventory = receipt.get("preserved_output_inventory")
+    if not isinstance(inventory, list):
+        raise TypeError("additional terminal inventory is missing")
+    pinned = set()
+    for item in inventory:
+        if not isinstance(item, dict) or set(item) != {"path", "size", "sha256"}:
+            raise ValueError("additional terminal inventory entry is invalid")
+        path, raw = _additional_file(root, item["path"])
+        if (
+            path in pinned
+            or type(item["size"]) is not int
+            or item["size"] != len(raw)
+            or item["sha256"] != sha256(raw).hexdigest()
+        ):
+            raise ValueError("additional terminal inventory bytes or uniqueness differ")
+        pinned.add(path)
+    # The original launcher inventories every preserved file before writing itself.
+    actual = {path for path in root.rglob("*") if path.is_file()}
+    if pinned != actual - {root / "launch-receipt.json"}:
+        raise ValueError("additional terminal inventory does not cover actual output")
+    stdout = isolation.get("raw_stdout") if isinstance(isolation, dict) else None
+    if not isinstance(stdout, dict):
+        raise TypeError("additional terminal stdout binding is missing")
+    path, raw = _additional_file(root, stdout.get("path"))
+    if (
+        stdout.get("schema_version") != "task13-worker-stdout-v1"
+        or path not in pinned
+        or type(stdout.get("bytes")) is not int
+        or stdout["bytes"] != len(raw)
+        or stdout.get("sha256") != sha256(raw).hexdigest()
+    ):
+        raise ValueError("additional terminal stdout bytes differ")
+
+
+def _additional_terminal(root, start):
+    """Check quiescence only; confer no analysis, package or timing credit."""
+    # Lazy imports avoid additional_analysis -> source_epochs circular imports.
+    from evals.adapters.additional_analysis import (
+        AdditionalDevelopmentAttempt,
+        AdditionalDevelopmentStarted,
+    )
+    from evals.contracts import AdapterResult
+
+    try:
+        _additional_file(root, root / "started.json")
+        binding = AdditionalDevelopmentStarted.model_validate(start).model_dump(
+            mode="json", exclude={"schema_version"}
+        )
+        raw = _additional_file(root, root / "result.json")[1]
+        result = json.loads(raw)
+        AdapterResult.model_validate(result)
+        attempt_path = root / "attempt.json"
+        if attempt_path.exists():
+            attempt = AdditionalDevelopmentAttempt.model_validate_json(
+                _additional_file(root, attempt_path)[1]
+            )
+            if (
+                any(getattr(attempt, key) != value for key, value in binding.items())
+                or attempt.result_sha256 != sha256(raw).hexdigest()
+                or result.get("execution_status") != "completed"
+            ):
+                raise ValueError("additional terminal completed execution differs")
+        _additional_launch_terminal(
+            root, binding, result, failed=not attempt_path.exists()
+        )
+    except (KeyError, TypeError, ValueError, OSError) as error:
+        raise PermissionError(
+            "additional controller terminal receipt requires reconciliation"
+        ) from error
+
+
 def _lock_controller_roots(roots, stack):
     owned_locks = set()
     for root in sorted(roots):
@@ -387,14 +572,32 @@ def _lock_controller_roots(roots, stack):
                     "unrecognized controller journal requires reconciliation"
                 )
             if entry.name == "started.json":
+                start = json.loads(entry.read_text(encoding="utf-8"))
+                if any(
+                    key in start
+                    for key in (
+                        "schema_version",
+                        "registration_id",
+                        "registration_sha256",
+                    )
+                ):
+                    _additional_terminal(entry.parent, start)
+                    continue
                 attempt_path = entry.parent / "attempt.json"
                 result_path = entry.parent / "result.json"
                 if not attempt_path.is_file() or not result_path.is_file():
                     raise PermissionError("controller dispatch is not quiescent")
-                start = json.loads(entry.read_text(encoding="utf-8"))
                 attempt = json.loads(attempt_path.read_text(encoding="utf-8"))
                 if (
                     attempt.get("status") not in {"completed", "failed"}
+                    or any(
+                        key in attempt
+                        for key in (
+                            "schema_version",
+                            "registration_id",
+                            "registration_sha256",
+                        )
+                    )
                     or not _sha256(start.get("bundle_sha256"))
                     or attempt.get("bundle_sha256") != start["bundle_sha256"]
                     or attempt.get("slot_id") != start.get("slot_id")

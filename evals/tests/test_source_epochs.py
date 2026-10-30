@@ -4,6 +4,7 @@ import json
 import shutil
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
+from hashlib import sha256
 
 import pytest
 
@@ -839,6 +840,454 @@ def test_reconciled_terminal_controller_is_quiescent(tmp_path):
         )
     )
     register(path, manifest_for(identity, controller))
+    assert not (controller / ".writer-lock").exists()
+
+
+def additional_terminal(controller, *, completed=False):
+    """Temporary evidence in the original launcher's shape, with no transport."""
+    from evals.contracts import AdapterResult
+
+    root = controller / "additional"
+    root.mkdir()
+    binding = {
+        "registration_id": "additional-development-test",
+        "registration_sha256": "a" * 64,
+        "request_sha256": "b" * 64,
+        "slot_id": "development-test",
+    }
+    write_record(
+        root,
+        "started.json",
+        {"schema_version": "task13-additional-development-started-v1", **binding},
+    )
+    stdout = root / "worker.controller" / "worker-stdout.bin"
+    stdout.parent.mkdir()
+    stdout.write_bytes(b"temporary worker stdout\n")
+    result = AdapterResult(
+        execution_status="completed" if completed else "failed",
+        # A completed execution need not be a qualified analysis or timing result.
+        diagnosis_status="failed",
+        resources={
+            "model_logical_calls": 0,
+            "model_physical_attempts": 0,
+            "development": {"payloads": [], "slot_id": binding["slot_id"]},
+        },
+        isolation_evidence={
+            "real_model_invocations": 0,
+            "model_physical_attempts": 0,
+            "raw_stdout": {
+                "schema_version": "task13-worker-stdout-v1",
+                "path": str(stdout.resolve()),
+                "sha256": sha256(stdout.read_bytes()).hexdigest(),
+                "bytes": stdout.stat().st_size,
+            },
+        },
+    ).model_dump(mode="json")
+    write_record(root, "result.json", result)
+    if completed:
+        write_record(
+            root,
+            "attempt.json",
+            {
+                "schema_version": "task13-additional-development-attempt-v1",
+                **binding,
+                "status": "completed",
+                "result_sha256": sha256(
+                    (root / "result.json").read_bytes()
+                ).hexdigest(),
+            },
+        )
+    summary = {
+        "schema_version": "task13-additional-analysis-launch-receipt-v1",
+        **binding,
+        "synthetic": False,
+        "status": "completed_awaiting_strict_package_verification"
+        if completed
+        else "failed",
+        "actual_execution_status": "completed" if completed else "failed",
+        "automatic_retry": False,
+        "started_at": "2026-10-28T13:06:01+00:00",
+        "package_verified": False,
+        "plan_approval_credit": 0,
+        "timing_credit": 0,
+        "source_commit": "c" * 40,
+        "candidate_sha256": "d" * 64,
+        "activation_plan_sha256": "e" * 64,
+        "scope_packet_sha256": "f" * 64,
+        "actual_user_reply_sha256": "1" * 64,
+        "core_config_sha256": "2" * 64,
+    }
+    write_record(root, "started-context.json", {**summary, "status": "unknown"})
+    if not completed:
+        write_record(
+            root,
+            "stop.json",
+            {
+                **summary,
+                "stopped_at": "2026-10-28T13:07:23+00:00",
+                "no_replay": True,
+            },
+        )
+    write_record(
+        root,
+        "launch-receipt.json",
+        {**summary, "finished_at": "2026-10-28T13:07:24+00:00"},
+    )
+    refresh_inventory(root)
+    return root
+
+
+def write_record(root, name, value):
+    (root / name).write_text(json.dumps(value), encoding="utf-8")
+
+
+def change_record(root, name, **changes):
+    value = json.loads((root / name).read_text(encoding="utf-8"))
+    value.update(changes)
+    write_record(root, name, value)
+
+
+def refresh_inventory(root):
+    change_record(
+        root,
+        "launch-receipt.json",
+        preserved_output_inventory=[
+            {
+                "path": str(path.resolve()),
+                "size": path.stat().st_size,
+                "sha256": sha256(path.read_bytes()).hexdigest(),
+            }
+            for path in sorted(root.rglob("*"))
+            if path.is_file() and path.name != "launch-receipt.json"
+        ],
+    )
+
+
+@pytest.mark.parametrize("completed", [False, True])
+def test_additional_terminal_is_quiescent_without_a_legacy_bundle(tmp_path, completed):
+    path, identity, controller = historical_account(tmp_path)
+    root = additional_terminal(controller, completed=completed)
+    before = {p: p.read_bytes() for p in root.rglob("*") if p.is_file()}
+    assert (root / "attempt.json").exists() is completed
+    register(path, manifest_for(identity, controller))
+    assert before == {p: p.read_bytes() for p in root.rglob("*") if p.is_file()}
+    assert not list(controller.rglob(".writer-lock"))
+    assert not list(controller.rglob(".analysis36-campaign-lock"))
+
+
+@pytest.mark.parametrize("record", ["launch-receipt.json", "stop.json", "attempt.json"])
+@pytest.mark.parametrize(
+    "field", ["registration_id", "registration_sha256", "request_sha256", "slot_id"]
+)
+def test_additional_terminal_rejects_mixed_bindings(tmp_path, record, field):
+    path, identity, controller = historical_account(tmp_path)
+    root = additional_terminal(controller, completed=record == "attempt.json")
+    change_record(root, record, **{field: "c" * 64})
+    if record != "attempt.json":
+        refresh_inventory(root)
+    with pytest.raises(PermissionError, match="terminal.*reconciliation"):
+        register(path, manifest_for(identity, controller))
+    assert not (controller / ".writer-lock").exists()
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "unknown",
+        "missing_stop",
+        "missing_launch",
+        "missing_result",
+        "changed_started",
+        "changed_result",
+        "changed_stop",
+        "changed_stdout",
+        "missing_pin",
+        "duplicate_pin",
+        "outside_pin",
+        "wrong_size",
+        "extra_file",
+        "model_ledger",
+        "logical_calls",
+        "physical_calls",
+        "payloads",
+        "isolation_calls",
+        "isolation_attempts",
+        "missing_calls",
+        "boolean_calls",
+        "wrong_stdout",
+        "unknown_start",
+        "unknown_launch",
+        "unknown_stop",
+        "retry",
+        "synthetic",
+        "stop_retry",
+        "stop_synthetic",
+        "stop_status",
+        "actual_status",
+        "result_status",
+        "no_replay",
+        "early_finished",
+        "early_stop",
+        "different_started",
+        "naive_time",
+        "hardlink",
+        "active_lock",
+        "unexpected_attempt",
+        "missing_context",
+        "context_source",
+        "context_candidate",
+        "context_activation",
+        "context_binding",
+        "stop_source",
+        "finished_before_stop",
+    ],
+)
+def test_additional_failed_terminal_requires_complete_bound_zero_call_evidence(
+    tmp_path, damage
+):
+    path, identity, controller = historical_account(tmp_path)
+    root = additional_terminal(controller)
+    if damage.startswith("missing_") and damage in {
+        "missing_stop",
+        "missing_launch",
+        "missing_result",
+        "missing_context",
+    }:
+        (
+            root
+            / {
+                "missing_stop": "stop.json",
+                "missing_launch": "launch-receipt.json",
+                "missing_result": "result.json",
+                "missing_context": "started-context.json",
+            }[damage]
+        ).unlink()
+    elif damage.startswith("changed_"):
+        target = {
+            "changed_stdout": root / "worker.controller" / "worker-stdout.bin"
+        }.get(damage, root / (damage.removeprefix("changed_") + ".json"))
+        target.write_bytes(target.read_bytes() + b" ")
+    elif damage in {"missing_pin", "duplicate_pin", "outside_pin", "wrong_size"}:
+        receipt = json.loads((root / "launch-receipt.json").read_text(encoding="utf-8"))
+        inventory = receipt["preserved_output_inventory"]
+        if damage == "missing_pin":
+            inventory.pop()
+        elif damage == "duplicate_pin":
+            inventory.append(inventory[0])
+        elif damage == "outside_pin":
+            external = controller / "external.json"
+            external.write_bytes((root / "started.json").read_bytes())
+            inventory.append(
+                {
+                    "path": str(external.resolve()),
+                    "size": external.stat().st_size,
+                    "sha256": sha256(external.read_bytes()).hexdigest(),
+                }
+            )
+        else:
+            inventory[0]["size"] += 1
+        write_record(root, "launch-receipt.json", receipt)
+    elif damage == "extra_file":
+        (root / "unrecorded.bin").write_bytes(b"unrecorded")
+    elif damage == "active_lock":
+        (root / ".writer-lock").mkdir()
+    elif damage == "hardlink":
+        (root / "linked.bin").hardlink_to(root / "result.json")
+        refresh_inventory(root)
+    elif damage == "unexpected_attempt":
+        write_record(root, "attempt.json", {"status": "failed"})
+        refresh_inventory(root)
+    elif damage in {
+        "model_ledger",
+        "logical_calls",
+        "physical_calls",
+        "payloads",
+        "isolation_calls",
+        "isolation_attempts",
+        "missing_calls",
+        "boolean_calls",
+        "wrong_stdout",
+        "result_status",
+    }:
+        result = json.loads((root / "result.json").read_text(encoding="utf-8"))
+        if damage == "model_ledger":
+            result["model_ledger"] = [{"physical_request_id": "provider-call"}]
+        elif damage == "logical_calls":
+            result["resources"]["model_logical_calls"] = 1
+        elif damage == "physical_calls":
+            result["resources"]["model_physical_attempts"] = 1
+        elif damage == "payloads":
+            result["resources"]["development"]["payloads"] = [{"path": "payload"}]
+        elif damage == "isolation_calls":
+            result["isolation_evidence"]["real_model_invocations"] = 1
+        elif damage == "isolation_attempts":
+            result["isolation_evidence"]["model_physical_attempts"] = 1
+        elif damage == "missing_calls":
+            del result["resources"]["model_logical_calls"]
+        elif damage == "boolean_calls":
+            result["resources"]["model_logical_calls"] = False
+        elif damage == "wrong_stdout":
+            result["isolation_evidence"]["raw_stdout"]["sha256"] = "f" * 64
+        else:
+            result["execution_status"] = "completed"
+        write_record(root, "result.json", result)
+        refresh_inventory(root)
+    else:
+        record, changes = {
+            "unknown": ("launch-receipt.json", {"status": "unknown"}),
+            "unknown_start": ("started.json", {"schema_version": "unknown"}),
+            "unknown_launch": ("launch-receipt.json", {"schema_version": "unknown"}),
+            "unknown_stop": ("stop.json", {"schema_version": "unknown"}),
+            "retry": ("launch-receipt.json", {"automatic_retry": True}),
+            "synthetic": ("launch-receipt.json", {"synthetic": True}),
+            "stop_retry": ("stop.json", {"automatic_retry": True}),
+            "stop_synthetic": ("stop.json", {"synthetic": True}),
+            "stop_status": ("stop.json", {"status": "unknown"}),
+            "actual_status": (
+                "launch-receipt.json",
+                {"actual_execution_status": "completed"},
+            ),
+            "no_replay": ("stop.json", {"no_replay": False}),
+            "early_finished": (
+                "launch-receipt.json",
+                {"finished_at": "2026-10-27T13:00:00+00:00"},
+            ),
+            "early_stop": ("stop.json", {"stopped_at": "2026-10-27T13:00:00+00:00"}),
+            "different_started": (
+                "stop.json",
+                {"started_at": "2026-10-27T13:00:00+00:00"},
+            ),
+            "naive_time": (
+                "launch-receipt.json",
+                {"finished_at": "2026-10-28T13:07:24"},
+            ),
+            "context_source": ("started-context.json", {"source_commit": "f" * 40}),
+            "context_candidate": (
+                "started-context.json",
+                {"candidate_sha256": "f" * 64},
+            ),
+            "context_activation": (
+                "started-context.json",
+                {"activation_plan_sha256": "f" * 64},
+            ),
+            "context_binding": ("started-context.json", {"registration_id": "other"}),
+            "stop_source": ("stop.json", {"source_commit": "f" * 40}),
+            "finished_before_stop": (
+                "launch-receipt.json",
+                {"finished_at": "2026-10-28T13:07:22+00:00"},
+            ),
+        }[damage]
+        change_record(root, record, **changes)
+        refresh_inventory(root)
+    before = path.read_bytes()
+    with pytest.raises(
+        (PermissionError, ValueError), match="terminal|quiescent|links|active"
+    ):
+        register(path, manifest_for(identity, controller))
+    assert path.read_bytes() == before
+    assert not (controller / ".writer-lock").exists()
+
+
+@pytest.mark.parametrize("damage", ["status", "schema", "result_status", "result_hash"])
+def test_additional_completed_terminal_checks_attempt_and_execution(tmp_path, damage):
+    path, identity, controller = historical_account(tmp_path)
+    root = additional_terminal(controller, completed=True)
+    if damage == "status":
+        change_record(root, "attempt.json", status="failed")
+    elif damage == "schema":
+        change_record(root, "attempt.json", schema_version="unknown")
+    elif damage == "result_hash":
+        change_record(root, "attempt.json", result_sha256="f" * 64)
+    else:
+        change_record(root, "result.json", execution_status="failed")
+        change_record(
+            root,
+            "attempt.json",
+            result_sha256=sha256((root / "result.json").read_bytes()).hexdigest(),
+        )
+    with pytest.raises(PermissionError, match="terminal.*reconciliation"):
+        register(path, manifest_for(identity, controller))
+
+
+def test_unknown_additional_schema_cannot_fall_back_to_legacy_bundle(tmp_path):
+    path, identity, controller = historical_account(tmp_path)
+    root = additional_terminal(controller, completed=True)
+    change_record(
+        root,
+        "started.json",
+        schema_version="task13-additional-development-started-v2",
+        bundle_sha256="a" * 64,
+    )
+    change_record(root, "attempt.json", bundle_sha256="a" * 64)
+    with pytest.raises(PermissionError, match="terminal.*reconciliation"):
+        register(path, manifest_for(identity, controller))
+
+
+def test_additional_attempt_cannot_be_mixed_with_a_legacy_start(tmp_path):
+    path, identity, controller = historical_account(tmp_path)
+    root = additional_terminal(controller, completed=True)
+    write_record(
+        root, "started.json", {"bundle_sha256": "a" * 64, "slot_id": "development-test"}
+    )
+    change_record(root, "attempt.json", bundle_sha256="a" * 64)
+    with pytest.raises(PermissionError, match="terminal.*reconciliation"):
+        register(path, manifest_for(identity, controller))
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "missing_launch",
+        "unknown",
+        "missing_context",
+        "wrong_inventory",
+        "stop",
+        "not_qualified",
+    ],
+)
+def test_additional_completed_attempt_is_not_a_final_controller_receipt(
+    tmp_path, damage
+):
+    path, identity, controller = historical_account(tmp_path)
+    root = additional_terminal(controller, completed=True)
+    if damage == "missing_launch":
+        (root / "launch-receipt.json").unlink()
+    elif damage == "missing_context":
+        (root / "started-context.json").unlink()
+    elif damage == "wrong_inventory":
+        change_record(root, "launch-receipt.json", preserved_output_inventory=[])
+    elif damage == "stop":
+        write_record(root, "stop.json", {"status": "failed"})
+        refresh_inventory(root)
+    else:
+        change_record(root, "launch-receipt.json", status=damage)
+    with pytest.raises(PermissionError, match="terminal.*reconciliation"):
+        register(path, manifest_for(identity, controller))
+
+
+def test_additional_failed_terminal_does_not_hide_an_unsettled_budget(tmp_path):
+    path, identity, controller = historical_account(tmp_path)
+    additional_terminal(controller)
+    supplement(path).reserve("inflight", 1, "development", metadata=started())
+    before = path.read_bytes()
+    with pytest.raises(PermissionError, match="in-flight"):
+        register(path, manifest_for(identity, controller))
+    assert path.read_bytes() == before
+    assert not (controller / ".writer-lock").exists()
+
+
+def test_additional_failed_terminal_rejects_symlinked_inventory(tmp_path):
+    path, identity, controller = historical_account(tmp_path)
+    root = additional_terminal(controller)
+    target = root / "worker.controller" / "worker-stdout.bin"
+    external = controller / "external-stdout.bin"
+    target.rename(external)
+    try:
+        target.symlink_to(external)
+    except OSError as error:
+        pytest.skip(f"Windows symlink privilege unavailable: {error.winerror}")
+    with pytest.raises((PermissionError, ValueError), match="terminal|links"):
+        register(path, manifest_for(identity, controller))
     assert not (controller / ".writer-lock").exists()
 
 
