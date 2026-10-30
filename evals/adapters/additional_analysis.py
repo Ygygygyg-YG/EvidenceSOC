@@ -162,6 +162,39 @@ def _validation_source_hashes():
     }
 
 
+def _validate_recovery_validation_sources(manifest, blobs):
+    """Original blob pins precede the explicit, response-only AST exception."""
+    current = _validation_source_hashes()
+    old = manifest.validation_source_sha256
+    contract = blobs.get("original_source:evals/adapters/e_planning_contracts.py")
+    verifier = blobs.get("original_source:evals/adapters/additional_analysis.py")
+    transport = blobs.get("original_source:evals/adapters/model_client.py")
+    if (
+        old.keys() != current.keys()
+        or contract is None
+        or verifier is None
+        or transport is None
+        or old.get("model_identity_contract") != sha256(contract).hexdigest()
+        or old.get("model_transport") != sha256(transport).hexdigest()
+        or manifest.package_verifier_sha256 != sha256(verifier).hexdigest()
+        or any(
+            old[name] != digest
+            for name, digest in current.items()
+            if name not in {"model_identity_contract", "model_transport"}
+        )
+    ):
+        raise ValueError(
+            "recovery analysis validator semantics or original metadata drift"
+        )
+    from evals.adapters.planning_recovery import (
+        validate_identity_contract_equivalence,
+        validate_response_transport_equivalence,
+    )
+
+    validate_identity_contract_equivalence(contract)
+    validate_response_transport_equivalence(transport)
+
+
 def _budget_location(budget_path, epoch, mounted_host_budget_path):
     if mounted_host_budget_path is not None:
         if (
@@ -513,32 +546,9 @@ def _verify(
         paths[name], blobs[name] = _read_ref(root, ref)
     if recovery_lineage is not None:
         # Preserve the original package byte-for-byte. Only the explicitly
-        # changed admission contract and this verifier's metadata may differ;
-        # all actual analysis schemas/validators remain byte-identical.
-        current = _validation_source_hashes()
-        old = manifest.validation_source_sha256
-        contract = blobs.get("original_source:evals/adapters/e_planning_contracts.py")
-        verifier = blobs.get("original_source:evals/adapters/additional_analysis.py")
-        if (
-            old.keys() != current.keys()
-            or contract is None
-            or verifier is None
-            or old.get("model_identity_contract") != sha256(contract).hexdigest()
-            or manifest.package_verifier_sha256 != sha256(verifier).hexdigest()
-            or any(
-                old[name] != digest
-                for name, digest in current.items()
-                if name != "model_identity_contract"
-            )
-        ):
-            raise ValueError(
-                "recovery analysis validator semantics or original metadata drift"
-            )
-        from evals.adapters.planning_recovery import (
-            validate_identity_contract_equivalence,
-        )
-
-        validate_identity_contract_equivalence(contract)
+        # changed admission contract, verifier metadata and a proved pure
+        # respond instruction may differ. Analysis behavior remains equivalent.
+        _validate_recovery_validation_sources(manifest, blobs)
     if "events" not in paths or paths["events"].name != "events.jsonl":
         raise ValueError("additional events must retain the fixed seed filename")
     base = {

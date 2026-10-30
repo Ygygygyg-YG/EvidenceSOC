@@ -39,6 +39,72 @@ def validate_identity_contract_equivalence(original_bytes):
         raise ValueError("original analysis identity contract semantics differ")
 
 
+def validate_response_transport_equivalence(original_bytes):
+    """Permit only a proved pure respond-instruction edit; never run old code."""
+    current = (Path(__file__).resolve().parent / "model_client.py").read_bytes()
+    guard = ast.dump(ast.parse('role == "respond"', mode="eval").body)
+    clock = ast.dump(ast.parse("datetime.now(UTC).isoformat()", mode="eval").body)
+
+    def instruction_parts(node):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return 1, 0
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+            left, right = instruction_parts(node.left), instruction_parts(node.right)
+            return left[0] + right[0], left[1] + right[1]
+        if isinstance(node, ast.Call) and ast.dump(node) == clock:
+            return 0, 1
+        raise ValueError("response instruction contains unproved behavior")
+
+    def normalized(raw):
+        try:
+            module = ast.parse(raw)
+        except (SyntaxError, ValueError) as error:
+            raise ValueError("response transport is not a valid module") from error
+        classes = [
+            node
+            for node in module.body
+            if isinstance(node, ast.ClassDef) and node.name == "TrackedModel"
+        ]
+        methods = (
+            [
+                node
+                for node in classes[0].body
+                if isinstance(node, ast.AsyncFunctionDef) and node.name == "structured"
+            ]
+            if len(classes) == 1
+            else []
+        )
+        if len(methods) != 1:
+            raise ValueError("unique response transport method required")
+        method = methods[0]
+        blocks = [
+            (index, node)
+            for index, node in enumerate(method.body)
+            if isinstance(node, ast.If) and ast.dump(node.test) == guard
+        ]
+        if len(blocks) != 1:
+            raise ValueError("unique exact response instruction guard required")
+        index, block = blocks[0]
+        if block.orelse or len(block.body) != 1:
+            raise ValueError("response instruction cannot contain other statements")
+        statement = block.body[0]
+        if (
+            not isinstance(statement, ast.AugAssign)
+            or not isinstance(statement.target, ast.Name)
+            or statement.target.id != "instruction"
+            or not isinstance(statement.op, ast.Add)
+        ):
+            raise ValueError("response instruction must only append literal guidance")
+        strings, clocks = instruction_parts(statement.value)
+        if strings < 1 or clocks != 1:
+            raise ValueError("response instruction must retain its exact single clock")
+        del method.body[index]
+        return index, ast.dump(module, include_attributes=False)
+
+    if normalized(original_bytes) != normalized(current):
+        raise ValueError("original analysis transport semantics differ")
+
+
 class RecoveryLineage(Contract):
     schema_version: Literal["task13-e-analysis-recovery-lineage-v1"]
     recovery_id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,120}$")
