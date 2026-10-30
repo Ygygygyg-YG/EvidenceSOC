@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Literal, Self
 
@@ -13,6 +13,7 @@ from evidencesoc.agents.analysis_import import PlanningAdmission
 from evidencesoc.agents.graph import _plan_hash
 from pydantic import model_validator
 
+from evals.adapters.e_participation import require_participation_window
 from evals.adapters.e_planning_contracts import EPlanningRequest
 from evals.adapters.e_planning_journal import EPlanningDispatchJournal
 from evals.adapters.remediation_worker import (
@@ -129,13 +130,8 @@ def build_review_request(
     )
 
 
-def require_review_window(now: datetime | None = None):
-    current = now or datetime.now(UTC)
-    if (
-        current.tzinfo is None
-        or current.astimezone(timezone(timedelta(hours=8))).hour < 19
-    ):
-        raise PermissionError("review window is 19:00-00:00 Asia/Shanghai")
+def require_review_window(now: datetime | None = None, participation_policy=None):
+    require_participation_window(now, participation_policy)
 
 
 def validate_review_state(request, state, imported, binding):
@@ -244,27 +240,30 @@ async def run_e_planning_review(request, agent_dir: Path) -> dict:
         raise PermissionError(
             "planning review requires its inspected verification worker"
         )
-    require_review_window()
+    policy = request.planning_request.participation_policy
+    require_review_window(None, policy)
     request, imported, binding, claim = validate_review_inputs(request, agent_dir)
 
     def validate(state):
-        require_review_window()
+        require_review_window(None, policy)
         if claim() != binding:
             raise PermissionError("registered review planning claim changed")
         validate_review_state(request, state, imported, binding)
         approval = state.get("approval")
         if approval is not None:
             require_review_window(
-                datetime.fromisoformat(approval["decided_at"].replace("Z", "+00:00"))
+                datetime.fromisoformat(approval["decided_at"].replace("Z", "+00:00")),
+                policy,
             )
-        require_review_window()
+        require_review_window(None, policy)
 
     result = await run_source_review(
         request.source_review_request(),
         agent_dir,
         state_validator=validate,
-        decision_admitter=require_review_window,
+        decision_admitter=lambda: require_review_window(None, policy),
         verification_enabled=False,
+        **({"participation_policy": policy} if policy is not None else {}),
     )
     if result.get("model_ledger"):
         raise PermissionError("planning reads and decisions cannot make model calls")

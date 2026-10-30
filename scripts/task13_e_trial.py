@@ -278,6 +278,27 @@ class ETrialController:
             or authority["decision_record_sha256"] != refs["scope_decision"]["sha256"]
         ):
             raise PermissionError("actual scope chat and independent authority differ")
+        policy = self._requests[0].participation_policy
+        if policy is not None and self._inputs["scope_packet"].get(
+            "participation_policy"
+        ) != policy.model_dump(mode="json"):
+            raise PermissionError("anytime policy differs from its approved new scope")
+        packet = self._inputs["scope_packet"]
+        lineage = self._planning.get("recovery_lineage")
+        if lineage is None:
+            if {"recovery_lineage", "recovery_lineage_sha256"} & packet.keys():
+                raise PermissionError("scope recovery has no registered lineage")
+        elif (
+            policy is None
+            or packet.get("recovery_lineage") != lineage
+            or canonical_hash(packet.get("recovery_lineage")) != canonical_hash(lineage)
+            or packet.get("recovery_lineage_sha256") != canonical_hash(lineage)
+            or lineage["authorization_record_sha256"]
+            != policy.authorization_record_sha256
+        ):
+            raise PermissionError(
+                "recovery lineage or actual user authorization differs"
+            )
         options = self._inputs["runtime_options"]
         request = self._requests[0]
         if (
@@ -848,7 +869,7 @@ class ETrialController:
         decision=None,
         reason=None,
     ):
-        require_review_window(self._now())
+        require_review_window(self._now(), request.participation_policy)
         self._preflight(request, review=True)
         retained, resources = self._retained(request)
         review = build_review_request(
@@ -900,6 +921,7 @@ class ETrialController:
             {"case_id": request.case_id, "dataset": request.dataset},
             state,
             now=self._now(),
+            participation_policy=request.participation_policy,
         )
         if value.get("approval_packet") != expected_packet:
             raise PermissionError("review packet differs from exact live state")
@@ -911,7 +933,7 @@ class ETrialController:
             raise PermissionError(
                 "live pending state differs from original retained bytes"
             )
-        require_review_window(self._now())
+        require_review_window(self._now(), request.participation_policy)
         return value, captured
 
     async def read(self, ordinal):
@@ -929,7 +951,7 @@ class ETrialController:
                 **captured,
             }
 
-    def _chat(self, record, *, kind):
+    def _chat(self, record, *, kind, participation_policy=None):
         if (
             record.get("schema_version") != f"task13-e-user-{kind}-decision-v1"
             or record.get("role") != "user"
@@ -945,7 +967,7 @@ class ETrialController:
         if when.tzinfo is None or when > self._now():
             raise PermissionError("actual user chat timestamp is invalid")
         if kind == "plan":
-            require_review_window(when)
+            require_review_window(when, participation_policy)
 
     async def decision(self, ordinal, *, packet_sha256, chat_record):
         """Apply only the supplied actual user's exact current packet decision."""
@@ -958,7 +980,9 @@ class ETrialController:
                 return previous
             raw = _read_pin(chat_record)
             record = _decode(raw)
-            self._chat(record, kind="plan")
+            self._chat(
+                record, kind="plan", participation_policy=request.participation_policy
+            )
             live, _ = await self._review(request)
             packet = live["approval_packet"]
             if (

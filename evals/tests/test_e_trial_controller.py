@@ -26,7 +26,7 @@ def pin(path, value):
 
 
 @pytest.fixture
-def host(tmp_path, monkeypatch):
+def host(tmp_path, monkeypatch, request):
     from evals.adapters.e_planning_journal import register_planning_slots
     from evals.adapters.retained_workflow import build_approval_packet
     from scripts.task13_e_trial import SCOPE, ETrialController, FreeDependencies
@@ -39,10 +39,22 @@ def host(tmp_path, monkeypatch):
         "response_model": "deepseek-flash",
         "fingerprint": "e72d3c7f663d3e1383b00b3884cb4501",
     }
+    participation = getattr(request, "param", None)
+    if participation is not None:
+        planning["core_config"]["participation_policy"] = participation
     planning["core_config_sha256"] = canonical_hash(planning["core_config"])
     planning = validate_e_planning_registration(planning)
     clock = Clock()
-    scope_packet = pin(tmp_path / "scope.json", {"synthetic": True, "scope": SCOPE})
+    if participation is not None:
+        clock.utc = clock.utc.replace(hour=4)
+    scope_packet = pin(
+        tmp_path / "scope.json",
+        {
+            "synthetic": True,
+            "scope": SCOPE,
+            **({"participation_policy": participation} if participation else {}),
+        },
+    )
     scope_record = {
         "schema_version": "task13-e-user-scope-decision-v1",
         "role": "user",
@@ -411,6 +423,7 @@ def host(tmp_path, monkeypatch):
             {"case_id": request.case_id, "dataset": request.dataset},
             state,
             now=clock.now(),
+            participation_policy=request.planning_request.participation_policy,
         )
         receipt = (
             persisted_receipt(state)

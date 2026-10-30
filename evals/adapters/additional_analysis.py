@@ -178,7 +178,9 @@ def _budget_location(budget_path, epoch, mounted_host_budget_path):
         raise ValueError("additional analysis must use its original budget path")
 
 
-def _ledger(request, ledger, budget_path, mounted_host_budget_path=None):
+def _ledger(
+    request, ledger, budget_path, mounted_host_budget_path=None, recovery_lineage=None
+):
     """Bind every physical attempt to its independently derived analysis slot."""
     budget_path = Path(budget_path)
     require_existing_budget(budget_path, request.budget_identity)
@@ -189,10 +191,17 @@ def _ledger(request, ledger, budget_path, mounted_host_budget_path=None):
         config_sha256=request.config_sha256,
         budget_identity=request.budget_identity,
         manifest_sha256=request.epoch_manifest_sha256,
-        latest=True,
+        latest=recovery_lineage is None,
     )
     _budget_location(budget_path, epoch, mounted_host_budget_path)
-    verify_identity_ledger(budget_path, request, ledger)
+    if recovery_lineage is None:
+        verify_identity_ledger(budget_path, request, ledger)
+    else:
+        from evals.adapters.planning_recovery import verify_historical_identity_ledger
+
+        verify_historical_identity_ledger(
+            budget_path, request, ledger, recovery_lineage
+        )
     account = SupplementBudgetAccount(budget_path, **request.budget_binding())
     hint = "v2-" + canonical_hash([request.slot_id, "analyze", 1])
     logical_key = canonical_hash(["analyze", "AnalysisOutput", hint])
@@ -363,12 +372,19 @@ def _replay(
     manifest_sha256,
     budget_path,
     mounted_host_budget_path=None,
+    recovery_lineage=None,
 ):
     registration = validate_additional_development_registration(
         _json(blobs["registration"])
     )
     request_data = _json(blobs["request"])
     request = EpochDevelopmentRequest.model_validate(request_data)
+    if recovery_lineage is not None:
+        from evals.adapters.planning_recovery import validate_recovery_original
+
+        validate_recovery_original(
+            recovery_lineage, registration, manifest_sha256, request_sha256
+        )
     if (
         canonical_hash(registration) != registration_sha256
         or canonical_hash(request_data) != request_sha256
@@ -427,7 +443,13 @@ def _replay(
             _json(raw)
     for relative in source_files:
         _parts(relative)
-    _ledger(request, result.model_ledger, budget_path, mounted_host_budget_path)
+    _ledger(
+        request,
+        result.model_ledger,
+        budget_path,
+        mounted_host_budget_path,
+        recovery_lineage,
+    )
     _conditions(request, result, blobs)
     original_receipt = _original_validator_equivalence(manifest, blobs, request, paths)
     anchor = AdditionalAnalysisAnchor(
@@ -471,13 +493,14 @@ def _verify(
     request_sha256,
     budget_path,
     mounted_host_budget_path=None,
+    recovery_lineage=None,
 ):
     root = _root(root)
     manifest_raw = _resolve(root, "manifest.json").read_bytes()
     if sha256(manifest_raw).hexdigest() != manifest_sha256:
         raise ValueError("additional package manifest hash differs")
     manifest = AdditionalAnalysisManifest.model_validate(_json(manifest_raw))
-    if (
+    if recovery_lineage is None and (
         manifest.validation_source_sha256 != _validation_source_hashes()
         or manifest.package_verifier_sha256
         != sha256(Path(__file__).read_bytes()).hexdigest()
@@ -488,6 +511,34 @@ def _verify(
     paths, blobs = {}, {}
     for name, ref in manifest.artifacts.items():
         paths[name], blobs[name] = _read_ref(root, ref)
+    if recovery_lineage is not None:
+        # Preserve the original package byte-for-byte. Only the explicitly
+        # changed admission contract and this verifier's metadata may differ;
+        # all actual analysis schemas/validators remain byte-identical.
+        current = _validation_source_hashes()
+        old = manifest.validation_source_sha256
+        contract = blobs.get("original_source:evals/adapters/e_planning_contracts.py")
+        verifier = blobs.get("original_source:evals/adapters/additional_analysis.py")
+        if (
+            old.keys() != current.keys()
+            or contract is None
+            or verifier is None
+            or old.get("model_identity_contract") != sha256(contract).hexdigest()
+            or manifest.package_verifier_sha256 != sha256(verifier).hexdigest()
+            or any(
+                old[name] != digest
+                for name, digest in current.items()
+                if name != "model_identity_contract"
+            )
+        ):
+            raise ValueError(
+                "recovery analysis validator semantics or original metadata drift"
+            )
+        from evals.adapters.planning_recovery import (
+            validate_identity_contract_equivalence,
+        )
+
+        validate_identity_contract_equivalence(contract)
     if "events" not in paths or paths["events"].name != "events.jsonl":
         raise ValueError("additional events must retain the fixed seed filename")
     base = {
@@ -514,7 +565,12 @@ def _verify(
         manifest_sha256,
         budget_path,
         mounted_host_budget_path,
+        recovery_lineage,
     )
+    if recovery_lineage is not None:
+        from evals.adapters.planning_recovery import validate_recovery_provenance
+
+        validate_recovery_provenance(recovery_lineage, provenance)
     # Re-read after replay: load_seed and source comparison must consume the same bytes.
     _inventory(root, refs)
     if _resolve(root, "manifest.json").read_bytes() != manifest_raw:
@@ -533,6 +589,7 @@ def verify_additional_analysis_package(
     budget_path,
     *,
     mounted_host_budget_path=None,
+    recovery_lineage=None,
 ) -> ImportedAnalysis:
     """Pins and the original account path must come from a trusted controller.
 
@@ -550,6 +607,7 @@ def verify_additional_analysis_package(
         expected_request_sha256,
         Path(budget_path),
         mounted_host_budget_path,
+        recovery_lineage,
     )
     values, provenance = _verify(*args)
     return ImportedAnalysis._from_verified_artifacts(

@@ -6,6 +6,7 @@ from typing import Literal, Self
 
 from pydantic import ConfigDict, Field, model_validator
 
+from evals.adapters.e_participation import EParticipationPolicy
 from evals.adapters.remediation_contracts import CAMPAIGN, ENTRY_PROMPT
 from evals.contracts import (
     SHA256,
@@ -208,8 +209,14 @@ class EPlanningRequest(Contract):
     budget_source_receipt_sha256: str = Field(pattern=SHA256)
     config_sha256: str = Field(pattern=SHA256)
     core_config_sha256: str = Field(pattern=SHA256)
+    recovery_lineage: dict | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     budget_identity: dict
     model_identity_binding: ModelIdentityBinding | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    participation_policy: EParticipationPolicy | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
     model: ModelConfig = Field(default_factory=ModelConfig)

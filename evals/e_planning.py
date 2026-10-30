@@ -8,6 +8,7 @@ from typing import Literal, Self
 
 from pydantic import Field, model_validator
 
+from evals.adapters.e_participation import EParticipationPolicy
 from evals.adapters.e_planning_contracts import (
     HEX32,
     EPlanningRequest,
@@ -142,10 +143,17 @@ class EPlanningRegistration(Contract):
     budget_source_receipt_sha256: str = Field(pattern=SHA256)
     core_config: dict
     core_config_sha256: str = Field(pattern=SHA256)
+    recovery_lineage: dict | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     slots: list[dict] = Field(min_length=3, max_length=3)
 
     @model_validator(mode="after")
     def fixed_registration(self) -> Self:
+        if "participation_policy" in self.core_config:
+            EParticipationPolicy.model_validate(
+                self.core_config["participation_policy"]
+            )
         descriptor = self.core_config.get("model_identity")
         reference = self.epoch_binding.model_identity_binding
         if (descriptor is None) != (reference is None):
@@ -164,7 +172,28 @@ class EPlanningRegistration(Contract):
             self.source.source_kind == "additional-development-v1"
         ):
             raise ValueError("planning mode differs from selected source kind")
-        if self.mode == "additional-development-replicates-v1":
+        if self.recovery_lineage is not None:
+            from evals.adapters.planning_recovery import (
+                validate_recovery_execution,
+                validate_recovery_original,
+            )
+
+            if self.mode != "additional-development-replicates-v1":
+                raise ValueError("explicit recovery requires additional analysis")
+            validate_recovery_original(
+                self.recovery_lineage,
+                self.source_selection_receipt["additional_registration"],
+                self.source.source_package_manifest_sha256,
+                self.source.request_sha256,
+            )
+            validate_recovery_execution(
+                self.recovery_lineage,
+                self.epoch_binding.model_dump(mode="json"),
+                self.core_config_sha256,
+            )
+            if self.synthetic is not self.recovery_lineage["synthetic"]:
+                raise ValueError("recovery synthetic flag differs")
+        elif self.mode == "additional-development-replicates-v1":
             additional = self.source_selection_receipt["additional_registration"]
             original = additional["request"]
             if (
@@ -221,6 +250,7 @@ def build_e_planning_registration(
     core_config,
     synthetic,
     mode="same-source-replicates-v1",
+    recovery_lineage=None,
 ) -> dict:
     """Build a proposal, preserving shortage; this does not approve/register it."""
     first, count = _selected_source(selection_receipt, mode)
@@ -260,6 +290,11 @@ def build_e_planning_registration(
         "core_config": deepcopy(core_config),
         "core_config_sha256": canonical_hash(core_config),
         "slots": _slots(registration_id, first["case_id"]),
+        **(
+            {"recovery_lineage": deepcopy(recovery_lineage)}
+            if recovery_lineage is not None
+            else {}
+        ),
     }
     return EPlanningRegistration.model_validate(value).model_dump(mode="json")
 
@@ -303,6 +338,16 @@ def planning_requests(registration: dict) -> tuple[EPlanningRequest, ...]:
             "config_sha256": r["core_config_sha256"],
             "core_config_sha256": r["core_config_sha256"],
             "model": r["core_config"]["model"],
+            **(
+                {"participation_policy": r["core_config"]["participation_policy"]}
+                if "participation_policy" in r["core_config"]
+                else {}
+            ),
+            **(
+                {"recovery_lineage": r["recovery_lineage"]}
+                if r.get("recovery_lineage") is not None
+                else {}
+            ),
         }
         requests.append(EPlanningRequest.model_validate(request))
     return tuple(requests)

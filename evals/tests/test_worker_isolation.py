@@ -23,6 +23,10 @@ def runtime():
     "failure,review_operation",
     [
         ("startup", None),
+        ("slow_probe", None),
+        ("startup_timeout", None),
+        ("bootstrap_failure", None),
+        ("pre_go_binding", None),
         ("probe", None),
         ("process", None),
         ("process", "read_packet"),
@@ -76,13 +80,32 @@ def test_docker_failures_keep_typed_errors_and_quarantine_paid_binding_failure(
     )
     monkeypatch.setenv("DEEPSEEK_API_KEY", "synthetic-no-call-key")
     child_environments = []
+    go_writes = []
+    waits = []
+    original_wait_for = module.asyncio.wait_for
+
+    async def wait_for(awaitable, timeout):
+        waits.append((awaitable.__name__, timeout))
+        if awaitable.__name__ == "readline" and (
+            failure == "startup_timeout" or (failure == "slow_probe" and timeout < 32)
+        ):
+            awaitable.close()
+            raise TimeoutError("synthetic full-check latency exceeded startup budget")
+        return await original_wait_for(awaitable, timeout)
+
+    monkeypatch.setattr(module.asyncio, "wait_for", wait_for)
     monkeypatch.setattr(module, "dependency_tree_hash", lambda root: "b" * 64)
     monkeypatch.setattr(
         module,
         "validate_worker_inspection",
         lambda *args: {"image_id": "sha256:" + "c" * 64},
     )
-    monkeypatch.setattr(module, "validate_worker_binding", lambda *args, **kwargs: None)
+
+    def validate_binding(*args, **kwargs):
+        if failure == "pre_go_binding":
+            raise ValueError("private binding difference")
+
+    monkeypatch.setattr(module, "validate_worker_binding", validate_binding)
 
     class Process:
         returncode = 1
@@ -95,6 +118,8 @@ def test_docker_failures_keep_typed_errors_and_quarantine_paid_binding_failure(
         async def readline(self):
             if failure == "probe":
                 return b"Docker startup failed"
+            if failure == "bootstrap_failure":
+                return b'TASK13_WORKER_STARTUP_FAILURE:{"stage":"planning_probe","category":"application","error_type":"ValueError"}\n'
             return (
                 module.PROBE_PREFIX
                 + json.dumps(
@@ -112,6 +137,9 @@ def test_docker_failures_keep_typed_errors_and_quarantine_paid_binding_failure(
             if self.inspect:
                 self.returncode = 0
                 return b"[{}]", b""
+            if failure == "slow_probe":
+                self.returncode = 0
+                return b'{"model_ledger":[]}', b""
             if failure == "binding":
                 self.returncode = 0
                 return json.dumps(
@@ -134,7 +162,7 @@ def test_docker_failures_keep_typed_errors_and_quarantine_paid_binding_failure(
             return b"", b"private error with secret credential"
 
         def write(self, data):
-            pass
+            go_writes.append(data)
 
         async def drain(self):
             pass
@@ -187,9 +215,72 @@ def test_docker_failures_keep_typed_errors_and_quarantine_paid_binding_failure(
             result.artifact_hashes["worker_raw_stdout"]
             == sha256(raw.read_bytes()).hexdigest()
         )
+    elif failure == "slow_probe":
+        result = asyncio.run(module.run_container(spec, agent, options))
+        assert result["isolation_evidence"]["status"] == "passed"
+        assert len(go_writes) == 1 and go_writes[0].startswith(b"GO:")
+        assert waits == [("readline", 120), ("communicate", 1800)]
     else:
-        with pytest.raises(errors.WorkerInfrastructureError):
+        expected_error = (
+            errors.WorkerTransportError
+            if failure == "startup_timeout"
+            else ValueError
+            if failure == "pre_go_binding"
+            else errors.WorkerInfrastructureError
+        )
+        with pytest.raises(expected_error):
             asyncio.run(module.run_container(spec, agent, options))
+    receipts = list((tmp_path / "output").rglob("*.startup-failure.json"))
+    if failure in {
+        "startup",
+        "probe",
+        "startup_timeout",
+        "bootstrap_failure",
+        "pre_go_binding",
+    }:
+        assert go_writes == []
+        assert len(receipts) == 1
+        receipt = json.loads(receipts[0].read_bytes())
+        assert receipt["go_authorized"] is False
+        assert receipt["stage"] == (
+            "docker_start"
+            if failure == "startup"
+            else "validate_binding"
+            if failure == "pre_go_binding"
+            else "waiting_probe"
+        )
+        assert receipt["startup_timeout_seconds"] == 120
+        assert receipt["source_commit"] == options["source_commit"]
+        assert receipt["worker_nonce"] in receipts[0].name
+        assert receipt["elapsed_seconds"] >= 0
+        assert receipt["error_type"] == (
+            "TimeoutError"
+            if failure == "startup_timeout"
+            else "OSError"
+            if failure == "startup"
+            else "ValueError"
+            if failure == "pre_go_binding"
+            else "WorkerInfrastructureError"
+        )
+        if failure != "pre_go_binding":
+            first_line = (
+                b""
+                if failure in {"startup", "startup_timeout"}
+                else b'TASK13_WORKER_STARTUP_FAILURE:{"stage":"planning_probe","category":"application","error_type":"ValueError"}\n'
+                if failure == "bootstrap_failure"
+                else b"Docker startup failed"
+            )
+            assert receipt["stderr_first_line_sha256"] == sha256(first_line).hexdigest()
+            assert receipt["stderr_first_line_bytes"] == len(first_line)
+        if failure == "bootstrap_failure":
+            assert receipt["worker_failure"] == {
+                "stage": "planning_probe",
+                "category": "application",
+                "error_type": "ValueError",
+            }
+        assert "private" not in receipts[0].read_text(encoding="utf-8")
+    else:
+        assert receipts == []
     if review_operation:
         assert child_environments
         assert ("DEEPSEEK_API_KEY" in child_environments[0]) == (
@@ -238,6 +329,49 @@ def test_bootstrap_serializes_typed_failure_without_secret_or_traceback(
     assert value["errors"][0]["category"] == category
     assert "secret-credential" not in output.out + output.err
     assert "Traceback" not in output.out + output.err
+
+
+@pytest.mark.parametrize("stage", ["worker_probe", "request_parse", "planning_probe"])
+def test_bootstrap_pre_go_failure_retains_only_typed_diagnostics(
+    monkeypatch, capsys, stage
+):
+    module = runtime()
+    monkeypatch.setenv("TASK13_FORBIDDEN_PATHS", "{}")
+    monkeypatch.setenv("TASK13_WORKER_NONCE", "nonce")
+    monkeypatch.setenv("TASK13_IMPORT_SOURCE_DIR", "/synthetic/source")
+    stdin = io.StringIO("GO:nonce\n")
+    monkeypatch.setattr(module.sys, "stdin", stdin)
+    monkeypatch.setattr(module.Path, "read_bytes", lambda *args: b"{}")
+
+    def fail(*args):
+        raise ValueError("private-source-data secret-credential")
+
+    monkeypatch.setattr(
+        module,
+        "worker_probe",
+        fail if stage == "worker_probe" else lambda *args: {"pid": 1},
+    )
+    monkeypatch.setattr(
+        module,
+        "_worker_request",
+        fail
+        if stage == "request_parse"
+        else lambda *args: SimpleNamespace(schema_version=module.E_PLANNING_SCHEMA),
+    )
+    monkeypatch.setattr(module, "e_planning_worker_probe", fail)
+    with pytest.raises(SystemExit) as stopped:
+        module.main()
+    assert stopped.value.code == 1
+    output = capsys.readouterr()
+    assert output.out == "" and stdin.tell() == 0
+    assert "secret-credential" not in output.err
+    assert "private-source-data" not in output.err and "Traceback" not in output.err
+    assert output.err.startswith("TASK13_WORKER_STARTUP_FAILURE:")
+    assert json.loads(output.err.split(":", 1)[1]) == {
+        "stage": stage,
+        "category": "application",
+        "error_type": "ValueError",
+    }
 
 
 def test_runtime_requires_immutable_source_digest_and_exact_mounts():

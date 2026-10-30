@@ -17,9 +17,10 @@ import time
 from collections import Counter
 from contextlib import contextmanager
 from copy import deepcopy
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from evals.adapters.e_participation import require_participation_window
 from evals.adapters.retained_workflow import build_approval_packet, resource_fields
 from evals.adapters.verification_worker import VerificationWorkerRequest
 from evals.contracts import canonical_hash
@@ -914,10 +915,14 @@ class ETimingCampaign:
         return registered
 
     def prepare_approval(self, trial_id, source):
-        """Prepare a packet in the review window; never persist a user decision."""
+        """Prepare a packet under the frozen policy; never persist a decision."""
         current = _time(self.now())
-        if current.astimezone(timezone(timedelta(hours=8))).hour < 19:
-            raise PermissionError("review window is 19:00-00:00 Asia/Shanghai")
+        policy = (
+            self.registration.get("planning_registration", {})
+            .get("core_config", {})
+            .get("participation_policy")
+        )
+        require_participation_window(current, policy)
         with self._lock():
             self._guard()
             self._load()
@@ -930,7 +935,10 @@ class ETimingCampaign:
             ):
                 raise PermissionError("only one human approval may be pending")
             packet = build_approval_packet(
-                registered, deepcopy(source["state"]), now=current
+                registered,
+                deepcopy(source["state"]),
+                now=current,
+                participation_policy=policy,
             )
             digest = self._save("reviews", packet)
             self._append(

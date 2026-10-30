@@ -15,6 +15,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 import zipfile
 from hashlib import sha256
@@ -23,6 +24,10 @@ from pathlib import Path
 from evals.adapters.worker_errors import WorkerInfrastructureError, WorkerTransportError
 
 PROBE_PREFIX = "TASK13_WORKER_PROBE:"
+STARTUP_FAILURE_PREFIX = "TASK13_WORKER_STARTUP_FAILURE:"
+# Full package/identity validation took 28.4-31.7s on the fixed 2 CPU worker.
+# Give cold startup its own bounded margin; execution and approval limits stay separate.
+WORKER_STARTUP_TIMEOUT_SECONDS = 120
 READ_ONLY_MOUNTS = {
     "/app/agent",
     "/app/source",
@@ -944,7 +949,9 @@ async def run_e_planning_review_container(
         raise ValueError("planning review requires its dedicated worker schema")
     from evals.adapters.e_planning_review import require_review_window
 
-    require_review_window()
+    require_review_window(
+        participation_policy=spec["planning_request"].get("participation_policy")
+    )
     value = await run_container(spec, agent_dir, options)
     if value.get("model_ledger"):
         raise ValueError("planning reads and decisions cannot make model calls")
@@ -1014,7 +1021,9 @@ async def run_container(spec: dict, agent_dir: Path, options: dict) -> dict:
     if planning_review:
         from evals.adapters.e_planning_review import require_review_window
 
-        require_review_window()
+        require_review_window(
+            participation_policy=planning_request.participation_policy
+        )
     verification = (
         getattr(request, "schema_version", None) == "task13-verification-worker-v1"
     )
@@ -1271,6 +1280,59 @@ async def run_container(spec: dict, agent_dir: Path, options: dict) -> dict:
             environment=passed,
             **({"schema_version": request.schema_version} if planning else {}),
         )
+        startup_started = time.monotonic()
+        startup_stage = "docker_start"
+        line = b""
+        go_authorized = False
+
+        def record_startup_failure(error):
+            from evals.contracts import canonical_hash
+
+            receipt = {
+                "schema_version": "task13-worker-startup-failure-v1",
+                "stage": startup_stage,
+                "error_type": type(error).__name__,
+                "startup_timeout_seconds": WORKER_STARTUP_TIMEOUT_SECONDS,
+                "elapsed_seconds": time.monotonic() - startup_started,
+                "go_authorized": False,
+                "worker_nonce": nonce,
+                "container_name": name,
+                "source_commit": options["source_commit"],
+                "image_id": options["image_id"],
+                "request_sha256": canonical_hash(spec),
+                "stderr_first_line_sha256": sha256(line).hexdigest(),
+                "stderr_first_line_bytes": len(line),
+            }
+            if line.startswith(STARTUP_FAILURE_PREFIX.encode()):
+                try:
+                    diagnostic = json.loads(
+                        line.decode("utf-8").removeprefix(STARTUP_FAILURE_PREFIX)
+                    )
+                    if (
+                        set(diagnostic) == {"stage", "category", "error_type"}
+                        and diagnostic["stage"]
+                        in {
+                            "startup_configuration",
+                            "worker_probe",
+                            "request_parse",
+                            "planning_probe",
+                            "model_identity",
+                        }
+                        and diagnostic["category"]
+                        in {"application", "schema", "transport", "infrastructure"}
+                        and isinstance(diagnostic["error_type"], str)
+                        and re.fullmatch(
+                            r"[A-Za-z][A-Za-z0-9_]{0,79}", diagnostic["error_type"]
+                        )
+                    ):
+                        receipt["worker_failure"] = diagnostic
+                except (ValueError, TypeError, UnicodeError):
+                    pass
+            # The worker mounts only output, never this controller-owned sibling.
+            write_immutable_json(
+                output.parent / (nonce + ".startup-failure.json"), receipt
+            )
+
         try:
             process = await asyncio.create_subprocess_exec(
                 "docker",
@@ -1281,17 +1343,22 @@ async def run_container(spec: dict, agent_dir: Path, options: dict) -> dict:
                 env=environment,
             )
         except OSError as error:
+            record_startup_failure(error)
             raise WorkerInfrastructureError(
                 "Docker worker startup is unavailable"
             ) from error
         accepted = None
         try:
-            line = await asyncio.wait_for(process.stderr.readline(), timeout=30)
+            startup_stage = "waiting_probe"
+            line = await asyncio.wait_for(
+                process.stderr.readline(), timeout=WORKER_STARTUP_TIMEOUT_SECONDS
+            )
             if not line.startswith(PROBE_PREFIX.encode()):
                 raise WorkerInfrastructureError(
                     "real worker filesystem probe missing before execution"
                 )
             probe = json.loads(line.decode("utf-8").removeprefix(PROBE_PREFIX))
+            startup_stage = "docker_inspect"
             inspection = await asyncio.create_subprocess_exec(
                 "docker",
                 "inspect",
@@ -1304,6 +1371,7 @@ async def run_container(spec: dict, agent_dir: Path, options: dict) -> dict:
             if inspection.returncode:
                 raise WorkerInfrastructureError("real worker Docker inspection failed")
             info = json.loads(raw)[0]
+            startup_stage = "validate_binding"
             accepted = validate_worker_inspection(
                 info,
                 mounts,
@@ -1328,6 +1396,7 @@ async def run_container(spec: dict, agent_dir: Path, options: dict) -> dict:
                     planning_request,
                     authority_sha256=options["planning_authority_sha256"],
                 )
+            go_authorized = True
             process.stdin.write(("GO:" + nonce + "\n").encode())
             await process.stdin.drain()
             process.stdin.close()
@@ -1423,14 +1492,18 @@ async def run_container(spec: dict, agent_dir: Path, options: dict) -> dict:
                 ),
             }
             return value
-        except (ConnectionError, TimeoutError) as error:
-            raise WorkerTransportError(
-                "worker communication was interrupted"
-            ) from error
-        except OSError as error:
-            raise WorkerInfrastructureError(
-                "Docker worker process is unavailable"
-            ) from error
+        except Exception as error:
+            if not go_authorized:
+                record_startup_failure(error)
+            if isinstance(error, (ConnectionError, TimeoutError)):
+                raise WorkerTransportError(
+                    "worker communication was interrupted"
+                ) from error
+            if isinstance(error, OSError):
+                raise WorkerInfrastructureError(
+                    "Docker worker process is unavailable"
+                ) from error
+            raise
         finally:
             if termination_dir is not None:
                 from evals.contracts import canonical_hash
@@ -1471,27 +1544,56 @@ async def run_container(spec: dict, agent_dir: Path, options: dict) -> dict:
 
 
 def main() -> None:
-    forbidden = {
-        kind: [Path(value) for value in values]
-        for kind, values in json.loads(os.environ["TASK13_FORBIDDEN_PATHS"]).items()
-    }
-    nonce = os.environ["TASK13_WORKER_NONCE"]
-    probe = worker_probe(Path("/app/agent/events.jsonl"), forbidden, nonce)
-    if os.environ.get("TASK13_IMPORT_SOURCE_DIR"):
-        request = _worker_request(json.loads(Path("/app/spec.json").read_bytes()))
-        if request.schema_version not in {E_PLANNING_SCHEMA, E_PLANNING_REVIEW_SCHEMA}:
-            raise ValueError("only planning workers may mount import resources")
-        probe["planning"] = e_planning_worker_probe(
-            request.planning_request
-            if request.schema_version == E_PLANNING_REVIEW_SCHEMA
-            else request
-        )
-    elif os.environ.get("TASK13_EPOCH_HOST_BUDGET_PATH"):
-        request = _worker_request(json.loads(Path("/app/spec.json").read_bytes()))
-        if request.model_identity_binding is not None:
-            from evals.adapters.model_identity_runtime import require_dispatch_identity
+    startup_stage = "startup_configuration"
+    try:
+        forbidden = {
+            kind: [Path(value) for value in values]
+            for kind, values in json.loads(os.environ["TASK13_FORBIDDEN_PATHS"]).items()
+        }
+        nonce = os.environ["TASK13_WORKER_NONCE"]
+        startup_stage = "worker_probe"
+        probe = worker_probe(Path("/app/agent/events.jsonl"), forbidden, nonce)
+        if os.environ.get("TASK13_IMPORT_SOURCE_DIR"):
+            startup_stage = "request_parse"
+            request = _worker_request(json.loads(Path("/app/spec.json").read_bytes()))
+            if request.schema_version not in {
+                E_PLANNING_SCHEMA,
+                E_PLANNING_REVIEW_SCHEMA,
+            }:
+                raise ValueError("only planning workers may mount import resources")
+            startup_stage = "planning_probe"
+            probe["planning"] = e_planning_worker_probe(
+                request.planning_request
+                if request.schema_version == E_PLANNING_REVIEW_SCHEMA
+                else request
+            )
+        elif os.environ.get("TASK13_EPOCH_HOST_BUDGET_PATH"):
+            startup_stage = "request_parse"
+            request = _worker_request(json.loads(Path("/app/spec.json").read_bytes()))
+            if request.model_identity_binding is not None:
+                from evals.adapters.model_identity_runtime import (
+                    require_dispatch_identity,
+                )
 
-            require_dispatch_identity(Path(os.environ["TASK13_BUDGET_DB"]), request)
+                startup_stage = "model_identity"
+                require_dispatch_identity(Path(os.environ["TASK13_BUDGET_DB"]), request)
+    except Exception as error:  # noqa: BLE001 - pre-GO failures must not leak secrets.
+        from evals.adapters.worker_errors import exception_category
+
+        sys.stderr.write(
+            STARTUP_FAILURE_PREFIX
+            + json.dumps(
+                {
+                    "stage": startup_stage,
+                    "category": exception_category(error),
+                    "error_type": type(error).__name__,
+                },
+                sort_keys=True,
+            )
+            + "\n"
+        )
+        sys.stderr.flush()
+        raise SystemExit(1) from None
     sys.stderr.write(PROBE_PREFIX + json.dumps(probe, sort_keys=True) + "\n")
     sys.stderr.flush()
     if sys.stdin.readline().strip() != "GO:" + nonce:

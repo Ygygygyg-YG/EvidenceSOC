@@ -495,8 +495,12 @@ async def test_real_pg_os_planning_pending_reopen_review_and_cleanup(
         monkeypatch.setattr(review.os, "getpid", lambda: 1)
         window_checks = []
 
-        def injected_review_window(now=None):
+        def injected_review_window(now=None, participation_policy=None):
             window_checks.append(now.isoformat() if now is not None else "clock")
+            if participation_policy is not None:
+                from evals.adapters.e_participation import require_participation_window
+
+                require_participation_window(now, participation_policy)
 
         monkeypatch.setattr(review, "require_review_window", injected_review_window)
 

@@ -183,13 +183,23 @@ def _snapshot_valid(state):
 
 
 def build_approval_packet(
-    case: dict, state: dict, *, now: datetime | None = None
+    case: dict, state: dict, *, now: datetime | None = None, participation_policy=None
 ) -> dict:
     """Materialize review details from an actual saved B3 state, without a decision."""
     if not _snapshot_valid(state):
         raise ValueError("a valid sealed B3 snapshot is required for review")
     plan = ResponsePlan.model_validate(state.get("response_plan"))
     current = now or datetime.now(UTC)
+    participation = {}
+    if participation_policy is not None:
+        from evals.adapters.e_participation import EParticipationPolicy
+
+        participation = {
+            "review_window": "anytime",
+            "participation_policy": EParticipationPolicy.model_validate(
+                participation_policy
+            ).model_dump(mode="json"),
+        }
     return {
         "schema_version": "task13-response-review-v1",
         "case_id": case["case_id"],
@@ -197,6 +207,7 @@ def build_approval_packet(
         "incident_id": state["incident_id"],
         "reviewer": "user",
         "review_window": "19:00-00:00 Asia/Shanghai",
+        **participation,
         "state_sha256": canonical_hash(state),
         "diagnostic_snapshot_sha256": state["diagnostic_snapshot_sha256"],
         "plan_sha256": _plan_hash(state["response_plan"]),

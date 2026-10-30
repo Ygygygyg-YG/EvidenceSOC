@@ -102,7 +102,7 @@ async def test_review_host_guard_runs_before_source_services_or_keys(
         await review.run_e_planning_review(operation, tmp_path)
 
 
-def review_state_fixture(tmp_path):
+def review_state_fixture(tmp_path, participation_policy=None):
     from evidencesoc.agents.graph import _plan_hash
 
     from evals.adapters.e_planning_worker import _claim_binding
@@ -115,6 +115,9 @@ def review_state_fixture(tmp_path):
 
     source = product_source(tmp_path)
     registration = product_registration(source)
+    if participation_policy is not None:
+        registration["core_config"]["participation_policy"] = participation_policy
+        registration["core_config_sha256"] = canonical_hash(registration["core_config"])
     planning = planning_requests(registration)[0]
     registration, authority, _ = register_fixture(
         tmp_path / "e-planning.sqlite", registration
@@ -193,12 +196,13 @@ def test_review_validates_actual_original_analysis_and_claim_before_decision(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("anytime", [False, True])
 @pytest.mark.parametrize(
     "operation,tamper",
     [("read_packet", False), ("decision", False), ("decision", True)],
 )
 async def test_real_review_adapter_validates_before_approval_and_never_constructs_model(
-    tmp_path, monkeypatch, operation, tamper
+    tmp_path, monkeypatch, operation, tamper, anytime
 ):
     from contextlib import asynccontextmanager
     from types import SimpleNamespace
@@ -206,8 +210,12 @@ async def test_real_review_adapter_validates_before_approval_and_never_construct
     from evals.adapters import e_planning_review as review
     from evals.adapters import model_client, retained_workflow
     from evals.adapters import verification_worker as original
+    from evals.tests.test_e_participation import POLICY
 
-    planning, state, source, binding = review_state_fixture(tmp_path)
+    policy = POLICY if anytime else None
+    planning, state, source, binding = review_state_fixture(
+        tmp_path, participation_policy=policy
+    )
     resource = reference(planning)
     resource.update(
         plan_sha256=canonical_hash(state["response_plan"]),
@@ -215,7 +223,9 @@ async def test_real_review_adapter_validates_before_approval_and_never_construct
         state_sha256=canonical_hash(state),
     )
     packet = retained_workflow.build_approval_packet(
-        {"case_id": planning.case_id, "dataset": planning.dataset}, state
+        {"case_id": planning.case_id, "dataset": planning.dataset},
+        state,
+        participation_policy=policy,
     )
     request = review.build_review_request(
         planning,
@@ -242,7 +252,9 @@ async def test_real_review_adapter_validates_before_approval_and_never_construct
                 "status": "approved",
                 "approval": {
                     "synthetic": True,
-                    "decided_at": "2026-10-25T12:00:00+00:00",
+                    "decided_at": "2026-10-25T04:00:00+00:00"
+                    if anytime
+                    else "2026-10-25T12:00:00+00:00",
                 },
             }
 
@@ -265,7 +277,16 @@ async def test_real_review_adapter_validates_before_approval_and_never_construct
         "validate_review_inputs",
         lambda *a: (request, source, binding, lambda: binding),
     )
-    monkeypatch.setattr(review, "require_review_window", lambda *a: None)
+    if anytime:
+        from evals.adapters import e_participation
+
+        monkeypatch.setattr(
+            e_participation,
+            "datetime",
+            SimpleNamespace(now=lambda tz: datetime(2026, 10, 25, 4, tzinfo=UTC)),
+        )
+    else:
+        monkeypatch.setattr(review, "require_review_window", lambda *a: None)
     monkeypatch.setattr(review.os, "getpid", lambda: 1)
     monkeypatch.setenv("TASK13_WORKER_NONCE", "synthetic")
     monkeypatch.setenv("TASK13_PHASE", "verification")
@@ -293,6 +314,9 @@ async def test_real_review_adapter_validates_before_approval_and_never_construct
     assert result["model_ledger"] == []
     assert result["status"] == ("failed" if tamper else "completed")
     assert len(decisions) == (1 if operation == "decision" and not tamper else 0)
+    if anytime and not tamper:
+        assert result["approval_packet"]["review_window"] == "anytime"
+        assert result["approval_packet"]["participation_policy"] == POLICY
 
 
 @pytest.mark.asyncio

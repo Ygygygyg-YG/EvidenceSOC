@@ -1,6 +1,14 @@
 # Task13 v2 整改进展报告
 
-更新于2026-10-24（北京时间），活动 `task13-repair-202610-v2`。已完成基线登记、采集/响应修复、预算与F8编排、真实检索/服务验收及开发分析输入一致性整改；最终全量1570项通过。工程源码随本报告提交，开发候选及其commit/hash另存新产物目录。**36项真实开发、176行新回归、真实F8与16槽新人工复核均未执行，Task13整体验收未完成**。补充协议见 [task13-remediation-protocol.md](task13-remediation-protocol.md)。
+当前恢复状态更新于2026-10-30（北京时间），活动 `task13-repair-202610-v2`。**原36项真实开发已全部终态，25有效、11失败；176行新回归、真实F8与16槽新人工复核仍未执行，Task13整体验收未完成**。补充协议见 [task13-remediation-protocol.md](task13-remediation-protocol.md)。下文10月23～24日的测试、费用与“未执行”描述是当时快照，不用于覆盖本段最新事实。
+
+2026-10-25开发终态证据：`data/task13/supplements/task13-repair-202610-v2/development/progress-20261025T061453Z-7fe4d324.json`，49次物理请求、0.32985832元，全部36槽保留在分母，不重跑失败。
+
+2026-10-30已取得新的合格真实分析（原AIT案例19事件，deepseek-flash/bc19身份）；最新补充开发累计53次物理请求、0.38286236元。首份规划pre-GO终止为unknown/WorkerTransportError，无新规划请求、claim或费用；实际计划审批0、完整六分支计时0/3。证据位于 `development/cold-terminal-candidate-20261030-facd10e2/activation/evening-resume-boundary.json` 及同目录首槽停止审计。合格分析包和旧unknown均保留，当前先修复验证启动，再办理明确恢复，不重复分析。
+
+用户2026-10-30明确将推进条件改为任意时间，取消19:00–00:00及持续在场限制；具体计划仍须逐份实际批准。实际指令原字节SHA256为 `decdef181118f852fbde86758f8ee2660a6fb2f0d556364df25b125d1cec4035`，保存于 `audit/startup-recovery-authorization-20261030/actual-user-instructions.json`。预算、数据、模型、TTL、分支时限与10月31日截止时间保留，旧冻结授权不覆盖。
+
+本轮恢复步骤与证据验收见 [2026-10-30-task13-startup-and-anytime-recovery.md](../superpowers/plans/2026-10-30-task13-startup-and-anytime-recovery.md)。尚需三次真实计时、正式具体范围确认与176回归、F8最低8案例/24完整对、16人工槽、独立评分/费用核对和新图表视觉检查。以下保留原工程阶段记录。
 
 实施位于 `D:\传智杯\.backups\task13-remediation` 的 `codex/task13-remediation` 分支，起点 `11aff6cf08e5d4246e252c4b0031126716e761bb`。主仓保留用户三份未提交修改和新增整改计划；四份文档的保留哈希、工作树信息、原产物哈希及验证结果位于 `D:\传智杯\data\task13\supplements\task13-repair-202610-v2\audit\baseline.json` 与 `receipts/task-a-validation.json`。任务 A 不运行模型、服务、产品审批或模拟动作，不写旧费用账本。
 

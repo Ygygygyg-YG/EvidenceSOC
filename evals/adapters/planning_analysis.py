@@ -47,18 +47,50 @@ def verify_planning_analysis(
             request.original_request_sha256,
             budget_path,
             mounted_host_budget_path=mounted_host_budget_path,
+            recovery_lineage=request.recovery_lineage,
         )
+        recovery = request.recovery_lineage
+        if recovery is not None:
+            from evals.adapters.planning_recovery import validate_recovery_execution
+
+            validate_recovery_execution(
+                recovery,
+                {
+                    key: getattr(request, key)
+                    for key in (
+                        "epoch_id",
+                        "source_commit",
+                        "source_sha256",
+                        "budget_identity",
+                    )
+                }
+                | {
+                    "model_identity_binding": request.model_identity_binding.model_dump(
+                        mode="json"
+                    )
+                },
+                request.core_config_sha256,
+            )
+        original = recovery["original_epoch_binding"] if recovery else None
         expected = {
             **request.source.model_dump(mode="json", exclude={"source_identity"}),
             "source_package_schema_version": "task13-additional-analysis-package-v1",
-            "source_core_sha256": request.core_config_sha256,
-            "source_epoch_id": request.epoch_id,
-            "source_epoch_manifest_sha256": request.epoch_manifest_sha256,
-            "source_model_identity_binding": request.model_identity_binding.model_dump(
-                mode="json"
-            ),
-            "source_commit": request.source_commit,
-            "source_sha256": request.source_sha256,
+            "source_core_sha256": recovery["original_core_config_sha256"]
+            if recovery
+            else request.core_config_sha256,
+            "source_epoch_id": original["epoch_id"] if recovery else request.epoch_id,
+            "source_epoch_manifest_sha256": original["epoch_manifest_sha256"]
+            if recovery
+            else request.epoch_manifest_sha256,
+            "source_model_identity_binding": original["model_identity_binding"]
+            if recovery
+            else request.model_identity_binding.model_dump(mode="json"),
+            "source_commit": original["source_commit"]
+            if recovery
+            else request.source_commit,
+            "source_sha256": original["source_sha256"]
+            if recovery
+            else request.source_sha256,
         }
         if imported.source_identity != request.source_identity or any(
             imported.provenance.get(key) != value for key, value in expected.items()

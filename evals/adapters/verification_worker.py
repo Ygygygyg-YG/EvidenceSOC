@@ -189,6 +189,7 @@ async def run_source_review(
     state_validator=None,
     decision_admitter=None,
     verification_enabled=True,
+    participation_policy=None,
 ) -> dict:
     """Read, explicitly decide, or renew the retained original product workflow."""
     from evals.adapters import retained_workflow
@@ -288,7 +289,13 @@ async def run_source_review(
                 if state_validator is not None:
                     state_validator(state)
                 packet = retained_workflow.build_approval_packet(
-                    {"case_id": request.case_id, "dataset": request.dataset}, state
+                    {"case_id": request.case_id, "dataset": request.dataset},
+                    state,
+                    **(
+                        {"participation_policy": participation_policy}
+                        if participation_policy is not None
+                        else {}
+                    ),
                 )
             finally:
                 tool_calls = [
