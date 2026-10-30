@@ -49,6 +49,20 @@ INPUTS = {
     "readiness",
 }
 HOST_ENTRYPOINT = "scripts/task13_e_trial.py"
+HOST_READ_ENTRYPOINT = "evals/host_review.py"
+
+
+def require_host_entrypoints(epoch, timing):
+    """Both host implementations must be pinned by the actual registered source."""
+    root = Path(__file__).resolve().parents[1]
+    for relative in (HOST_ENTRYPOINT, HOST_READ_ENTRYPOINT):
+        path = root / relative
+        digest = sha256(path.read_bytes()).hexdigest()
+        if (
+            epoch["entrypoints"].get(relative) != digest
+            or timing["source_files"].get(str(path)) != digest
+        ):
+            raise PermissionError("actual host entrypoint differs from frozen source")
 
 
 class PlanningBlocked(PermissionError):
@@ -346,24 +360,17 @@ class ETrialController:
             manifest_sha256=request.epoch_manifest_sha256,
             latest=True,
         )
-        actual_host = Path(__file__).resolve()
-        if (
-            epoch["authority"]
-            != {
-                "kind": "phase_scope_consent",
-                "packet_sha256": self._manifest["inputs"]["scope_packet"]["sha256"],
-                "decision_record_sha256": self._manifest["inputs"]["scope_decision"][
-                    "sha256"
-                ],
-            }
-            or epoch["entrypoints"].get(HOST_ENTRYPOINT)
-            != sha256(actual_host.read_bytes()).hexdigest()
-            or self._timing["source_files"].get(str(actual_host))
-            != sha256(actual_host.read_bytes()).hexdigest()
-        ):
+        if epoch["authority"] != {
+            "kind": "phase_scope_consent",
+            "packet_sha256": self._manifest["inputs"]["scope_packet"]["sha256"],
+            "decision_record_sha256": self._manifest["inputs"]["scope_decision"][
+                "sha256"
+            ],
+        }:
             raise PermissionError(
                 "actual host entrypoint or registered real phase authority differs"
             )
+        require_host_entrypoints(epoch, self._timing)
         roots = [_path(value) for value in epoch["controller_state_roots"]]
         if any(
             not any(path.is_relative_to(root) for root in roots)
@@ -880,13 +887,33 @@ class ETrialController:
             decision=decision,
             reason=reason,
         )
-        from scripts.task13_worker_runtime import run_e_planning_review_container
-
-        worker = self._free.review if self._free else run_e_planning_review_container
         options = self._options("verification")
-        value = await worker(review, self._agent, options)
-        self._save("runtime-result", _bytes(value))
-        captured, _ = self._capture(value, options, review)
+        if operation == "read_packet" and self._free is None:
+            from evals.host_review import read_e_planning_host_review
+
+            value = await read_e_planning_host_review(review, self._agent, options)
+            receipt = value.get("host_read_receipt") or {}
+            if (
+                receipt.get("schema_version") != "task13-e-host-review-read-v1"
+                or receipt.get("origin") != "host_original_postgresql_read"
+                or receipt.get("request_sha256") != canonical_hash(review)
+                or receipt.get("state_sha256") != value.get("source_state_sha256")
+                or "isolation_evidence" in value
+            ):
+                raise PermissionError("actual host read receipt binding differs")
+            captured = {
+                "host_read_result": self._save("host-review-result", _bytes(value)),
+                "host_read_receipt": self._save("host-review-read", _bytes(receipt)),
+            }
+        else:
+            from scripts.task13_worker_runtime import run_e_planning_review_container
+
+            worker = (
+                self._free.review if self._free else run_e_planning_review_container
+            )
+            value = await worker(review, self._agent, options)
+            self._save("runtime-result", _bytes(value))
+            captured, _ = self._capture(value, options, review)
         if (
             value.get("model_ledger")
             or value.get("status") != "completed"

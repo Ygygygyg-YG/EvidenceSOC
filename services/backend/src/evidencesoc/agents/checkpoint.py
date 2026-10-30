@@ -39,7 +39,8 @@ def psycopg_url(database_url: str) -> str:
 
 
 @asynccontextmanager
-async def open_checkpointer(database_url: str):
+async def open_checkpointer(database_url: str, *, readonly: bool = False):
+    """Open existing checkpoints read-only when requested; default still sets up."""
     pool: ConnectionPool[Connection[DictRow]] = ConnectionPool(
         psycopg_url(database_url),
         kwargs={
@@ -47,7 +48,8 @@ async def open_checkpointer(database_url: str):
             "connect_timeout": 3,
             "prepare_threshold": 0,
             "row_factory": dict_row,
-            "options": "-c statement_timeout=3000",
+            "options": "-c statement_timeout=3000"
+            + (" -c default_transaction_read_only=on" if readonly else ""),
         },
         min_size=1,
         max_size=2,
@@ -58,7 +60,8 @@ async def open_checkpointer(database_url: str):
     try:
         await asyncio.to_thread(pool.open, wait=True, timeout=3)
         saver = ThreadedPostgresSaver(pool)
-        await asyncio.to_thread(saver.setup)
+        if not readonly:
+            await asyncio.to_thread(saver.setup)
         yield saver
     finally:
         await asyncio.to_thread(pool.close)

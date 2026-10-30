@@ -21,6 +21,7 @@ def test_source_review_dependencies_work_with_only_worker_export_paths(tmp_path)
         "services/backend/src",
         "evals/contracts.py",
         "evals/e_planning.py",
+        "evals/additional_source_selection.py",
         "evals/adapters",
         "scripts/dedale_task12_runtime.py",
         "scripts/task13_worker_runtime.py",

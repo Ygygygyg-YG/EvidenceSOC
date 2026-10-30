@@ -104,8 +104,12 @@ def _require_renewal_workflow(workflow):
 
 
 @asynccontextmanager
-async def open_retained_workflow(reference, *, model=None, verification_enabled=True):
+async def open_retained_workflow(
+    reference, *, model=None, verification_enabled=True, readonly=False
+):
     """Open the original retained checkpoint; only a tracked worker may renew it."""
+    if readonly and model is not None:
+        raise PermissionError("read-only retained workflow cannot use a model")
     # Import locally: the worker contract also imports these workflow helpers.
     from evals.adapters.verification_worker import SourceResources
 
@@ -116,6 +120,18 @@ async def open_retained_workflow(reference, *, model=None, verification_enabled=
     url = make_url(base.database_url)
     if url.get_backend_name() != "postgresql":
         raise ValueError("retained approval workflow requires PostgreSQL")
+    if readonly:
+        options = url.query.get("options", "")
+        if not isinstance(options, str):
+            raise ValueError("read-only PostgreSQL options must be a single string")
+        url = url.update_query_dict(
+            {
+                "options": (
+                    options
+                    + " -c default_transaction_read_only=on -c statement_timeout=3000"
+                ).strip()
+            }
+        )
     database_url = url.set(database=resources.database_name).render_as_string(
         hide_password=False
     )
@@ -147,9 +163,12 @@ async def open_retained_workflow(reference, *, model=None, verification_enabled=
         key: os.environ.get(key) for key in ("DATABASE_URL", "OPENSEARCH_INDEX")
     }
     try:
-        os.environ["DATABASE_URL"] = database_url
-        os.environ["OPENSEARCH_INDEX"] = resources.index_name
-        async with open_checkpointer(database_url) as saver:
+        if not readonly:
+            os.environ["DATABASE_URL"] = database_url
+            os.environ["OPENSEARCH_INDEX"] = resources.index_name
+        async with open_checkpointer(
+            database_url, **({"readonly": True} if readonly else {})
+        ) as saver:
             workflow = InvestigationWorkflow(
                 services=services,
                 settings=settings,
@@ -168,11 +187,12 @@ async def open_retained_workflow(reference, *, model=None, verification_enabled=
             await services.aclose()
         finally:
             engine.dispose()
-            for key, value in previous.items():
-                if value is None:
-                    os.environ.pop(key, None)
-                else:
-                    os.environ[key] = value
+            if not readonly:
+                for key, value in previous.items():
+                    if value is None:
+                        os.environ.pop(key, None)
+                    else:
+                        os.environ[key] = value
 
 
 def _snapshot_valid(state):
