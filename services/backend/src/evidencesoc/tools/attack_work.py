@@ -156,6 +156,7 @@ class AttackLookupWork:
             [Session], AttackKnowledgeLookup
         ] = AttackKnowledgeRepository,
         max_attempts: int = 3,
+        prepare: Callable[[], None] | None = None,
     ) -> None:
         if not 1 <= max_attempts <= 3:
             raise ValueError("max_attempts must be between 1 and 3")
@@ -163,6 +164,12 @@ class AttackLookupWork:
         self._clock = clock
         self._repository_factory = repository_factory
         self._max_attempts = max_attempts
+        self._prepare = prepare
+
+    def prepare(self) -> None:
+        """Prepare this work's dependencies without opening a database session."""
+        if self._prepare is not None:
+            self._prepare()
 
     def __call__(self, *, query: str, limit: int) -> list[dict[str, str]]:
         deadline = self._clock() + 10.0
@@ -206,4 +213,5 @@ def build_attack_lookup_work(
         repository_factory=lambda session: HybridAttackKnowledgeRepository(
             session, embedder
         ),
+        prepare=embedder.prepare,
     )

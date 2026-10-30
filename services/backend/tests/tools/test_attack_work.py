@@ -136,3 +136,38 @@ def test_production_builder_uses_hybrid_repository_without_loading_model_or_quer
     work = build_attack_lookup_work(session_factory=SessionFactory())  # type: ignore[arg-type]
     repository = work._repository_factory(None)
     assert isinstance(repository, HybridAttackKnowledgeRepository)
+
+
+def test_prepare_uses_same_lazy_provider_as_subsequent_lookup(monkeypatch) -> None:
+    from evidencesoc.rag import embeddings, retriever
+    from evidencesoc.tools.attack_work import build_attack_lookup_work
+
+    observed = []
+
+    class Provider:
+        def prepare(self):
+            observed.append(("prepare", self))
+
+    class Repository:
+        def __init__(self, session, embedder):
+            self.embedder = embedder
+
+        def lookup(self, **kwargs):
+            assert observed == [("prepare", self.embedder)]
+            observed.append(("lookup", kwargs["query"], kwargs["limit"]))
+            return []
+
+    monkeypatch.setattr(embeddings, "LocalEmbeddingProvider", Provider)
+    monkeypatch.setattr(retriever, "HybridAttackKnowledgeRepository", Repository)
+    work = build_attack_lookup_work(session_factory=lambda: nullcontext(None))
+    assert observed == []
+    work.prepare()
+    assert work(query="fixed query", limit=5) == []
+    assert observed[-1] == ("lookup", "fixed query", 5)
+
+
+def test_legacy_work_prepare_has_no_session_or_startup_side_effect() -> None:
+    def no_session():
+        raise AssertionError("preparation must not open a database")
+
+    AttackLookupWork(session_factory=no_session).prepare()

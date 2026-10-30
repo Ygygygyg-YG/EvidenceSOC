@@ -86,6 +86,37 @@ def test_validated_local_model_is_reused_with_network_disabled(
     assert calls[0]["threads"] == 2
 
 
+def test_explicit_runtime_prepare_loads_once_without_embedding_a_query(
+    model_files: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = fake_model(monkeypatch, [[1.0] + [0.0] * 383])
+    queries = []
+    original = sys.modules["fastembed"].TextEmbedding.query_embed
+
+    def query(model: Any, text: str) -> Any:
+        queries.append((model, text))
+        return original(model, text)
+
+    monkeypatch.setattr(sys.modules["fastembed"].TextEmbedding, "query_embed", query)
+    provider = embeddings.LocalEmbeddingProvider(model_files)
+    assert calls == []
+    provider.prepare()
+    provider.prepare()
+    prepared = provider._model
+    assert len(calls) == 1 and queries == []
+    assert provider.embed_query("same actual query")[0] == 1.0
+    assert len(calls) == 1 and queries == [(prepared, "same actual query")]
+
+
+def test_runtime_prepare_rejects_missing_model_without_download(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = fake_model(monkeypatch, [])
+    with pytest.raises(RuntimeError, match="unavailable or unverified"):
+        embeddings.LocalEmbeddingProvider(tmp_path / "absent").prepare()
+    assert calls == [] and not (tmp_path / "absent").exists()
+
+
 @pytest.mark.parametrize("change", ["missing", "corrupt", "manifest", "revision"])
 def test_unverified_model_is_rejected_before_loading(
     model_files: Path, monkeypatch: pytest.MonkeyPatch, change: str

@@ -11,6 +11,10 @@ from pathlib import Path
 
 import anyio
 import pytest
+from evidencesoc.agents.capabilities import (
+    InvestigationCapabilities,
+    capability_scope,
+)
 from evidencesoc.config import Settings
 from evidencesoc.mcp_server.context import RunContext
 
@@ -146,7 +150,11 @@ async def test_stdio_process_initializes_and_discovers_exactly_three_tools(
     client = importlib.import_module("evidencesoc.mcp_server.client")
     settings = _settings(f"sqlite+pysqlite:///{agent_run_database.as_posix()}")
 
-    with anyio.fail_after(20):
+    # This schema/policy check does not require a local embedding model.
+    with (
+        capability_scope(InvestigationCapabilities(rag_mode="disabled")),
+        anyio.fail_after(20),
+    ):
         async with client.open_stdio_session(
             RunContext("AR-42", "IN-42", "TRACE-42"),
             settings=settings,

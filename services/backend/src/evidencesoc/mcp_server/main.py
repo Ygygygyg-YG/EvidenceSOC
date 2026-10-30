@@ -119,6 +119,7 @@ def build_server(
     settings: Settings,
     session_factory: sessionmaker[Session],
     max_attempts: int = 3,
+    prepare_knowledge: bool = False,
 ) -> RestrictedFastMCP:
     validate_run_context(session_factory, context)
     audit = SqlAuditWriter(session_factory=session_factory)
@@ -146,13 +147,17 @@ def build_server(
         ),
         audit=audit,
     )
+    attack_work = build_attack_lookup_work(
+        session_factory=session_factory,
+        model_path=settings.rag_data_directory / "model",
+        max_attempts=max_attempts,
+    )
+    if prepare_knowledge:
+        # Startup owns cold offline model loading; tool deadlines stay unchanged.
+        attack_work.prepare()
     attack_tools = AttackTools(
         context=context,
-        work=build_attack_lookup_work(
-            session_factory=session_factory,
-            model_path=settings.rag_data_directory / "model",
-            max_attempts=max_attempts,
-        ),
+        work=attack_work,
         audit=audit,
     )
     return create_server(
@@ -193,6 +198,10 @@ def main() -> None:
                 settings=settings,
                 session_factory=create_session_factory(engine),
                 max_attempts=tool_attempt_limit(os.environ),
+                prepare_knowledge=(
+                    "lookup_attack_technique" in policy.allowed_tools
+                    and policy.rag_mode != "disabled"
+                ),
             )
             server.run(transport="stdio")
     finally:

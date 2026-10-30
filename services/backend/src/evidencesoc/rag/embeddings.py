@@ -202,6 +202,10 @@ class LocalEmbeddingProvider:
                     )
         return self._model
 
+    def prepare(self) -> None:
+        """Verify and load the pinned offline model before serving tool calls."""
+        self._load_model()
+
     def embed_documents(self, documents: list[str]) -> list[list[float]]:
         if not documents:
             return []
