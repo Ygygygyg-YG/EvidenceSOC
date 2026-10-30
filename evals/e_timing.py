@@ -413,6 +413,57 @@ def _validate_imported_state(state, selected):
         ) from error
 
 
+def _additional_source_expectation(registration, request):
+    """Keep analysis provenance historical while admission uses the current epoch."""
+    planning = registration["planning_registration"]
+    recovery = request.get("recovery_lineage")
+    registered_recovery = planning.get("recovery_lineage")
+    if (recovery is None) != (registered_recovery is None) or (
+        recovery is not None
+        and canonical_hash(recovery) != canonical_hash(registered_recovery)
+    ):
+        raise ValueError("timing recovery lineage differs from its registration")
+    original = None
+    if recovery is not None:
+        from evals.adapters.planning_recovery import (
+            validate_recovery_execution,
+            validate_recovery_original,
+        )
+
+        validate_recovery_original(
+            recovery,
+            planning["source_selection_receipt"]["additional_registration"],
+            request["source_package_manifest_sha256"],
+            request["original_request_sha256"],
+        )
+        validate_recovery_execution(recovery, request, request["core_config_sha256"])
+        validate_recovery_execution(
+            recovery, planning["epoch_binding"], planning["core_config_sha256"]
+        )
+        original = recovery["original_epoch_binding"]
+    return {
+        "source_kind": request["source"]["source_kind"],
+        "source_registration_sha256": request["source"]["source_registration_sha256"],
+        "source_core_sha256": recovery["original_core_config_sha256"]
+        if original
+        else request["core_config_sha256"],
+        "source_epoch_id": original["epoch_id"] if original else request["epoch_id"],
+        "source_epoch_manifest_sha256": original["epoch_manifest_sha256"]
+        if original
+        else request["epoch_manifest_sha256"],
+        "source_model_identity_binding": original["model_identity_binding"]
+        if original
+        else request["model_identity_binding"],
+        "source_synthetic": registration["synthetic"],
+        "source_commit": original["source_commit"]
+        if original
+        else request["source_commit"],
+        "source_sha256": original["source_sha256"]
+        if original
+        else request["source_sha256"],
+    }
+
+
 def _validate_replicate_source(registration, registered, source):
     """Independently join the live approval to original bytes and worker retention.
 
@@ -467,6 +518,11 @@ def _validate_replicate_source(registration, registered, source):
             != registered["planning_request_sha256"]
         ):
             raise ValueError("actual planning request differs from its fixed slot")
+        additional_expected = (
+            _additional_source_expectation(registration, request)
+            if additional
+            else None
+        )
         state, retained, reference = (
             source["state"],
             source["retained_state"],
@@ -499,28 +555,18 @@ def _validate_replicate_source(registration, registered, source):
                 type(provenance.get("source_synthetic")) is not bool
                 or any(
                     provenance.get(key) != value
-                    for key, value in {
-                        "source_kind": request["source"]["source_kind"],
-                        "source_registration_sha256": request["source"][
-                            "source_registration_sha256"
-                        ],
-                        "source_core_sha256": request["core_config_sha256"],
-                        "source_epoch_id": request["epoch_id"],
-                        "source_epoch_manifest_sha256": request[
-                            "epoch_manifest_sha256"
-                        ],
-                        "source_model_identity_binding": request[
-                            "model_identity_binding"
-                        ],
-                        "source_synthetic": registration["synthetic"],
-                        "source_commit": request["source_commit"],
-                        "source_sha256": request["source_sha256"],
-                    }.items()
+                    for key, value in additional_expected.items()
                 )
             ):
                 raise ValueError(
                     "sealed additional source registration/epoch/core/model differs"
                 )
+            if additional and request.get("recovery_lineage") is not None:
+                from evals.adapters.planning_recovery import (
+                    validate_recovery_provenance,
+                )
+
+                validate_recovery_provenance(request["recovery_lineage"], provenance)
         if (
             retained.get("status") != "awaiting_approval"
             or retained.get("approval") is not None
