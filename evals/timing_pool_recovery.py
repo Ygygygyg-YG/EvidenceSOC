@@ -221,16 +221,92 @@ def _require_lease(lease):
         raise PermissionError("live manual recovery lease required")
     if canonical_hash(lease.spec) != lease._spec_sha256:
         raise PermissionError("manual recovery lease spec changed")
-    for path, raw in lease.owned.items():
-        require_plain_path(path, file=not path.is_dir())
-        current = (
-            (path / "owner.json").read_bytes() if path.is_dir() else path.read_bytes()
-        )
-        if current != raw:
-            raise PermissionError("manual recovery lease lock ownership differs")
+    for path, owner in lease.owned.items():
+        _require_owned_lock(path, owner)
     for journal, owner in lease.journals:
         if json.loads(journal.lock_path.read_bytes()) != owner:
             raise PermissionError("manual recovery lease pool ownership differs")
+
+
+def _require_owned_lock(path, owner):
+    try:
+        require_plain_path(path, file=isinstance(owner, bytes))
+        if isinstance(owner, tuple):
+            valid = (
+                path.is_dir()
+                and (path.stat().st_dev, path.stat().st_ino) == owner
+                and not any(path.iterdir())
+            )
+        else:
+            valid = path.read_bytes() == owner
+        if not valid:
+            raise PermissionError("manual recovery lease lock ownership differs")
+    except OSError as error:
+        raise PermissionError("manual recovery lease lock ownership differs") from error
+
+
+def _release_owned_lock(path, owner):
+    _require_owned_lock(path, owner)
+    path.rmdir() if isinstance(owner, tuple) else path.unlink()
+
+
+def _sealed_additional_outputs(roots, spec, target):
+    """Authenticate immutable worker outputs before choosing transient writes."""
+    from evals.adapters.source_epochs import _additional_terminal
+
+    sealed, entries = set(), set()
+    for root in roots:
+        for path in root.rglob("*"):
+            require_plain_path(path, file=path.is_file())
+            entries.add(path)
+    for path in sorted(entries):
+        if path.name in {
+            ".pool-adoption-fence",
+            "host-writer.lock",
+            "pool-journal.jsonl.lock",
+            ".writer-lock",
+            ".analysis36-campaign-lock",
+            ".rolling-adoption-lock",
+        }:
+            raise PermissionError(
+                "manual recovery active or stale lock requires reconciliation"
+            )
+        if path.name == "started.json":
+            start = json.loads(path.read_bytes())
+            if any(
+                key in start
+                for key in ("schema_version", "registration_id", "registration_sha256")
+            ):
+                _additional_terminal(path.parent, start)
+                sealed.add(path.parent)
+    host = _pin(spec["pool_host_manifest"])
+    control_roots = {Path(host["journal_path"]).parent}
+    for pin in host["hosts"].values():
+        child_host = _pin(pin)
+        if child_host.get("schema_version") != "task13-e-host-controller-v1":
+            raise PermissionError("pinned predecessor host schema differs")
+        control_roots.add(require_plain_path(child_host["output_dir"]))
+    if target is not None:
+        control_roots.add(Path(target["execution_journal_path"]).parent)
+        control_roots.update(
+            require_plain_path(child["evidence_root"]).parent
+            for child in target["children"]
+        )
+    if not control_roots <= set(roots) or any(
+        root.is_relative_to(output) for root in control_roots for output in sealed
+    ):
+        raise PermissionError(
+            "pinned host or pool root coverage conflicts with sealed output"
+        )
+    if any(
+        path.name in {"host-binding.json", "pool-journal.jsonl"}
+        and any(path.is_relative_to(output) for output in sealed)
+        for path in entries
+    ):
+        raise PermissionError(
+            "host or pool control evidence conflicts with sealed output"
+        )
+    return sealed
 
 
 @contextmanager
@@ -245,6 +321,7 @@ def manual_recovery_quiescence(spec):
     roots = [Path(p) for p in spec["controller_state_roots"]]
     old = _pin(spec["stop_evidence"])["pool_journal"]
     target = _target_registration(spec) if "target_pool_registration" in spec else None
+    sealed = _sealed_additional_outputs(roots, spec, target)
     with ExitStack() as stack:
         for root in sorted(roots):
             fence = root / ".pool-adoption-fence"
@@ -254,11 +331,12 @@ def manual_recovery_quiescence(spec):
                 raise PermissionError(
                     "manual recovery adoption fence active or stale"
                 ) from error
-            stack.callback(fence.rmdir)
-            owner_file = fence / "owner.json"
-            owner_file.write_bytes(raw)
-            stack.callback(owner_file.unlink)
-            owned[fence] = raw
+            identity = (fence.stat().st_dev, fence.stat().st_ino)
+            stack.callback(_release_owned_lock, fence, identity)
+            owned[fence] = identity
+        for root in sorted(roots):
+            if any(root.is_relative_to(output) for output in sealed):
+                continue
             lock = root / "host-writer.lock"
             try:
                 with lock.open("xb") as stream:
@@ -267,7 +345,7 @@ def manual_recovery_quiescence(spec):
                 raise PermissionError(
                     "manual recovery host writer active or stale"
                 ) from error
-            stack.callback(lock.unlink)
+            stack.callback(_release_owned_lock, lock, raw)
             owned[lock] = raw
         found = set()
         for root in roots:

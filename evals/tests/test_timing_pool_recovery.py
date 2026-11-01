@@ -67,6 +67,215 @@ def test_manual_audit_requires_unforgeable_live_outer_lease():
         module.audit_old_pool_locked({}, lease=object())
 
 
+@pytest.mark.parametrize("completed", [False, True])
+@pytest.mark.parametrize("register_sealed", [False, True])
+def test_outer_lease_preserves_native_additional_inventory_and_all_root_locks(
+    tmp_path, monkeypatch, completed, register_sealed
+):
+    from evals.adapters.source_epochs import (
+        _additional_terminal,
+        _lock_controller_roots,
+    )
+    from evals.tests.test_source_epochs import additional_terminal
+
+    module, spec, journal = synthetic_spec(tmp_path, monkeypatch)
+    sealed = additional_terminal(journal.path.parent, completed=completed)
+    nested = sealed / "worker.controller"
+    spec["controller_state_roots"].append(str(nested))
+    if register_sealed:
+        spec["controller_state_roots"].append(str(sealed))
+    start = json.loads((sealed / "started.json").read_bytes())
+    _additional_terminal(sealed, start)
+    before = {str(p): p.read_bytes() for p in sealed.rglob("*") if p.is_file()}
+    with module.manual_recovery_quiescence(spec) as lease, ExitStack() as stack:
+        # Exercise the actual native exact inventory before inspecting our lease.
+        locks = _lock_controller_roots(spec["controller_state_roots"], stack)
+        module.require_native_lock_ownership(spec["controller_state_roots"], locks)
+        assert len(locks) == 2 * len(spec["controller_state_roots"])
+        assert (journal.path.parent / "host-writer.lock").is_file()
+        for root in (sealed, nested):
+            assert not (root / "host-writer.lock").exists()
+            if str(root) in spec["controller_state_roots"]:
+                assert list((root / ".pool-adoption-fence").iterdir()) == []
+        module._require_lease(lease)
+        _additional_terminal(sealed, start)
+        assert before == {
+            str(p): p.read_bytes() for p in sealed.rglob("*") if p.is_file()
+        }
+    assert before == {str(p): p.read_bytes() for p in sealed.rglob("*") if p.is_file()}
+
+
+@pytest.mark.parametrize("damage", ["missing_receipt", "extra_file", "host_lock"])
+def test_outer_lease_does_not_classify_invalid_additional_output_as_sealed(
+    tmp_path, monkeypatch, damage
+):
+    from evals.tests.test_source_epochs import additional_terminal
+
+    module, spec, journal = synthetic_spec(tmp_path, monkeypatch)
+    sealed = additional_terminal(journal.path.parent)
+    spec["controller_state_roots"].append(str(sealed))
+    if damage == "missing_receipt":
+        (sealed / "launch-receipt.json").unlink()
+    else:
+        (
+            sealed / ("host-writer.lock" if damage == "host_lock" else "extra")
+        ).write_bytes(b"existing")
+    before = {str(p): p.read_bytes() for p in sealed.rglob("*") if p.is_file()}
+    with pytest.raises(PermissionError), module.manual_recovery_quiescence(spec):
+        pass
+    assert before == {str(p): p.read_bytes() for p in sealed.rglob("*") if p.is_file()}
+    assert not list(journal.path.parent.rglob(".pool-adoption-fence"))
+
+
+def test_outer_lease_empty_fence_rejects_replacement_and_foreign_contents(
+    tmp_path, monkeypatch
+):
+    module, spec, journal = synthetic_spec(tmp_path, monkeypatch)
+    with module.manual_recovery_quiescence(spec) as lease:
+        fence = journal.path.parent / ".pool-adoption-fence"
+        assert list(fence.iterdir()) == []
+        foreign = fence / "foreign"
+        foreign.write_bytes(b"not ours")
+        with pytest.raises(PermissionError, match="ownership"):
+            module._require_lease(lease)
+        foreign.unlink()
+        held = journal.path.parent / "original-fence"
+        fence.rename(held)
+        fence.mkdir()
+        try:
+            with pytest.raises(PermissionError, match="ownership"):
+                module._require_lease(lease)
+        finally:
+            fence.rmdir()
+            held.rename(fence)
+
+
+def test_outer_lease_fences_new_pool_creation_in_every_registered_tree(
+    tmp_path, monkeypatch
+):
+    from evals.timing_pool_controller import PoolJournal
+
+    module, spec, _journal = synthetic_spec(tmp_path, monkeypatch)
+    unrelated = tmp_path / "unrelated"
+    unrelated.mkdir()
+    spec["controller_state_roots"].append(str(unrelated))
+    with module.manual_recovery_quiescence(spec):
+        with pytest.raises(PermissionError, match="fence"):
+            PoolJournal.prepare(
+                unrelated / "pool-journal.jsonl",
+                pool_sha256="c" * 64,
+                attempts=[f"x{i}" for i in range(6)],
+                imported_trial_id="imported",
+                now=datetime(2026, 11, 1, tzinfo=timezone.utc),
+            )
+        assert not (unrelated / "pool-journal.jsonl").exists()
+
+
+def test_outer_lease_cleanup_preserves_replaced_foreign_fence(tmp_path, monkeypatch):
+    module, spec, journal = synthetic_spec(tmp_path, monkeypatch)
+    fence = journal.path.parent / ".pool-adoption-fence"
+    held = journal.path.parent / "original-fence"
+    with (
+        pytest.raises(PermissionError, match="ownership"),
+        module.manual_recovery_quiescence(spec),
+    ):
+        fence.rename(held)
+        fence.mkdir()
+        (fence / "foreign").write_bytes(b"must remain")
+    assert (fence / "foreign").read_bytes() == b"must remain"
+    assert held.is_dir()
+    assert not journal.lock_path.exists()
+    assert not (journal.path.parent / "host-writer.lock").exists()
+
+
+def test_native_locks_still_reject_sealed_mutation_after_outer_classification(
+    tmp_path, monkeypatch
+):
+    from evals.adapters.source_epochs import _lock_controller_roots
+    from evals.tests.test_source_epochs import additional_terminal
+
+    module, spec, journal = synthetic_spec(tmp_path, monkeypatch)
+    sealed = additional_terminal(journal.path.parent)
+    spec["controller_state_roots"].append(str(sealed))
+    with module.manual_recovery_quiescence(spec):
+        (sealed / "late-extra").write_bytes(b"must fail native inventory")
+        with pytest.raises(PermissionError, match="terminal"), ExitStack() as stack:
+            _lock_controller_roots(spec["controller_state_roots"], stack)
+    assert (sealed / "late-extra").exists()
+
+
+@pytest.mark.parametrize("which", ["predecessor", "target"])
+def test_pinned_host_cannot_overlap_authenticated_sealed_output(
+    tmp_path, monkeypatch, which
+):
+    from evals.tests.test_source_epochs import additional_terminal
+
+    if which == "target":
+        module, spec, journal, _ = target_genesis(tmp_path, monkeypatch)
+    else:
+        module, spec, journal = synthetic_spec(tmp_path, monkeypatch)
+    sealed = additional_terminal(journal.path.parent)
+    nested = sealed / "worker.controller"
+    spec["controller_state_roots"] += [str(sealed), str(nested)]
+    if which == "predecessor":
+        host = json.loads((tmp_path / "host.json").read_bytes())
+        host["hosts"] = {
+            "child": pinned(
+                tmp_path / "child-host.json",
+                {
+                    "schema_version": "task13-e-host-controller-v1",
+                    "output_dir": str(nested),
+                },
+            )
+        }
+        spec["pool_host_manifest"] = pinned(tmp_path / "host.json", host)
+        monkeypatch.setitem(
+            module.FROZEN, "pool_host_manifest", spec["pool_host_manifest"]["sha256"]
+        )
+    else:
+        target = json.loads((tmp_path / "target.json").read_bytes())
+        target["children"] = [{"evidence_root": str(nested / "timing")}]
+        spec["target_pool_registration"] = pinned(tmp_path / "target.json", target)
+    with (
+        pytest.raises(PermissionError, match="conflicts"),
+        module.manual_recovery_quiescence(spec),
+    ):
+        pass
+    assert not list(journal.path.parent.rglob(".pool-adoption-fence"))
+
+
+def test_outer_lease_retains_historical_and_pre_genesis_host_protocol_locks(
+    tmp_path, monkeypatch
+):
+    from scripts.task13_e_trial import ETrialController
+
+    module, spec, _journal = synthetic_spec(tmp_path, monkeypatch)
+    host_roots = [tmp_path / name for name in ("historical-host", "target-pre-genesis")]
+    for root in host_roots:
+        root.mkdir()
+        spec["controller_state_roots"].append(str(root))
+    with module.manual_recovery_quiescence(spec):
+        for root in host_roots:
+            host = object.__new__(ETrialController)
+            host._root = root
+            with pytest.raises(PermissionError, match="host writer"), host._lock():
+                pass
+            assert not (root / "host-binding.json").exists()
+
+
+def test_outer_lease_preserves_preexisting_empty_fence(tmp_path, monkeypatch):
+    module, spec, journal = synthetic_spec(tmp_path, monkeypatch)
+    fence = journal.path.parent / ".pool-adoption-fence"
+    fence.mkdir()
+    identity = (fence.stat().st_dev, fence.stat().st_ino)
+    with (
+        pytest.raises(PermissionError, match="stale"),
+        module.manual_recovery_quiescence(spec),
+    ):
+        pass
+    assert (fence.stat().st_dev, fence.stat().st_ino) == identity
+
+
 def test_native_lock_capability_is_live_and_cannot_be_recreated(tmp_path):
     from evals.adapters.source_epochs import _lock_controller_roots
 
@@ -106,7 +315,9 @@ def synthetic_spec(tmp_path, monkeypatch):
         reserved_yuan="0.1",
     )
     journal.stop("unknown_native_execution")
-    host = pinned(tmp_path / "host.json", {"journal_path": str(journal.path)})
+    host = pinned(
+        tmp_path / "host.json", {"journal_path": str(journal.path), "hosts": {}}
+    )
     scope = pinned(tmp_path / "scope.json", {"unsigned": True})
     stop = pinned(
         tmp_path / "stop.json",
@@ -471,7 +682,11 @@ def target_genesis(tmp_path, monkeypatch):
     )
     spec["pool_host_manifest"] = pinned(
         tmp_path / "host.json",
-        {"journal_path": str(old.path), "pool_registration": old_registration},
+        {
+            "journal_path": str(old.path),
+            "pool_registration": old_registration,
+            "hosts": {},
+        },
     )
     monkeypatch.setitem(
         module.FROZEN, "pool_host_manifest", spec["pool_host_manifest"]["sha256"]
@@ -498,6 +713,7 @@ def target_genesis(tmp_path, monkeypatch):
     spec["controller_state_roots"].append(str(target_root))
     target = {
         "schema_version": RECOVERY_REGISTRATION_SCHEMA,
+        "children": [],
         "execution_journal_path": str(target_root / "pool-journal.jsonl"),
         "future_logical_limit": 5,
         "future_physical_limit": 15,
