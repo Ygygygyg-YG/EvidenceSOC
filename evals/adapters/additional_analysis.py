@@ -163,12 +163,14 @@ def _validation_source_hashes():
 
 
 def _validate_recovery_validation_sources(manifest, blobs):
-    """Original blob pins precede the explicit, response-only AST exception."""
+    """Authenticate original bytes before the narrow, proved AST exceptions."""
     current = _validation_source_hashes()
     old = manifest.validation_source_sha256
     contract = blobs.get("original_source:evals/adapters/e_planning_contracts.py")
     verifier = blobs.get("original_source:evals/adapters/additional_analysis.py")
     transport = blobs.get("original_source:evals/adapters/model_client.py")
+    registry = blobs.get("original_source:evals/adapters/source_epochs.py")
+    registry_changed = old.get("source_epoch") != current.get("source_epoch")
     if (
         old.keys() != current.keys()
         or contract is None
@@ -177,10 +179,18 @@ def _validate_recovery_validation_sources(manifest, blobs):
         or old.get("model_identity_contract") != sha256(contract).hexdigest()
         or old.get("model_transport") != sha256(transport).hexdigest()
         or manifest.package_verifier_sha256 != sha256(verifier).hexdigest()
+        or (
+            registry_changed
+            and (
+                registry is None
+                or old.get("source_epoch") != sha256(registry).hexdigest()
+            )
+        )
         or any(
             old[name] != digest
             for name, digest in current.items()
-            if name not in {"model_identity_contract", "model_transport"}
+            if name
+            not in {"model_identity_contract", "model_transport", "source_epoch"}
         )
     ):
         raise ValueError(
@@ -189,10 +199,13 @@ def _validate_recovery_validation_sources(manifest, blobs):
     from evals.adapters.planning_recovery import (
         validate_identity_contract_equivalence,
         validate_response_transport_equivalence,
+        validate_timing_registry_equivalence,
     )
 
     validate_identity_contract_equivalence(contract)
     validate_response_transport_equivalence(transport)
+    if registry_changed:
+        validate_timing_registry_equivalence(registry)
 
 
 def _budget_location(budget_path, epoch, mounted_host_budget_path):
@@ -546,8 +559,8 @@ def _verify(
         paths[name], blobs[name] = _read_ref(root, ref)
     if recovery_lineage is not None:
         # Preserve the original package byte-for-byte. Only the explicitly
-        # changed admission contract, verifier metadata and a proved pure
-        # respond instruction may differ. Analysis behavior remains equivalent.
+        # changed admission contract, verifier metadata, pure respond guidance
+        # and exact timing-v2 dispatch guard may differ. Analysis stays equivalent.
         _validate_recovery_validation_sources(manifest, blobs)
     if "events" not in paths or paths["events"].name != "events.jsonl":
         raise ValueError("additional events must retain the fixed seed filename")

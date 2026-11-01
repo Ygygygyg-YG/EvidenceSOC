@@ -616,7 +616,10 @@ def _lock_controller_roots(roots, stack):
             registration = json.loads(
                 (root / "registration.json").read_text(encoding="utf-8")
             )
-            if registration.get("schema_version") == "task13-e-timing-registration-v1":
+            if registration.get("schema_version") in {
+                "task13-e-timing-registration-v1",
+                "task13-e-timing-registration-v2",
+            }:
                 from evals.e_timing import read_timing_journal
 
                 state = read_timing_journal(root)

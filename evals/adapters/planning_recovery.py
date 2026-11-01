@@ -105,6 +105,52 @@ def validate_response_transport_equivalence(original_bytes):
         raise ValueError("original analysis transport semantics differ")
 
 
+def validate_timing_registry_equivalence(original_bytes):
+    """Prove the sole v1-to-v1/v2 timing dispatch addition, without running code."""
+    current = (Path(__file__).resolve().parent / "source_epochs.py").read_bytes()
+    legacy = ast.parse(
+        'registration.get("schema_version") == "task13-e-timing-registration-v1"',
+        mode="eval",
+    ).body
+    supported = ast.parse(
+        'registration.get("schema_version") in '
+        '{"task13-e-timing-registration-v1", "task13-e-timing-registration-v2"}',
+        mode="eval",
+    ).body
+    legacy_dump, supported_dump = ast.dump(legacy), ast.dump(supported)
+
+    def normalized(raw, *, is_current):
+        try:
+            module = ast.parse(raw)
+        except (SyntaxError, ValueError, TypeError) as error:
+            raise ValueError("timing registry is not a valid module") from error
+        functions = [
+            node
+            for node in module.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "_lock_controller_roots"
+        ]
+        if len(functions) != 1:
+            raise ValueError("unique timing registry lock function required")
+        blocks = [
+            node
+            for node in ast.walk(functions[0])
+            if isinstance(node, ast.If)
+            and ast.dump(node.test) in {legacy_dump, supported_dump}
+        ]
+        if len(blocks) != 1 or (
+            is_current and ast.dump(blocks[0].test) != supported_dump
+        ):
+            raise ValueError("unique exact timing v1/v2 dispatch guard required")
+        blocks[0].test = legacy
+        return ast.dump(module, include_attributes=False)
+
+    if normalized(original_bytes, is_current=False) != normalized(
+        current, is_current=True
+    ):
+        raise ValueError("original analysis timing registry semantics differ")
+
+
 class RecoveryLineage(Contract):
     schema_version: Literal["task13-e-analysis-recovery-lineage-v1"]
     recovery_id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,120}$")
