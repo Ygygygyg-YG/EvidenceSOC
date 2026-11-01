@@ -273,6 +273,38 @@ class RegressionHost:
         )
         if receipt.get("synthetic") is not self._manifest["synthetic"]:
             raise PermissionError("synthetic E timing cannot admit a real regression")
+        if receipt.get("schema_version") == "task13-e-timing-pool-receipt-v1":
+            from evals.timing_pool import validate_pool_receipt
+
+            if not self._manifest["synthetic"]:
+                validator = Path(__file__).resolve().parents[1] / "evals/timing_pool.py"
+                if (
+                    freeze["source_files"].get(str(validator))
+                    != sha256(_path(validator, file=True).read_bytes()).hexdigest()
+                ):
+                    raise PermissionError(
+                        "actual timing pool validator is outside freeze"
+                    )
+            identity = {
+                "campaign_id": bundle["campaign_id"],
+                "plan_sha256": core["f8_plan_sha256"],
+                "source_commit": bundle["source_commit"],
+                "source_sha256": canonical_hash(freeze["source_files"]),
+                "config_sha256": bundle["config_sha256"],
+            }
+            expected_binding = {
+                key: bundle.get(key)
+                for key in (
+                    "source_sha256",
+                    "epoch_id",
+                    "epoch_manifest_sha256",
+                    "model_identity_binding",
+                )
+            }
+            if receipt.get("formal_binding") != expected_binding:
+                raise PermissionError("timing pool formal epoch/model binding differs")
+            validate_pool_receipt(receipt, identity)
+            return
         planning = receipt["planning_registration"]
         expected = build_e_timing_registration(
             planning,

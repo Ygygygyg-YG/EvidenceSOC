@@ -65,6 +65,23 @@ def require_host_entrypoints(epoch, timing):
             raise PermissionError("actual host entrypoint differs from frozen source")
 
 
+def require_pool_membership(pool, packet, timing):
+    """An explicit parent packet authorizes exactly its native child membership."""
+    from evals.timing_pool_controller import pool_scope_proposal
+
+    proposal = pool_scope_proposal(pool)
+    if packet.get("pool_proposal") != proposal or packet.get(
+        "pool_proposal_sha256"
+    ) != canonical_hash(proposal):
+        raise PermissionError(
+            "parent pool proposal hash or complete projection differs"
+        )
+    members = [child for child in pool["children"] if child["registration"] == timing]
+    if len(members) != 1:
+        raise PermissionError("native child is not an exact unique parent pool member")
+    return members[0]
+
+
 class PlanningBlocked(PermissionError):
     """A verified no-candidate slot cannot authorize review or timing."""
 
@@ -175,7 +192,7 @@ class ETrialController:
             }
             or manifest["schema_version"] != "task13-e-host-controller-v1"
             or type(manifest["synthetic"]) is not bool
-            or set(manifest["inputs"]) != INPUTS
+            or set(manifest["inputs"]) not in (INPUTS, INPUTS | {"pool_authority"})
         ):
             raise ValueError("complete frozen host controller manifest required")
         self._manifest = deepcopy(manifest)
@@ -223,6 +240,59 @@ class ETrialController:
         if type(ordinal) is not int or ordinal not in (1, 2, 3):
             raise ValueError("only frozen ordinals 1, 2, 3 are registered")
         return self._requests[ordinal - 1]
+
+    def _require_pool_phase(self, request, phase):
+        if "pool_authority" not in self._inputs:
+            return
+        from evals.timing_pool_controller import (
+            PoolPhaseLease,
+            require_pool_phase_lease,
+        )
+
+        lease = getattr(self, "_pool_lease", None)
+        if not isinstance(lease, PoolPhaseLease):
+            raise PermissionError("active parent pool phase lease required")
+        pool = self._inputs["pool_authority"]
+        members = [
+            child for child in pool["children"] if child["registration"] == self._timing
+        ]
+        if len(members) != 1:
+            raise PermissionError("active parent pool lease child differs")
+        require_pool_phase_lease(
+            pool, members[0]["child_id"], request.trial_id, phase, lease
+        )
+
+    def _pool_previous_expiry(self, request):
+        if "pool_authority" not in self._inputs or request.ordinal <= 1:
+            return False
+        self._require_pool_phase(request, "plan")
+        from evals.timing_pool_controller import (
+            PoolJournal,
+            validate_pre_timing_expiry_audit,
+        )
+
+        pool = self._inputs["pool_authority"]
+        prior = self._requests[request.ordinal - 2].trial_id
+        journal = PoolJournal(
+            pool["execution_journal_path"], pool_sha256=canonical_hash(pool)
+        )
+        audits = [
+            e["payload"]
+            for e in journal._events()
+            if e["kind"] == "expiry_audit" and e["payload"]["trial_id"] == prior
+        ]
+        if len(audits) != 1:
+            return False
+        proof = audits[0]
+        if (
+            proof["outcome"] != "ttl_infrastructure_failure"
+            or proof["evidence"].get("subtype") != "pre_timing_expired"
+            or proof["evidence"]["audit"]["trial_id"] != prior
+            or canonical_hash(proof["evidence"]) != proof["evidence_sha256"]
+        ):
+            raise PermissionError("prior pool expiry audit identity differs")
+        validate_pre_timing_expiry_audit(proof["evidence"]["audit"])
+        return True
 
     def _slot(self, request):
         return self._root / "slots" / request.planning_slot_id
@@ -298,6 +368,37 @@ class ETrialController:
         ) != policy.model_dump(mode="json"):
             raise PermissionError("anytime policy differs from its approved new scope")
         packet = self._inputs["scope_packet"]
+        if "pool_authority" in self._inputs:
+            from evals.timing_pool import validate_pool_structure
+
+            pool = validate_pool_structure(self._inputs["pool_authority"])
+            require_pool_membership(pool, packet, self._timing)
+            # Both child dispatch authorities still bind their own native planning
+            # registration and the same parent scope/actual user decision above.
+            root = Path(__file__).resolve().parents[1]
+            for relative in (
+                "scripts/task13_timing_pool.py",
+                "evals/timing_pool_controller.py",
+                "evals/timing_pool.py",
+            ):
+                path = root / relative
+                if (
+                    self._timing["source_files"].get(str(path))
+                    != sha256(path.read_bytes()).hexdigest()
+                ):
+                    raise PermissionError("pool host implementation is not frozen")
+        elif any(
+            key in packet
+            for key in (
+                "pool_registration",
+                "pool_registration_sha256",
+                "pool_proposal",
+                "pool_proposal_sha256",
+            )
+        ):
+            raise PermissionError(
+                "parent pool scope requires explicit pool authority mode"
+            )
         lineage = self._planning.get("recovery_lineage")
         if lineage is None:
             if {"recovery_lineage", "recovery_lineage_sha256"} & packet.keys():
@@ -372,6 +473,14 @@ class ETrialController:
             )
         require_host_entrypoints(epoch, self._timing)
         roots = [_path(value) for value in epoch["controller_state_roots"]]
+        if "pool_authority" in self._inputs:
+            pool_path = _path(self._inputs["pool_authority"]["execution_journal_path"])
+            if pool_path.name != "pool-journal.jsonl" or not any(
+                pool_path.is_relative_to(root) for root in roots
+            ):
+                raise PermissionError(
+                    "pool journal outside actual registered epoch controller roots"
+                )
         if any(
             not any(path.is_relative_to(root) for root in roots)
             for path in (self._root, self._termination, _path(options["output_dir"]))
@@ -641,6 +750,15 @@ class ETrialController:
                 "errors",
                 "diagnosis_status",
                 "diagnostic_snapshot",
+                "source",
+                "approval_packet",
+                "approval_receipt",
+                "operation",
+                "request_id",
+                "source_state_sha256",
+                "planning_slot_id",
+                "registration_sha256",
+                "selected_source_lineage_sha256",
                 "resources",
                 "tool_ledger",
             )
@@ -753,6 +871,7 @@ class ETrialController:
     async def plan(self, ordinal):
         """Explicitly dispatch one fixed planning request once; ambiguity consumes it."""
         request = self._request(ordinal)
+        self._require_pool_phase(request, "plan")
         binding = self._preflight(request)
         with self._lock():
             prior = self._terminal(request, "plan")
@@ -766,19 +885,24 @@ class ETrialController:
             if ordinal > 1:
                 path = self._root / "timing" / "registration.json"
                 if not path.exists():
-                    raise PermissionError(
-                        "preceding trial must terminate before a new short-TTL plan"
-                    )
-                campaign = self._campaign()
-                previous = campaign.snapshot()["trials"][ordinal - 2]
-                if previous["status"] not in {
-                    "completed",
-                    "failed",
-                    "expired",
-                    "rejected",
-                    "not_applicable",
-                }:
-                    raise PermissionError("preceding trial is pending or unknown")
+                    if not self._pool_previous_expiry(request):
+                        raise PermissionError(
+                            "preceding trial must terminate before a new short-TTL plan"
+                        )
+                else:
+                    campaign = self._campaign()
+                    previous = campaign.snapshot()["trials"][ordinal - 2]
+                    if previous["status"] not in {
+                        "completed",
+                        "failed",
+                        "expired",
+                        "rejected",
+                        "not_applicable",
+                    } and (
+                        previous["status"] != "not_started"
+                        or not self._pool_previous_expiry(request)
+                    ):
+                        raise PermissionError("preceding trial is pending or unknown")
             started = {
                 "operation": "plan",
                 "request_sha256": canonical_hash(request),
@@ -793,6 +917,7 @@ class ETrialController:
 
                 options = self._options("development")
                 worker = self._free.plan if self._free else run_e_planning_container
+                self._require_pool_phase(request, "plan")
                 value = await worker(request, self._agent, options)
                 capture["runtime_result"] = self._save("runtime-result", _bytes(value))
                 try:
@@ -966,6 +1091,7 @@ class ETrialController:
     async def read(self, ordinal):
         """Read the live zero-model packet and save the actual inspected response."""
         request = self._request(ordinal)
+        self._require_pool_phase(request, "read")
         self._require_candidate(request)
         self._preflight(request, review=True)
         with self._lock():
@@ -999,6 +1125,7 @@ class ETrialController:
     async def decision(self, ordinal, *, packet_sha256, chat_record):
         """Apply only the supplied actual user's exact current packet decision."""
         request = self._request(ordinal)
+        self._require_pool_phase(request, "decision")
         self._require_candidate(request)
         self._preflight(request, review=True)
         with self._lock():
@@ -1133,7 +1260,7 @@ class ETrialController:
             **identity,
         }
 
-    def _campaign(self, *, approval_verifier=None):
+    def _campaign(self, *, approval_verifier=None, now=None):
         return ETimingCampaign(
             self._timing,
             self._root / "timing",
@@ -1144,13 +1271,14 @@ class ETrialController:
                 if self._free
                 else HostWorkerLifecycleVerifier(self._termination)
             ),
-            now=self._now,
+            now=now if now is not None else self._now,
             monotonic_ns=self._free.monotonic_ns if self._free else None,
         )
 
     async def trial(self, ordinal):
         """Explicit timing v2 trial; six requests and lifecycle policy remain in ETimingCampaign."""
         request = self._request(ordinal)
+        self._require_pool_phase(request, "trial")
         self._require_candidate(request)
         self._preflight(request, review=True)
         with self._lock():
@@ -1196,7 +1324,26 @@ class ETrialController:
                 self._free.verification if self._free else run_verification_container
             )
 
+            admission_clock = None
+            if "pool_authority" in self._inputs:
+                from evals.timing_pool_controller import FirstDispatchClock, PoolJournal
+
+                pool = self._inputs["pool_authority"]
+                journal = PoolJournal(
+                    pool["execution_journal_path"], pool_sha256=canonical_hash(pool)
+                )
+                admission_clock = FirstDispatchClock(
+                    self._now,
+                    expires_at=datetime.fromisoformat(
+                        source["state"]["response_plan"]["expires_at"]
+                    ),
+                    shared_max=journal.status()["observed_max_seconds"],
+                )
+
             async def run_worker(branch):
+                self._require_pool_phase(request, "trial")
+                if admission_clock is not None and not admission_clock.admitted:
+                    admission_clock.admit()
                 self._preflight(request, review=True)
                 return await worker(
                     branch,
@@ -1204,9 +1351,9 @@ class ETrialController:
                     self._options("verification", verification=True),
                 )
 
-            return await self._campaign(approval_verifier=verify).run_trial(
-                request.trial_id, source, run_worker=run_worker
-            )
+            return await self._campaign(
+                approval_verifier=verify, now=admission_clock
+            ).run_trial(request.trial_id, source, run_worker=run_worker)
 
     def status(self):
         """Read-only status. Started or worker-claimed ambiguity remains unknown."""

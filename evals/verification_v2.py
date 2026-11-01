@@ -242,6 +242,18 @@ def observed_six_branch_max(receipt, identity):
         ) from error
 
 
+def observed_timing_max(receipt, identity):
+    """Explicit schema dispatch; native historical evidence is never relabelled."""
+    if (
+        isinstance(receipt, dict)
+        and receipt.get("schema_version") == "task13-e-timing-pool-receipt-v1"
+    ):
+        from evals.timing_pool import validate_pool_receipt
+
+        return validate_pool_receipt(receipt, identity)
+    return observed_six_branch_max(receipt, identity)
+
+
 def _json_bytes(value):
     return json.dumps(
         value, sort_keys=True, separators=(",", ":"), ensure_ascii=False
@@ -799,6 +811,7 @@ class VerificationCampaign:
         timing_receipt,
         approval_verifier=None,
         now=None,
+        admission_deadline=None,
     ):
         """Handle one registered case; bound interrupted cases are never replayed."""
         clock = now or (lambda: datetime.now(UTC))
@@ -856,6 +869,16 @@ class VerificationCampaign:
                 or any(gate.get(key) != value for key, value in self.identity.items())
             ):
                 raise PermissionError("verified v2 execution gate binding differs")
+            if gate.get("deadline_at") is not None:
+                gate_deadline = _time(gate["deadline_at"])
+                if (
+                    admission_deadline is not None
+                    and _time(admission_deadline) != gate_deadline
+                ):
+                    raise PermissionError(
+                        "F8 admission deadline differs from approved gate"
+                    )
+                admission_deadline = gate_deadline
             _immutable(self.root / "gates" / (canonical_hash(gate) + ".json"), gate)
             receipt = approval_verifier(deepcopy(source))
             receipt = await receipt if inspect.isawaitable(receipt) else receipt
@@ -869,9 +892,11 @@ class VerificationCampaign:
             )
             if expires - created != timedelta(minutes=30):
                 raise PermissionError("plan TTL must remain exactly 30 minutes")
-            maximum = observed_six_branch_max(timing_receipt, self.identity)
+            maximum = observed_timing_max(timing_receipt, self.identity)
             # Re-read the clock after all admission work, immediately before binding.
             current = _time(clock())
+            if admission_deadline is not None and current >= _time(admission_deadline):
+                raise PermissionError("F8 admission deadline has passed")
             if (expires - current).total_seconds() <= 1.5 * maximum + 300:
                 raise PermissionError(
                     "remaining TTL must exceed 1.5 * observed maximum + 300 seconds"
@@ -923,6 +948,16 @@ class VerificationCampaign:
             _immutable(
                 self.root / "approvals" / (canonical_hash(receipt) + ".json"), receipt
             )
+            if admission_deadline is not None:
+                # Publication may itself be slow. Admission happens only after
+                # every required input is durable; already bound cases may finish.
+                current = _time(clock())
+                if current >= _time(admission_deadline):
+                    raise PermissionError("F8 admission deadline has passed")
+                if (expires - current).total_seconds() <= 1.5 * maximum + 300:
+                    raise PermissionError(
+                        "remaining TTL must exceed 1.5 * observed maximum + 300 seconds"
+                    )
             self._append(
                 {
                     "case_id": case_id,
