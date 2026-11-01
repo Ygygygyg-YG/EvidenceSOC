@@ -14,7 +14,7 @@ import stat
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 
 from pydantic import Field, model_validator
 
@@ -59,6 +59,189 @@ class EPlanningAuthority(Contract):
                 "real authority requires nonempty external artifact hashes"
             )
         return self
+
+
+def _validate_request_partition(requests, authorized, denied):
+    if (
+        len(set(requests)) != 3
+        or len(set(authorized)) != len(authorized)
+        or len(set(denied)) != len(denied)
+        or set(authorized) & set(denied)
+        or set(authorized) | set(denied) != set(requests)
+        or authorized != [digest for digest in requests if digest in authorized]
+        or denied != [digest for digest in requests if digest in denied]
+    ):
+        raise ValueError(
+            "authorized and denied requests must partition the frozen three"
+        )
+
+
+class ManualRecoveryChildGrant(Contract):
+    registration_sha256: str = Field(pattern=SHA256)
+    journal_path: str
+    request_sha256s: list[Annotated[str, Field(pattern=SHA256)]] = Field(
+        min_length=3, max_length=3
+    )
+    authorized_request_sha256s: list[Annotated[str, Field(pattern=SHA256)]] = Field(
+        min_length=1, max_length=3
+    )
+    denied_request_sha256s: list[Annotated[str, Field(pattern=SHA256)]] = Field(
+        min_length=0, max_length=2
+    )
+
+    @model_validator(mode="after")
+    def fixed_partition(self) -> Self:
+        _validate_request_partition(
+            self.request_sha256s,
+            self.authorized_request_sha256s,
+            self.denied_request_sha256s,
+        )
+        return self
+
+
+class ManualRecoveryGrant(Contract):
+    """Frozen migration scope; parsing does not consume or create authority."""
+
+    schema_version: Literal["task13-manual-recovery-grant-v1"]
+    recovery_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    recovery_plan_sha256: str = Field(pattern=SHA256)
+    quarantine_record_sha256: str = Field(pattern=SHA256)
+    predecessor_pool_registration_sha256: str = Field(pattern=SHA256)
+    predecessor_pool_journal_sha256: str = Field(pattern=SHA256)
+    predecessor_pool_head_sha256: str = Field(pattern=SHA256)
+    scope_packet_sha256: str = Field(pattern=SHA256)
+    decision_record_sha256: str = Field(pattern=SHA256)
+    consumed_logical: Literal[8]
+    consumed_physical: Literal[24]
+    remaining_logical: Literal[5]
+    remaining_physical: Literal[15]
+    total_logical_limit: Literal[13]
+    total_physical_limit: Literal[39]
+    analysis_inclusive_limit: Literal[40]
+    development_cap_yuan: Literal["6"]
+    deadline: Literal["2026-11-02T23:59:59+08:00"]
+    children: list[ManualRecoveryChildGrant] = Field(min_length=2, max_length=2)
+
+    @model_validator(mode="before")
+    @classmethod
+    def strict_budget_types(cls, value):
+        if isinstance(value, dict) and any(
+            type(value.get(key)) is not int
+            for key in (
+                "consumed_logical",
+                "consumed_physical",
+                "remaining_logical",
+                "remaining_physical",
+                "total_logical_limit",
+                "total_physical_limit",
+                "analysis_inclusive_limit",
+            )
+        ):
+            raise ValueError("migration budgets require exact integer values")
+        return value
+
+    @model_validator(mode="after")
+    def exact_remaining_grant(self) -> Self:
+        if (
+            [len(child.authorized_request_sha256s) for child in self.children] != [3, 2]
+            or len({child.registration_sha256 for child in self.children}) != 2
+            or len({child.journal_path for child in self.children}) != 2
+            or len(
+                {digest for child in self.children for digest in child.request_sha256s}
+            )
+            != 6
+            or any(
+                getattr(self, key) == "0" * 64
+                for key in (
+                    "recovery_plan_sha256",
+                    "quarantine_record_sha256",
+                    "predecessor_pool_registration_sha256",
+                    "predecessor_pool_journal_sha256",
+                    "predecessor_pool_head_sha256",
+                    "scope_packet_sha256",
+                    "decision_record_sha256",
+                )
+            )
+        ):
+            raise ValueError(
+                "migration requires exact distinct three-plus-two grants and pins"
+            )
+        return self
+
+
+class LimitedEPlanningAuthority(Contract):
+    """Explicit subset of a three-slot native registration under one migration."""
+
+    schema_version: Literal["task13-e-planning-authority-v2"]
+    campaign_id: Literal["task13-repair-202610-v2"]
+    registration_sha256: str = Field(pattern=SHA256)
+    journal_path: str
+    scope_packet_sha256: str = Field(pattern=SHA256)
+    decision_record_sha256: str = Field(pattern=SHA256)
+    decision: Literal["approved"]
+    decided_by: Literal["user"]
+    decided_at: str
+    purpose: Literal["development"]
+    synthetic: bool = Field(strict=True)
+    request_sha256s: list[Annotated[str, Field(pattern=SHA256)]] = Field(
+        min_length=3, max_length=3
+    )
+    authorized_request_sha256s: list[Annotated[str, Field(pattern=SHA256)]] = Field(
+        min_length=1, max_length=3
+    )
+    denied_request_sha256s: list[Annotated[str, Field(pattern=SHA256)]] = Field(
+        min_length=0, max_length=2
+    )
+    migration_grant: ManualRecoveryGrant
+    migration_grant_sha256: str = Field(pattern=SHA256)
+
+    @model_validator(mode="after")
+    def exact_migration_child(self) -> Self:
+        legacy = {key: getattr(self, key) for key in EPlanningAuthority.model_fields}
+        legacy["schema_version"] = "task13-e-planning-authority-v1"
+        EPlanningAuthority.model_validate(legacy)
+        _validate_request_partition(
+            self.request_sha256s,
+            self.authorized_request_sha256s,
+            self.denied_request_sha256s,
+        )
+        grant = self.migration_grant
+        child = {
+            key: getattr(self, key) for key in ManualRecoveryChildGrant.model_fields
+        }
+        if (
+            canonical_hash(grant) != self.migration_grant_sha256
+            or grant.scope_packet_sha256 != self.scope_packet_sha256
+            or grant.decision_record_sha256 != self.decision_record_sha256
+            or sum(
+                candidate.model_dump(mode="json") == child
+                for candidate in grant.children
+            )
+            != 1
+        ):
+            raise ValueError(
+                "limited authority differs from exact migration child grant"
+            )
+        return self
+
+
+def parse_authority(value) -> EPlanningAuthority | LimitedEPlanningAuthority:
+    """Parse an explicit version without changing legacy canonical values."""
+    if not isinstance(value, dict):
+        raise ValueError("an explicit versioned planning authority is required")  # noqa: TRY004 - invalid external authority.
+    if value.get("schema_version") == "task13-e-planning-authority-v1":
+        return EPlanningAuthority.model_validate(value)
+    if value.get("schema_version") == "task13-e-planning-authority-v2":
+        return LimitedEPlanningAuthority.model_validate(value)
+    raise ValueError("unsupported planning authority version")
+
+
+def _require_authorized_request(authority, request):
+    if (
+        authority["schema_version"] == "task13-e-planning-authority-v2"
+        and canonical_hash(request) not in authority["authorized_request_sha256s"]
+    ):
+        raise PermissionError("planning request is not authorized by its limited grant")
 
 
 def _path(value, *, exists):
@@ -113,7 +296,7 @@ def _authority(
     value, registration, expected_registration_sha256, expected_authority_sha256
 ):
     r = validate_e_planning_registration(registration)
-    a = EPlanningAuthority.model_validate(value).model_dump(mode="json")
+    a = parse_authority(value).model_dump(mode="json")
     if (
         canonical_hash(r) != expected_registration_sha256
         or canonical_hash(a) != expected_authority_sha256
@@ -228,6 +411,7 @@ def _read(db, expected_registration_sha256, expected_authority_sha256):
                 "started",
             ):
                 raise ValueError("registered planning claim binding differs")
+            _require_authorized_request(a, q)
         return r, a, receipt
     except (sqlite3.DatabaseError, KeyError, TypeError, json.JSONDecodeError) as error:
         raise ValueError(
@@ -358,6 +542,7 @@ class EPlanningDispatchJournal:
                 raise PermissionError(
                     "request differs from the registered planning slot"
                 )
+            _require_authorized_request(authority, request)
             claim = db.execute(
                 "SELECT request_sha256,incident_id,status FROM analysis_import_planning_claims "
                 "WHERE planning_slot_id=?",
@@ -397,6 +582,7 @@ class EPlanningDispatchJournal:
                 raise PermissionError(
                     "request differs from the registered planning slot"
                 )
+            _require_authorized_request(authority, request)
             try:
                 db.execute(
                     "INSERT INTO analysis_import_planning_claims VALUES (?,?,?,'started')",

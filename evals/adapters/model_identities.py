@@ -333,6 +333,7 @@ def register_model_identity(
     budget_identity,
     authority,
     expected_authority_sha256,
+    locked_audit=None,
 ):
     from evals.adapters.source_epochs import (
         _existing_path,
@@ -357,7 +358,7 @@ def register_model_identity(
     ):
         raise ValueError("original budget binding differs")
     with ExitStack() as stack:
-        _lock_controller_roots(m["controller_state_roots"], stack)
+        owned_locks = _lock_controller_roots(m["controller_state_roots"], stack)
         with sqlite3.connect(path, timeout=30) as db:
             db.execute("PRAGMA foreign_keys=ON")
             db.execute("BEGIN IMMEDIATE")
@@ -397,6 +398,12 @@ def register_model_identity(
                 "predecessor_model_epoch_id"
             ] != (previous[0] if previous else None):
                 raise ValueError("model identity predecessor differs")
+            if locked_audit is not None:
+                locked_audit(
+                    db=db,
+                    controller_state_roots=tuple(m["controller_state_roots"]),
+                    owned_locks=owned_locks,
+                )
             at = datetime.now(UTC).isoformat()
             head = (
                 m["model_epoch_id"],

@@ -13,6 +13,7 @@ from unittest.mock import patch
 from urllib.parse import unquote, urlsplit
 
 _ISOLATED = ContextVar("pool_fixture_isolated_database_namespace", default=None)
+_DATABASE_NAMESPACE = ContextVar("pool_fixture_database_transport", default=None)
 
 
 def _database_path(database, uri):
@@ -36,7 +37,7 @@ def isolated_native_io(root, *, reopen_saved_copies=False):
     locks = root / "VIRTUAL-HISTORICAL-LOCKS"
     locks.mkdir(exist_ok=reopen_saved_copies)
     original_connect = sqlite3.connect
-    original_mkdir, original_rmdir = Path.mkdir, Path.rmdir
+    original_mkdir, original_rmdir, original_stat = Path.mkdir, Path.rmdir, Path.stat
     originals, redirected, lock_targets = {}, [], {}
 
     def connect(database, *args, **kwargs):
@@ -72,13 +73,23 @@ def isolated_native_io(root, *, reopen_saved_copies=False):
         return original_connect(database, *args, **kwargs)
 
     def lock_target(path):
-        path = path.resolve()
-        if path.is_relative_to(root) or path.name not in {
+        # Path.resolve() itself calls Path.stat() for nonexistent Windows paths;
+        # transport dispatch must therefore use lexical normalization only.
+        import os
+
+        if path.name not in {
             ".writer-lock",
             ".analysis36-campaign-lock",
         }:
             return None
-        if path.exists():
+        path = Path(os.path.abspath(path))
+        if path.is_relative_to(root):
+            return None
+        try:
+            original_stat(path, follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        else:
             raise PermissionError("existing actual lock cannot be virtualized")
         return lock_targets.setdefault(
             path, locks / sha256(str(path).encode()).hexdigest()
@@ -90,13 +101,18 @@ def isolated_native_io(root, *, reopen_saved_copies=False):
     def rmdir(path, *args, **kwargs):
         return original_rmdir(lock_target(path) or path, *args, **kwargs)
 
+    def stat(path, *args, **kwargs):
+        return original_stat(lock_target(path) or path, *args, **kwargs)
+
     try:
         with (
             patch.object(sqlite3, "connect", connect),
             patch.object(Path, "mkdir", mkdir),
             patch.object(Path, "rmdir", rmdir),
+            patch.object(Path, "stat", stat),
         ):
             token = _ISOLATED.set(root)
+            namespace_token = _DATABASE_NAMESPACE.set((originals, original_connect))
             try:
                 yield {
                     "originals": originals,
@@ -105,6 +121,7 @@ def isolated_native_io(root, *, reopen_saved_copies=False):
                 }
             finally:
                 _ISOLATED.reset(token)
+                _DATABASE_NAMESPACE.reset(namespace_token)
     finally:
         for source, (_, before) in originals.items():
             assert sha256(source.read_bytes()).hexdigest() == before, (
@@ -113,6 +130,85 @@ def isolated_native_io(root, *, reopen_saved_copies=False):
         assert not any(path.exists() for path in lock_targets), (
             "original historical lock was created"
         )
+
+
+def reconstruct_historical_databases(data):
+    """Build the exact pre-source10 account in NEW private files, SELECT-only outside.
+
+    The complete frozen schema/row multiset is restored, including unknown rows
+    and halt state. No current row is deleted or hidden in a copied live account.
+    """
+    import json
+    from copy import deepcopy
+
+    from scripts.task13_pool_prepare import snapshot
+
+    root = _ISOLATED.get()
+    if root is None:
+        raise PermissionError("historical reconstruction requires private namespace")
+    originals, connect = _DATABASE_NAMESPACE.get()
+    receipt = (
+        data["old_root"].parent
+        / "timing-pool-candidate-20261101-2f360b77"
+        / "activation/preparation-receipt.json"
+    )
+    frozen = json.loads(receipt.read_bytes())["database_snapshots"]
+    for name, expected in frozen.items():
+        original = Path(name).resolve()
+        before = sha256(original.read_bytes()).hexdigest()
+        if original in originals:
+            raise PermissionError("historical database already opened in namespace")
+        target = root / ("SYNTHETIC-HISTORICAL-" + original.name)
+        if target.exists():
+            raise PermissionError("historical reconstruction requires a new database")
+        # Snapshot rows omit implicit SQLite rowids, which native budget identity
+        # pins. Recover them by exact frozen row bytes from append-only originals.
+        rowids = {}
+        if "reservations" in expected["tables"]:
+            with closing(connect(original.as_uri() + "?mode=ro", uri=True)) as actual:
+                rowids = {
+                    json.dumps(row[1:]): row[0]
+                    for row in actual.execute("SELECT rowid,* FROM reservations")
+                }
+            assert set(expected["tables"]["reservations"]) <= set(rowids)
+        with closing(connect(target)) as db:
+            for kind, _, _, sql in expected["schema"]:
+                if kind == "table":
+                    db.execute(sql)
+            for table, rows in expected["tables"].items():
+                for encoded in rows:
+                    row = json.loads(
+                        encoded,
+                        object_hook=lambda value: (
+                            bytes.fromhex(value["hex"])
+                            if set(value) == {"hex"}
+                            else value
+                        ),
+                    )
+                    if table == "reservations":
+                        db.execute(
+                            "INSERT INTO reservations "
+                            "(rowid,id,request_key,phase,upper,actual,settled) "
+                            "VALUES (?,?,?,?,?,?,?)",
+                            (rowids[encoded], *row),
+                        )
+                    else:
+                        db.execute(
+                            'INSERT INTO "'
+                            + table.replace('"', '""')
+                            + '" VALUES ('
+                            + ",".join("?" for _ in row)
+                            + ")",
+                            row,
+                        )
+            for kind, _, _, sql in expected["schema"]:
+                if kind != "table" and sql is not None:
+                    db.execute(sql)
+            db.commit()
+        assert snapshot(target) == expected
+        originals[original] = (target, before)
+        assert snapshot(original) == expected
+    data["database_snapshots"] = deepcopy(frozen)
 
 
 def register_fixture_metadata(materialization):
@@ -228,31 +324,54 @@ def corrupt_copied_field(path, table, key, row_id, field, replacement):
 
 
 def mirrored_fixture_compiler(root):
-    """Freeze every evaluated host file into a private byte-identical test tree.
+    """Run the legacy v1 producer from its full compatible frozen source tree.
 
-    The pure test compiler derives its tree from __file__. Its private function
-    namespace points at that same copied helper, leaving its module unchanged.
-    No production verifier or source path is substituted.
+    Every production file comes from 2f360b77, whose complete 117 worker map is
+    identical to C10. Only test harness files are current; all are host-frozen.
+    This proves historical v1 behavior, never current changed-worker equivalence.
     """
-    import shutil
+    import io
+    import subprocess
+    import zipfile
     from types import FunctionType
 
-    from evals.freeze import required_freeze_files
     from evals.tests import pool_composite_prepare_fixture as fixture
 
     tree = Path(__file__).resolve().parents[2]
     mirror = Path(root).resolve() / "FROZEN-SYNTHETIC-HOST-SOURCE"
     data = fixture.original_templates()
-    names = (
-        set(required_freeze_files(tree))
-        | set(data["receipt"]["files"])
-        | set(data["source"]["entrypoints"])
+    commit = "2f360b77b72d0ac49609aa06b1aca3e8a16fe705"
+    archive = subprocess.check_output(
+        [
+            "git",
+            "archive",
+            "--format=zip",
+            commit,
+            "services/backend/src",
+            "services/backend/tests",
+            "services/backend/pyproject.toml",
+            "services/backend/uv.lock",
+            "evals",
+            "scripts",
+            "docs/evaluations/protocol.md",
+        ],
+        cwd=tree,
     )
-    for name in names:
-        target = mirror / name
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(tree / name, target)
-        assert target.read_bytes() == (tree / name).read_bytes()
+    mirror.mkdir(parents=True)
+    with zipfile.ZipFile(io.BytesIO(archive)) as bundle:
+        bundle.extractall(mirror)
+    for name in (
+        "pool_composite_fixture.py",
+        "pool_composite_prepare_fixture.py",
+        "pool_composite_planning_fixture.py",
+        "test_pool_composite_integration.py",
+        "test_pool_composite_planning_fixture.py",
+    ):
+        relative = "evals/tests/" + name
+        (mirror / relative).write_bytes((tree / relative).read_bytes())
+    assert len(data["receipt"]["files"]) == 117
+    for name, digest in data["receipt"]["files"].items():
+        assert sha256((mirror / name).read_bytes()).hexdigest() == digest
     original = fixture.compile_fixture_documents
     namespace = {
         **original.__globals__,
@@ -265,7 +384,9 @@ def mirrored_fixture_compiler(root):
     return clone, mirror
 
 
-async def enter_mirrored_test(tmp_path, test_name):
+async def enter_mirrored_test(
+    tmp_path, test_name, *, test_file="test_pool_composite_integration.py"
+):
     """Return mirror inside child, or run the complete test in an isolated child."""
     import asyncio
     import os
@@ -284,7 +405,7 @@ async def enter_mirrored_test(tmp_path, test_name):
         + ";import pytest;raise SystemExit(pytest.main("
         + repr(
             [
-                str(mirror / "evals/tests/test_pool_composite_integration.py"),
+                str(mirror / "evals/tests" / test_file),
                 "-vv",
                 "-k",
                 test_name,

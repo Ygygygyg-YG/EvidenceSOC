@@ -320,6 +320,7 @@ def test_native_cow_metadata_recovers_each_completed_durability_boundary(
     tmp_path, monkeypatch
 ):
     """One copied account progresses across simulated crashes, never real registration."""
+    import json
     from hashlib import sha256
     from pathlib import Path
     from unittest.mock import patch
@@ -337,19 +338,25 @@ def test_native_cow_metadata_recovers_each_completed_durability_boundary(
     class Crash(RuntimeError):
         pass
 
+    mkdir, rmdir, stat = Path.mkdir, Path.rmdir, Path.stat
     with isolated_native_io(tmp_path) as namespace:
         # Native historical root locks AND companion fences are virtualized only
-        # at filesystem transport; no source/model/schema validators are patched.
-        mkdir, rmdir = Path.mkdir, Path.rmdir
+        # at filesystem transport; stat observes the same real temporary inode
+        # that mkdir acquires and rmdir releases. Native validators stay intact.
         fences = tmp_path / "SYNTHETIC-COMPANION-FENCES"
         fences.mkdir()
 
         def mapped(path):
             if path.name in {
+                ".writer-lock",
+                ".analysis36-campaign-lock",
                 ".pool-adoption-fence",
                 ".rolling-adoption-lock",
             } and not path.is_relative_to(tmp_path):
-                assert not path.exists()
+                # Check the actual historical path without our stat redirection.
+                # An existing actual lock must never be hidden by the fixture.
+                with pytest.raises(FileNotFoundError):
+                    stat(path)
                 return fences / sha256(str(path).encode()).hexdigest()
             return path
 
@@ -358,13 +365,20 @@ def test_native_cow_metadata_recovers_each_completed_durability_boundary(
                 Path, "mkdir", lambda path, *a, **k: mkdir(mapped(path), *a, **k)
             ),
             patch.object(Path, "rmdir", lambda path: rmdir(mapped(path))),
+            patch.object(
+                Path, "stat", lambda path, *a, **k: stat(mapped(path), *a, **k)
+            ),
         ):
             data = original_templates()
             budget = Path(data["source"]["budget_path"])
             old_journal = Path(data["runtime"]["import_dispatch_path"])
-            data["database_snapshots"] = {
-                str(path): snapshot(path) for path in (budget, old_journal)
-            }
+            # Build exact legacy rows in new private databases; never trim a
+            # live-account copy to impersonate the historical prefix.
+            from evals.tests.pool_composite_fixture import (
+                reconstruct_historical_databases,
+            )
+
+            reconstruct_historical_databases(data)
             fixture = compile_fixture_documents(
                 tmp_path,
                 {"SYNTHETIC": True},
@@ -577,6 +591,7 @@ def test_native_cow_metadata_recovers_each_completed_durability_boundary(
             with pytest.raises(PermissionError, match="slot claimed"):
                 invoke(True)
             assert snapshot(budget) == final_sql
+        assert not list(fences.iterdir())
 
 
 def test_ownerless_native_lock_is_not_removed(tmp_path):

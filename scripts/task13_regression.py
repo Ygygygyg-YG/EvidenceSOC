@@ -273,7 +273,10 @@ class RegressionHost:
         )
         if receipt.get("synthetic") is not self._manifest["synthetic"]:
             raise PermissionError("synthetic E timing cannot admit a real regression")
-        if receipt.get("schema_version") == "task13-e-timing-pool-receipt-v1":
+        if receipt.get("schema_version") in {
+            "task13-e-timing-pool-receipt-v1",
+            "task13-e-timing-pool-receipt-v2",
+        }:
             from evals.timing_pool import validate_pool_receipt
 
             if not self._manifest["synthetic"]:

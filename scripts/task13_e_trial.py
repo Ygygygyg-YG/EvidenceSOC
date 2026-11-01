@@ -22,8 +22,8 @@ from hashlib import sha256
 from pathlib import Path
 
 from evals.adapters.e_planning_journal import (
-    EPlanningAuthority,
     EPlanningDispatchJournal,
+    parse_authority,
 )
 from evals.adapters.e_planning_review import (
     build_review_request,
@@ -266,6 +266,7 @@ class ETrialController:
         if "pool_authority" not in self._inputs or request.ordinal <= 1:
             return False
         self._require_pool_phase(request, "plan")
+        from evals.timing_pool import pool_policy
         from evals.timing_pool_controller import (
             PoolJournal,
             validate_pre_timing_expiry_audit,
@@ -274,7 +275,9 @@ class ETrialController:
         pool = self._inputs["pool_authority"]
         prior = self._requests[request.ordinal - 2].trial_id
         journal = PoolJournal(
-            pool["execution_journal_path"], pool_sha256=canonical_hash(pool)
+            pool["execution_journal_path"],
+            pool_sha256=canonical_hash(pool),
+            policy=pool_policy(pool),
         )
         audits = [
             e["payload"]
@@ -298,6 +301,7 @@ class ETrialController:
         if "pool_authority" not in self._inputs or request.ordinal <= 1:
             return False
         self._require_pool_phase(request, "plan")
+        from evals.timing_pool import pool_policy
         from evals.timing_pool_controller import (
             PoolJournal,
             validate_first_dispatch_guard,
@@ -306,7 +310,9 @@ class ETrialController:
         pool = self._inputs["pool_authority"]
         previous = self._requests[request.ordinal - 2]
         journal = PoolJournal(
-            pool["execution_journal_path"], pool_sha256=canonical_hash(pool)
+            pool["execution_journal_path"],
+            pool_sha256=canonical_hash(pool),
+            policy=pool_policy(pool),
         )
         matches = [
             e["payload"]
@@ -375,9 +381,7 @@ class ETrialController:
 
     def _journal(self):
         dispatch = self._timing["planning_dispatch_registration_receipt"]
-        authority = EPlanningAuthority.model_validate(
-            self._inputs["planning_authority"]
-        )
+        authority = parse_authority(self._inputs["planning_authority"])
         if (
             canonical_hash(authority) != dispatch["authority_sha256"]
             or authority.registration_sha256 != canonical_hash(self._planning)
@@ -431,6 +435,13 @@ class ETrialController:
 
             pool = validate_pool_structure(self._inputs["pool_authority"])
             require_pool_membership(pool, packet, self._timing)
+            from evals.timing_pool import (
+                RECOVERY_REGISTRATION_SCHEMA,
+                require_recovery_child_authority,
+            )
+
+            if pool["schema_version"] == RECOVERY_REGISTRATION_SCHEMA:
+                require_recovery_child_authority(pool, self._timing, authority)
             # Both child dispatch authorities still bind their own native planning
             # registration and the same parent scope/actual user decision above.
             root = Path(__file__).resolve().parents[1]
@@ -1389,11 +1400,14 @@ class ETrialController:
 
             admission_clock = None
             if "pool_authority" in self._inputs:
+                from evals.timing_pool import pool_policy
                 from evals.timing_pool_controller import FirstDispatchClock, PoolJournal
 
                 pool = self._inputs["pool_authority"]
                 journal = PoolJournal(
-                    pool["execution_journal_path"], pool_sha256=canonical_hash(pool)
+                    pool["execution_journal_path"],
+                    pool_sha256=canonical_hash(pool),
+                    policy=pool_policy(pool),
                 )
                 admission_clock = FirstDispatchClock(
                     self._now,

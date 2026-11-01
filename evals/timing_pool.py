@@ -10,6 +10,7 @@ import json
 import math
 import stat
 from copy import deepcopy
+from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
 
@@ -24,6 +25,70 @@ from evals.verification_v2 import CAMPAIGN, _time, _validated_worker_result, fil
 
 REGISTRATION_SCHEMA = "task13-e-timing-pool-registration-v1"
 RECEIPT_SCHEMA = "task13-e-timing-pool-receipt-v1"
+RECOVERY_REGISTRATION_SCHEMA = "task13-e-timing-pool-registration-v2"
+RECOVERY_RECEIPT_SCHEMA = "task13-e-timing-pool-receipt-v2"
+
+
+@dataclass(frozen=True)
+class PoolPolicy:
+    registration_schema: str
+    receipt_schema: str
+    future_logical_limit: int
+    future_physical_limit: int
+    historical_logical: int
+    historical_physical: int
+
+
+def pool_policy(pool_or_schema):
+    """Select fixed budgets by an explicit version; never infer from lengths."""
+    schema = (
+        pool_or_schema.get("schema_version")
+        if isinstance(pool_or_schema, dict)
+        else pool_or_schema
+    )
+    if schema == REGISTRATION_SCHEMA:
+        return PoolPolicy(REGISTRATION_SCHEMA, RECEIPT_SCHEMA, 6, 18, 7, 21)
+    if schema == RECOVERY_REGISTRATION_SCHEMA:
+        return PoolPolicy(
+            RECOVERY_REGISTRATION_SCHEMA, RECOVERY_RECEIPT_SCHEMA, 5, 15, 8, 24
+        )
+    raise PermissionError("unsupported explicit pool policy")
+
+
+def validate_recovery_bindings(grant, predecessor):
+    from evals.adapters.e_planning_journal import ManualRecoveryGrant
+
+    try:
+        value = ManualRecoveryGrant.model_validate(grant).model_dump(mode="json")
+        expected = {
+            "pool_registration": value["predecessor_pool_registration_sha256"],
+            "pool_journal": value["predecessor_pool_journal_sha256"],
+            "quarantine_record": value["quarantine_record_sha256"],
+        }
+        if not isinstance(predecessor, dict) or set(predecessor) != set(expected) | {
+            "pool_head_sha256"
+        }:
+            raise PermissionError("exact quarantined predecessor raw pins required")
+        for key, digest in expected.items():
+            ref = predecessor[key]
+            if (
+                not isinstance(ref, dict)
+                or set(ref) != {"path", "sha256"}
+                or ref["sha256"] != digest
+            ):
+                raise PermissionError("quarantined predecessor raw pin differs")
+            path = Path(ref["path"])
+            if not path.is_absolute() or ".." in path.parts:
+                raise PermissionError(
+                    "quarantined predecessor absolute raw pins required"
+                )
+        if predecessor["pool_head_sha256"] != value["predecessor_pool_head_sha256"]:
+            raise PermissionError("quarantined predecessor differs from recovery grant")
+        return value
+    except (ValueError, TypeError) as error:
+        raise PermissionError("invalid manual recovery grant or quarantine") from error
+
+
 C10_TRIAL = "b99f2588f98db830904ec9dd2e63944e"
 C10_REGISTRATION = "29bc66cf1fecdadd8e490c47781abc911d44e60b2a05cc7bd94d89fef54846b0"
 
@@ -289,11 +354,11 @@ def _read_native_observation(
 def _validated_registration(pool, runtime_audit):
     try:
         validate_pool_structure(pool)
+        selected = pool_policy(pool)
         if (
-            pool["schema_version"] != REGISTRATION_SCHEMA
-            or pool["target_qualified"] != 3
-            or pool["future_logical_limit"] != 6
-            or pool["future_physical_limit"] != 18
+            pool["target_qualified"] != 3
+            or pool["future_logical_limit"] != selected.future_logical_limit
+            or pool["future_physical_limit"] != selected.future_physical_limit
         ):
             raise PermissionError("pool limits differ")
         if pool["measurement_constants"] != {
@@ -301,7 +366,11 @@ def _validated_registration(pool, runtime_audit):
             "order": [list(x) for x in ORDER],
         }:
             raise PermissionError("measurement constants differ")
-        validate_measurement_equivalence(pool)
+        if selected.registration_schema == RECOVERY_REGISTRATION_SCHEMA:
+            validate_recovery_measurement_equivalence(pool)
+            validate_recovery_quarantine(pool)
+        else:
+            validate_measurement_equivalence(pool)
         imports = pool["imported_observations"]
         if Path(imports[0]["evidence_root"]).absolute() != C10_EVIDENCE_ROOT or any(
             imports[0].get(k) != v for k, v in C10_IMPORT_PINS.items()
@@ -321,6 +390,8 @@ def _validated_registration(pool, runtime_audit):
         )
         if original["registration_sha256"] != C10_REGISTRATION:
             raise PermissionError("original C10 registration differs")
+        if selected.registration_schema == RECOVERY_REGISTRATION_SCHEMA:
+            validate_recovery_equivalence_join(pool, original)
         children = pool["children"]
         if len(children) != 2 or len({c["child_id"] for c in children}) != 2:
             raise PermissionError("two fixed-three children required")
@@ -383,7 +454,7 @@ def _validated_registration(pool, runtime_audit):
                 for t in r["trials"]
             )
         if (
-            pool["attempt_order"] != expected
+            pool["attempt_order"] != expected[: selected.future_logical_limit]
             or len({x["trial_id"] for x in expected}) != 6
             or C10_TRIAL in {x["trial_id"] for x in expected}
         ):
@@ -402,7 +473,7 @@ def validate_pool_receipt(receipt: dict, identity: dict) -> float:
             receipt["pool_registration"], runtime_audit
         )
         if (
-            receipt["schema_version"] != RECEIPT_SCHEMA
+            receipt["schema_version"] != pool_policy(pool).receipt_schema
             or receipt.get("synthetic") is not False
             or receipt.get("f8_approval_credit") != 0
             or receipt.get("distinct_case_count") != 1
@@ -787,11 +858,14 @@ def validate_pool_structure(pool):
     must guard their frozen pool and native journals during every operation.
     """
     try:
+        selected = pool_policy(pool)
         if (
-            pool["schema_version"] != REGISTRATION_SCHEMA
-            or pool["target_qualified"] != 3
-            or pool["future_logical_limit"] != 6
-            or pool["future_physical_limit"] != 18
+            pool["target_qualified"] != 3
+            or type(pool["target_qualified"]) is not int
+            or type(pool["future_logical_limit"]) is not int
+            or type(pool["future_physical_limit"]) is not int
+            or pool["future_logical_limit"] != selected.future_logical_limit
+            or pool["future_physical_limit"] != selected.future_physical_limit
             or pool["measurement_constants"]
             != {"bootstrap": BOOTSTRAP, "order": [list(x) for x in ORDER]}
         ):
@@ -833,12 +907,14 @@ def validate_pool_structure(pool):
                 for t in child["registration"]["trials"]
             )
         if (
-            pool["attempt_order"] != order
+            pool["attempt_order"] != order[: selected.future_logical_limit]
             or len({x["trial_id"] for x in order}) != 6
             or C10_TRIAL in {x["trial_id"] for x in order}
         ):
             raise PermissionError("frozen attempt order differs")
-        if (
+        if selected.registration_schema == RECOVERY_REGISTRATION_SCHEMA:
+            _validate_recovery_structure(pool, order)
+        elif (
             len(pool["measurement_files"]) != 117
             or pool["measurement_files"] != pool["original_measurement_files"]
         ):
@@ -848,6 +924,244 @@ def validate_pool_structure(pool):
         raise
     except (KeyError, ValueError, TypeError, OSError) as error:
         raise PermissionError("invalid pool structure") from error
+
+
+def _validate_recovery_structure(pool, native_order):
+    from evals.e_planning import planning_requests
+
+    grant = validate_recovery_bindings(
+        pool["migration_grant"], pool["quarantined_predecessor"]
+    )
+    if (
+        canonical_hash(grant) != pool["migration_grant_sha256"]
+        or pool["denied_attempts"] != native_order[5:]
+        or pool["quarantine_record"]
+        != pool["quarantined_predecessor"]["quarantine_record"]
+        or pool["recovery_plan"]["sha256"] != grant["recovery_plan_sha256"]
+    ):
+        raise PermissionError("recovery grant, quarantine or denied sixth slot differs")
+    if set(pool["recovery_equivalence"]) != {
+        "original_execution",
+        "candidate_execution",
+        "policy_pin",
+    }:
+        raise PermissionError("explicit recovery equivalence proof required")
+    for index, (child, allowed) in enumerate(
+        zip(pool["children"], (3, 2), strict=True)
+    ):
+        registration = child["registration"]
+        planning = registration["planning_registration"]
+        dispatch = registration["planning_dispatch_registration_receipt"]
+        requests = [canonical_hash(request) for request in planning_requests(planning)]
+        expected = {
+            "registration_sha256": canonical_hash(planning),
+            "journal_path": dispatch["journal_path"],
+            "request_sha256s": requests,
+            "authorized_request_sha256s": requests[:allowed],
+            "denied_request_sha256s": requests[allowed:],
+        }
+        if grant["children"][index] != expected:
+            raise PermissionError(
+                "recovery grant differs from frozen native child requests"
+            )
+
+
+def validate_recovery_measurement_equivalence(pool):
+    from evals.recovery_equivalence import validate_recovery_equivalence
+
+    proof = pool["recovery_equivalence"]
+    return validate_recovery_equivalence(
+        proof["original_execution"], proof["candidate_execution"], proof["policy_pin"]
+    )
+
+
+def recovery_execution_identity(registration):
+    """Stable native identities; future authorization hashes stay in formal binding."""
+    epoch = registration["planning_registration"]["epoch_binding"]
+    return {
+        "source": {key: epoch[key] for key in ("source_sha256", "epoch_id")}
+        | {"source_commit": registration["source_commit"]},
+        "model": deepcopy(registration["core_config"]["model_identity"]),
+        "controller": {"source_files": deepcopy(registration["source_files"])},
+    }
+
+
+def validate_recovery_equivalence_join(pool, original):
+    """Join scope-only transformation review to independently verified native data."""
+    proof = validate_recovery_measurement_equivalence(pool)
+    old = pool["recovery_equivalence"]["original_execution"]
+    new = pool["recovery_equivalence"]["candidate_execution"]
+    if (
+        proof.get("schema_version") != "task13-recovery-equivalence-proof-v1"
+        or proof.get("scope") != "source-and-declared-conditions-only"
+        or proof.get("authorization") is not False
+        or proof.get("timing_credit") is not False
+        or proof["original_measurement_files"] != pool["original_measurement_files"]
+        or proof["candidate_measurement_files"] != pool["measurement_files"]
+        or Path(new["root"]) != Path(pool["measurement_root"])
+        or old["identity"] != recovery_execution_identity(original["registration"])
+        or old["core_config"] != original["registration"]["core_config"]
+        or old["disclosed_control_changes"] != {}
+        or old["candidate_conditions"] != original["actual_conditions"]
+        or new["candidate_conditions"] != original["actual_conditions"]
+        or proof["declared_candidate_conditions"] != original["actual_conditions"]
+        or old["measurement_constants"] != pool["measurement_constants"]
+        or new["measurement_constants"] != pool["measurement_constants"]
+    ):
+        raise PermissionError(
+            "recovery equivalence differs from actual C10 and native pool declarations"
+        )
+    if (
+        old["measurement_files"] != pool["original_measurement_files"]
+        or new["measurement_files"] != pool["measurement_files"]
+        or old["native_measurement_files"] != proof["native_measurement_files"]
+        or new["native_measurement_files"]
+        != proof["candidate_native_measurement_files"]
+    ):
+        raise PermissionError("recovery equivalence raw inventories differ")
+    for record, registration in [(old, original["registration"])] + [
+        (new, c["registration"]) for c in pool["children"]
+    ]:
+        if (
+            record["identity"] != recovery_execution_identity(registration)
+            or record["core_config"] != registration["core_config"]
+        ):
+            raise PermissionError(
+                "recovery identity or declared core config differs from native registration"
+            )
+        root = Path(record["root"])
+        for relative, digest in record["native_measurement_files"].items():
+            if registration["source_files"].get(str(root / relative)) != digest:
+                raise PermissionError(
+                    "recovery native implementation map differs from registration"
+                )
+    if any(
+        c["disclosed_control_changes"] != new["disclosed_control_changes"]
+        for c in pool["children"]
+    ):
+        raise PermissionError(
+            "recovery declared control disclosures differ from native child"
+        )
+    return proof
+
+
+def require_recovery_child_authority(pool, timing, authority):
+    from evals.adapters.e_planning_journal import (
+        LimitedEPlanningAuthority,
+        parse_authority,
+    )
+
+    parsed = parse_authority(authority)
+    if (
+        not isinstance(parsed, LimitedEPlanningAuthority)
+        or parsed.registration_sha256 != canonical_hash(timing["planning_registration"])
+        or parsed.journal_path
+        != timing["planning_dispatch_registration_receipt"]["journal_path"]
+        or parsed.migration_grant.model_dump(mode="json") != pool["migration_grant"]
+        or parsed.migration_grant_sha256 != pool["migration_grant_sha256"]
+        or canonical_hash(parsed)
+        != timing["planning_dispatch_registration_receipt"]["authority_sha256"]
+    ):
+        raise PermissionError(
+            "native limited child authority differs from exact recovery grant"
+        )
+    return parsed
+
+
+def validate_denied_native_slot(context, request, view):
+    """Allow only native structural defaults, with no denied-slot activity."""
+    import sqlite3
+
+    trial = view.trials[request.trial_id]
+    expected_records = {}
+    structural_drift = False
+    if hasattr(view, "registration"):
+        registered = next(
+            (
+                t
+                for t in view.registration["trials"]
+                if t["trial_id"] == request.trial_id
+            ),
+            None,
+        )
+        if registered is None:
+            raise PermissionError("denied sixth native slot is not registered")
+        structural_drift = canonical_hash(trial) != canonical_hash(
+            {
+                "trial_id": request.trial_id,
+                "source_row_id": registered["source_row_id"],
+                "status": "not_started",
+                "reason": None,
+                "binding": None,
+            }
+        )
+        expected_records = {
+            branch["request_id"]: {
+                **branch,
+                "trial_id": request.trial_id,
+                "status": "not_started",
+                "reason": None,
+            }
+            for branch in registered["branches"]
+        }
+    actual_records = {
+        key: row
+        for key, row in view.records.items()
+        if key in expected_records or row.get("trial_id") == request.trial_id
+    }
+    slot = context["reader"]._root / "slots" / request.planning_slot_id
+    if (
+        trial.get("status") != "not_started"
+        or trial.get("binding")
+        or trial.get("review_pending")
+        or context["claims"][request.trial_id]["status"] != "unclaimed"
+        or structural_drift
+        or canonical_hash(actual_records) != canonical_hash(expected_records)
+        or any(
+            event["payload"].get("trial_id") == request.trial_id
+            or event["payload"].get("request_id") in expected_records
+            for event in getattr(view, "events", [])
+        )
+        or slot.exists()
+        and any(slot.iterdir())
+    ):
+        raise PermissionError(
+            "denied sixth native slot contains plan/read/decision/trial/branch activity"
+        )
+    path = _plain(context["planning_journal_path"])
+    with sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True) as db:
+        claim = db.execute(
+            "SELECT 1 FROM analysis_import_planning_claims WHERE planning_slot_id=?",
+            (request.planning_slot_id,),
+        ).fetchone()
+    if claim:
+        raise PermissionError("denied sixth native slot contains SQL claim")
+
+
+def validate_recovery_quarantine(pool):
+    from evals.timing_pool_recovery import validate_quarantine_evidence
+
+    ref = pool["quarantine_record"]
+    path = _plain(ref["path"])
+    if file_sha256(path) != ref["sha256"]:
+        raise PermissionError("recovery quarantine raw pin differs")
+    quarantine = validate_quarantine_evidence(
+        _json(path), expected_scope=pool["recovery_plan"]
+    )
+    predecessor = pool["quarantined_predecessor"]
+    journal = quarantine["parent_journal"]
+    if {"path": journal["path"], "sha256": journal["sha256"]} != predecessor[
+        "pool_journal"
+    ] or journal["head_sha256"] != predecessor["pool_head_sha256"]:
+        raise PermissionError("quarantine predecessor journal differs")
+    host_ref = quarantine["pool_host_manifest"]
+    host_path = _plain(host_ref["path"])
+    if (
+        file_sha256(host_path) != host_ref["sha256"]
+        or _json(host_path)["pool_registration"] != predecessor["pool_registration"]
+    ):
+        raise PermissionError("quarantine predecessor pool registration differs")
+    return quarantine
 
 
 def validate_pool_registration(pool):
@@ -968,8 +1282,14 @@ def _validate_host_semantics(view, host, inputs):
     reader._now = lambda: datetime.now(UTC)
     reader._scope()
     journal = reader._journal()
+    authority = inputs["planning_authority"]
+    denied = set(authority.get("denied_request_sha256s", []))
     claims = {
-        t["trial_id"]: journal.validate_request(request)
+        t["trial_id"]: (
+            {"status": "unclaimed"}
+            if canonical_hash(request) in denied
+            else journal.validate_request(request)
+        )
         for t, request in zip(
             view.registration["trials"], reader._requests, strict=True
         )
@@ -1048,6 +1368,7 @@ def _validate_host_semantics(view, host, inputs):
     return {
         "reader": reader,
         "claims": claims,
+        "planning_journal_path": authority["journal_path"],
         "epoch": epoch,
         "model": descriptor,
         "budget_path": budget,
@@ -1099,6 +1420,23 @@ def _finish_archives(context):
 
 
 def validate_migration_marker(marker, pool, parent_packet_pin, parent_decision_pin):
+    if pool.get("schema_version") == RECOVERY_REGISTRATION_SCHEMA:
+        grant = validate_recovery_bindings(
+            pool["migration_grant"], pool["quarantined_predecessor"]
+        )
+        if (
+            parent_packet_pin["sha256"] != grant["scope_packet_sha256"]
+            or parent_decision_pin["sha256"] != grant["decision_record_sha256"]
+        ):
+            raise PermissionError(
+                "actual recovery parent scope differs from limited grant"
+            )
+        quarantine = validate_recovery_quarantine(pool)
+        if marker != quarantine:
+            raise PermissionError(
+                "recovery migration evidence differs from pinned independent quarantine"
+            )
+        return quarantine
     path = _plain(C10_EVIDENCE_ROOT / "registration.json")
     if file_sha256(path) != C10_REGISTRATION:
         raise PermissionError("migration original registration anchor differs")

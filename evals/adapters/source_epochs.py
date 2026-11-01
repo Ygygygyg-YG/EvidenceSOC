@@ -33,6 +33,7 @@ LIMITS = {
     "purposes": dict(PURPOSE_LIMITS),
     "held": HELD_CONTINGENCY,
 }
+_ACTIVE_CONTROLLER_LOCKS = {}
 _FIELDS = {
     "schema_version",
     "campaign_id",
@@ -655,6 +656,14 @@ def _lock_controller_roots(roots, stack):
             raise PermissionError(
                 "controller journal requires reconciliation"
             ) from error
+    capability = frozenset(owned_locks)
+    _ACTIVE_CONTROLLER_LOCKS[id(capability)] = (
+        capability,
+        frozenset(roots),
+        {path: (path.stat().st_dev, path.stat().st_ino) for path in capability},
+    )
+    stack.callback(_ACTIVE_CONTROLLER_LOCKS.pop, id(capability))
+    return capability
 
 
 def register_source_epoch(
@@ -665,6 +674,7 @@ def register_source_epoch(
     budget_identity,
     authority,
     expected_authority_sha256,
+    locked_audit=None,
 ):
     """Append on a trusted host after independent concrete authority verification.
 
@@ -701,7 +711,7 @@ def register_source_epoch(
     ):
         raise PermissionError("independently pinned external authority record differs")
     with ExitStack() as stack:
-        _lock_controller_roots(manifest["controller_state_roots"], stack)
+        owned_locks = _lock_controller_roots(manifest["controller_state_roots"], stack)
         with sqlite3.connect(path, timeout=30) as db:
             db.execute("PRAGMA foreign_keys=ON")
             db.execute("BEGIN IMMEDIATE")
@@ -742,6 +752,12 @@ def register_source_epoch(
             ):
                 raise ValueError(
                     "legacy epoch must attest the existing frozen source/config"
+                )
+            if locked_audit is not None:
+                locked_audit(
+                    db=db,
+                    controller_state_roots=tuple(manifest["controller_state_roots"]),
+                    owned_locks=owned_locks,
                 )
             registered_at = datetime.now(UTC).isoformat()
             columns = [

@@ -24,6 +24,8 @@ from pathlib import Path
 
 from evals.contracts import canonical_hash
 from evals.timing_pool import (
+    RECOVERY_REGISTRATION_SCHEMA,
+    pool_policy,
     read_native_observation,
     validate_pool_receipt,
     validate_pool_registration,
@@ -410,11 +412,26 @@ class NativePoolController:
         self.pin = {"path": str(manifest_path), "sha256": manifest_sha256}
         self.raw = _read_pin(self.pin)
         self.manifest = _decode(self.raw)
-        if self.manifest["schema_version"] != "task13-e-timing-pool-host-v1":
+        if self.manifest["schema_version"] not in {
+            "task13-e-timing-pool-host-v1",
+            "task13-e-timing-pool-host-v2",
+        }:
             raise PoolStopped("pool host manifest schema differs")
         self.pool = validate_pool_registration(
             _decode(_read_pin(self.manifest["pool_registration"]))
         )
+        expected_host = (
+            "task13-e-timing-pool-host-v2"
+            if pool_policy(self.pool).future_logical_limit == 5
+            else "task13-e-timing-pool-host-v1"
+        )
+        if self.manifest["schema_version"] != expected_host:
+            raise PoolStopped("pool host and registration version differ")
+        if (
+            self.pool["schema_version"] == RECOVERY_REGISTRATION_SCHEMA
+            and self.manifest["migration_marker"] != self.pool["quarantine_record"]
+        ):
+            raise PoolStopped("pool host quarantine raw reference differs")
         if (
             self.manifest["original_account_baseline"]
             != self.pool["original_account_baseline"]
@@ -427,7 +444,9 @@ class NativePoolController:
         ):
             raise PoolStopped("pool journal path differs from approved parent proposal")
         self.journal = PoolJournal(
-            self.manifest["journal_path"], pool_sha256=self.digest
+            self.manifest["journal_path"],
+            pool_sha256=self.digest,
+            policy=pool_policy(self.pool),
         )
         self.hosts = {}
         for child in self.pool["children"]:
@@ -462,6 +481,12 @@ class NativePoolController:
         validate_pool_structure(self.pool)
         from evals.timing_pool import validate_migration_marker
 
+        if (
+            self.pool["schema_version"] == RECOVERY_REGISTRATION_SCHEMA
+            and self.manifest["migration_marker"] != self.pool["quarantine_record"]
+        ):
+            raise PoolStopped("pool host quarantine raw reference differs")
+
         first_host = next(iter(self.hosts.values()))
         validate_migration_marker(
             _decode(_read_pin(self.manifest["migration_marker"])),
@@ -471,6 +496,39 @@ class NativePoolController:
         )
         for host in self.hosts.values():
             host._preflight(host._requests[0])
+        if self.pool["schema_version"] == RECOVERY_REGISTRATION_SCHEMA:
+            from types import SimpleNamespace
+
+            from evals.timing_pool import _view, validate_denied_native_slot
+
+            for denied in self.pool["denied_attempts"]:
+                host = self.hosts[denied["child_id"]]
+                host._journal()  # Original native metadata validates every SQL claim.
+                request = next(
+                    r for r in host._requests if r.trial_id == denied["trial_id"]
+                )
+                root = host._root / "timing"
+                if (root / "registration.json").exists():
+                    view = _view(root)
+                else:
+                    if root.exists() and any(root.rglob("*")):
+                        raise PoolStopped(
+                            "denied slot has unregistered timing evidence"
+                        )
+                    view = SimpleNamespace(
+                        trials={
+                            request.trial_id: {"status": "not_started", "binding": None}
+                        },
+                        records={},
+                    )
+                context = {
+                    "reader": host,
+                    "claims": {request.trial_id: {"status": "unclaimed"}},
+                    "planning_journal_path": host._inputs["planning_authority"][
+                        "journal_path"
+                    ],
+                }
+                validate_denied_native_slot(context, request, view)
 
     def budget(self):
         # Read only. Native BudgetAccount still enforces original and supplement caps.
@@ -565,7 +623,17 @@ class NativePoolController:
                 if record.get("returncode") != 0 or stdout is None or stdout.strip():
                     raise PoolStopped("owned native worker is not freshly absent")
                 proofs.append({"receipt_sha256": digest, "inspection": record})
-        return {"inspected_at": datetime.now(UTC).isoformat(), "proofs": proofs}
+        proof = {"inspected_at": datetime.now(UTC).isoformat(), "proofs": proofs}
+        if self.pool["schema_version"] == RECOVERY_REGISTRATION_SCHEMA:
+            from evals.timing_pool import validate_recovery_quarantine
+            from evals.timing_pool_recovery import fresh_quarantine_workers_absent
+
+            quarantine = validate_recovery_quarantine(self.pool)
+            proof["quarantined_predecessor_workers"] = await asyncio.to_thread(
+                fresh_quarantine_workers_absent, quarantine
+            )
+            proof["inspected_at"] = datetime.now(UTC).isoformat()
+        return proof
 
     def reserve_bound(self):
         proof = _decode(_read_pin(self.manifest["capacity_proof"]))
@@ -610,6 +678,9 @@ class NativePoolController:
             imported_trial_id=original["trial_id"],
             now=datetime.now(UTC),
             initial_spent_yuan=str(spent),
+            policy=pool_policy(self.pool),
+            migration_grant=self.pool.get("migration_grant"),
+            quarantined_predecessor=self.pool.get("quarantined_predecessor"),
             imported_max_seconds=max(
                 original["duration_wall_seconds"],
                 original["duration_monotonic_seconds"],
@@ -697,7 +768,7 @@ class NativePoolController:
                     original,
                     require_complete=False,
                 )
-            if state["attempted"] >= 6:
+            if state["attempted"] >= pool_policy(self.pool).future_logical_limit:
                 raise PoolStopped("pool exhausted")
             attempt = self.pool["attempt_order"][state["attempted"]]
             reserve = self.reserve_bound()
@@ -1251,7 +1322,7 @@ class NativePoolController:
                 }
             )
         receipt = {
-            "schema_version": "task13-e-timing-pool-receipt-v1",
+            "schema_version": pool_policy(self.pool).receipt_schema,
             "synthetic": False,
             "identity": self.pool["identity"],
             "formal_binding": self.pool["formal_binding"],

@@ -81,16 +81,36 @@ def test_historical_native_locks_exist_only_in_private_namespace(tmp_path):
     original_root = tmp_path / "pretend-original-controller"
     original_root.mkdir()
     lock = original_root / ".writer-lock"
+    native_stat = type(lock).stat
     with isolated_native_io(tmp_path / "isolated") as proof:
         lock.mkdir()
-        assert not lock.exists()
+        with pytest.raises(FileNotFoundError):
+            native_stat(lock)
         target = proof["lock_targets"][lock.resolve()]
         assert target.is_dir()
+        assert (lock.stat().st_dev, lock.stat().st_ino) == (
+            target.stat().st_dev,
+            target.stat().st_ino,
+        )
         with pytest.raises(FileExistsError):
             lock.mkdir()
         lock.rmdir()
         assert not target.exists()
     assert not lock.exists()
+
+
+def test_historical_lock_transport_never_hides_actual_lock(tmp_path):
+    original_root = tmp_path / "pretend-original-controller"
+    original_root.mkdir()
+    lock = original_root / ".writer-lock"
+    lock.mkdir()
+    before = lock.stat()
+    with isolated_native_io(tmp_path / "isolated"):
+        with pytest.raises(PermissionError, match="existing actual lock"):
+            lock.stat()
+        with pytest.raises(PermissionError, match="existing actual lock"):
+            lock.mkdir()
+    assert lock.stat().st_ino == before.st_ino
 
 
 def test_database_namespace_routes_path_and_readonly_uri_to_same_copy(tmp_path):
@@ -113,8 +133,15 @@ def test_database_namespace_routes_path_and_readonly_uri_to_same_copy(tmp_path):
     assert sha256(original.read_bytes()).hexdigest() == before
 
 
-def test_full_native_metadata_join_in_copied_namespace(tmp_path):
+@pytest.mark.asyncio
+async def test_full_native_metadata_join_in_copied_namespace(tmp_path):
     import builtins
+
+    from evals.tests.pool_composite_fixture import enter_mirrored_test
+
+    mirror = await enter_mirrored_test(tmp_path, "full_native_metadata_join")
+    if mirror is None:
+        return
 
     from evals.adapters import additional_analysis, planning_analysis, planning_recovery
     from evals.e_planning import planning_requests
@@ -139,6 +166,9 @@ def test_full_native_metadata_join_in_copied_namespace(tmp_path):
     )
     with isolated_native_io(tmp_path) as proof:
         data = original_templates()
+        from evals.tests.pool_composite_fixture import reconstruct_historical_databases
+
+        reconstruct_historical_databases(data)
         fixture = compile_fixture_documents(
             tmp_path,
             original["actual_conditions"],
@@ -278,6 +308,9 @@ async def test_complete_offline_public_pool_receipt(tmp_path, monkeypatch):
     original = read_native_observation(C10_EVIDENCE_ROOT, C10_TRIAL)
     with isolated_native_io(tmp_path):
         data = original_templates()
+        from evals.tests.pool_composite_fixture import reconstruct_historical_databases
+
+        reconstruct_historical_databases(data)
         policy = fixture_free_policy(tmp_path / "SYNTHETIC-free-gates", mirror)
         fixture = compile_fixture_documents(
             tmp_path,
@@ -470,6 +503,9 @@ async def test_complete_offline_expiry_closed_prefix(tmp_path, monkeypatch):
     original = read_native_observation(C10_EVIDENCE_ROOT, C10_TRIAL)
     with isolated_native_io(tmp_path):
         data = original_templates()
+        from evals.tests.pool_composite_fixture import reconstruct_historical_databases
+
+        reconstruct_historical_databases(data)
         fixture = compile_fixture_documents(
             tmp_path,
             original["actual_conditions"],

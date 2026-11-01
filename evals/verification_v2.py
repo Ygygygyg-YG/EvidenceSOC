@@ -244,10 +244,10 @@ def observed_six_branch_max(receipt, identity):
 
 def observed_timing_max(receipt, identity):
     """Explicit schema dispatch; native historical evidence is never relabelled."""
-    if (
-        isinstance(receipt, dict)
-        and receipt.get("schema_version") == "task13-e-timing-pool-receipt-v1"
-    ):
+    if isinstance(receipt, dict) and receipt.get("schema_version") in {
+        "task13-e-timing-pool-receipt-v1",
+        "task13-e-timing-pool-receipt-v2",
+    }:
         from evals.timing_pool import validate_pool_receipt
 
         return validate_pool_receipt(receipt, identity)

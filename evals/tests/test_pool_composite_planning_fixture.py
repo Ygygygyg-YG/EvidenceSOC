@@ -21,6 +21,16 @@ async def test_offline_adapter_refuses_non_copied_account(tmp_path):
 
 @pytest.mark.asyncio
 async def test_current_c10_source_native_workflow_and_sql_are_offline_only(tmp_path):
+    from evals.tests.pool_composite_fixture import enter_mirrored_test
+
+    mirror = await enter_mirrored_test(
+        tmp_path,
+        "current_c10_source_native_workflow",
+        test_file="test_pool_composite_planning_fixture.py",
+    )
+    if mirror is None:
+        return
+
     from evals.contracts import canonical_hash
     from evals.e_planning import planning_requests
     from evals.tests.pool_composite_fixture import (
@@ -38,6 +48,9 @@ async def test_current_c10_source_native_workflow_and_sql_are_offline_only(tmp_p
     original = read_native_observation(C10_EVIDENCE_ROOT, C10_TRIAL)
     with isolated_native_io(tmp_path):
         data = original_templates()
+        from evals.tests.pool_composite_fixture import reconstruct_historical_databases
+
+        reconstruct_historical_databases(data)
         fixture = compile_fixture_documents(
             tmp_path,
             original["actual_conditions"],

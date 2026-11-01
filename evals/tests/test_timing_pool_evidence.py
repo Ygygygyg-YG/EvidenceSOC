@@ -128,9 +128,15 @@ def test_entire_worker_manifest_anchored_not_self_declared():
         "measurement_files": files,
         "original_measurement_files": files.copy(),
         "original_measurement_root": str(source),
-        "measurement_root": str(Path(__file__).resolve().parents[2]),
+        "measurement_root": str(source),
     }
     assert module().validate_measurement_equivalence(pool) == files
+    # The live recovery tree legitimately changed authorization code. A v1
+    # receipt still requires every historical worker byte, without exceptions.
+    pool["measurement_root"] = str(Path(__file__).resolve().parents[2])
+    with pytest.raises(PermissionError):
+        module().validate_measurement_equivalence(pool)
+    pool["measurement_root"] = str(source)
     tampered = files.copy()
     key = next(iter(tampered))
     tampered[key] = "0" * 64

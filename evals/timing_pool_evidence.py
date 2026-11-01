@@ -23,16 +23,47 @@ TTL_REASONS = frozenset(
 
 
 def validate_attempt_inventory(
-    order, begun, states, settlements, *, require_complete=True
+    order,
+    begun,
+    states,
+    settlements,
+    *,
+    require_complete=True,
+    policy=None,
+    denied_trial_ids=(),
 ):
+    from evals.timing_pool import REGISTRATION_SCHEMA, pool_policy
+
+    selected = (
+        pool_policy(REGISTRATION_SCHEMA)
+        if policy is None
+        else pool_policy(policy.registration_schema)
+    )
+    limit = selected.future_logical_limit
     if (
-        len(order) != 6
-        or len(set(order)) != 6
+        len(order) != limit
+        or len(set(order)) != limit
         or begun != order[: len(begun)]
-        or len(begun) > 6
+        or len(begun) > limit
         or [s["trial_id"] for s in settlements] != begun
     ):
         raise PermissionError("all begun attempts must form one settled frozen prefix")
+    if limit == 5:
+        if (
+            len(denied_trial_ids) != 1
+            or set(denied_trial_ids) & set(order)
+            or set(states) != set(order) | set(denied_trial_ids)
+        ):
+            raise PermissionError("exact excluded sixth native slot required")
+        for trial in denied_trial_ids:
+            row = states[trial]
+            if (
+                not isinstance(row, dict)
+                or row.get("status") != "not_started"
+                or row.get("binding")
+                or row.get("review_pending")
+            ):
+                raise PermissionError("denied native slot contains activity")
     qualified = []
     for trial_id, settlement in zip(begun, settlements, strict=True):
         if len(qualified) == 2:
@@ -226,6 +257,54 @@ def _quiescence(proof, contexts):
             raise PermissionError(
                 "fresh recovery guard does not establish container absence"
             )
+    from evals.timing_pool import (
+        RECOVERY_REGISTRATION_SCHEMA,
+        validate_recovery_quarantine,
+    )
+
+    pools = [
+        getattr(c["reader"], "_inputs", {}).get("pool_authority", {})
+        for c in contexts.values()
+    ]
+    recovery = [
+        p for p in pools if p.get("schema_version") == RECOVERY_REGISTRATION_SCHEMA
+    ]
+    if recovery:
+        pool = recovery[0]
+        if any(p != pool for p in pools):
+            raise PermissionError("quarantine parent pool differs across contexts")
+        quarantine = validate_recovery_quarantine(pool)
+        absence = proof.get("quarantined_predecessor_workers")
+        expected_workers = []
+        for worker in quarantine["workers"]:
+            container = worker["container_id"]
+            expected_workers.append(
+                {
+                    "container_id": container,
+                    "inspection": {
+                        "argv": [
+                            "docker",
+                            "container",
+                            "ls",
+                            "--all",
+                            "--no-trunc",
+                            "--filter",
+                            "id=" + container,
+                            "--format",
+                            "{{.ID}}",
+                        ],
+                        "returncode": 0,
+                        "stdout_sha256": sha256(b"").hexdigest(),
+                        "stderr_sha256": sha256(b"").hexdigest(),
+                    },
+                }
+            )
+        if absence != {
+            "schema_version": "task13-manual-quarantine-worker-absence-v1",
+            "status": "verified",
+            "workers": expected_workers,
+        }:
+            raise PermissionError("fresh quarantine predecessor worker absence differs")
     return when
 
 
@@ -239,15 +318,23 @@ def validate_controller_evidence(evidence, pool, original, *, require_complete=T
         _time,
         _validate_host_semantics,
         _view,
+        pool_policy,
+        validate_denied_native_slot,
         validate_migration_marker,
     )
     from evals.timing_pool_controller import validate_pool_journal_evidence
     from evals.verification_v2 import _validated_worker_result
     from scripts.task13_timing_pool import NativePoolController
 
+    selected = pool_policy(pool)
     manifest = _pin(evidence["pool_host_manifest"])
+    host_schema = (
+        "task13-e-timing-pool-host-v2"
+        if selected.future_logical_limit == 5
+        else "task13-e-timing-pool-host-v1"
+    )
     if (
-        manifest["schema_version"] != "task13-e-timing-pool-host-v1"
+        manifest["schema_version"] != host_schema
         or _pin(manifest["pool_registration"]) != pool
         or manifest["hosts"] != evidence["host_manifests"]
         or manifest["journal_path"] != evidence["pool_journal"]["path"]
@@ -257,6 +344,11 @@ def validate_controller_evidence(evidence, pool, original, *, require_complete=T
     ):
         raise PermissionError("actual pool host manifest differs")
     _plain(evidence["pool_journal"]["path"])
+    if (
+        selected.future_logical_limit == 5
+        and manifest["migration_marker"] != pool["quarantine_record"]
+    ):
+        raise PermissionError("pool host quarantine raw reference differs")
     transcript = validate_pool_journal_evidence(evidence, pool)
     state = transcript["state"]
     events = transcript["events"]
@@ -336,7 +428,15 @@ def validate_controller_evidence(evidence, pool, original, *, require_complete=T
         states,
         transcript["settlements"],
         require_complete=require_complete,
+        policy=selected,
+        denied_trial_ids=[a["trial_id"] for a in pool.get("denied_attempts", [])],
     )
+    for denied in pool.get("denied_attempts", []):
+        validate_denied_native_slot(
+            contexts[denied["child_id"]],
+            requests[denied["trial_id"]],
+            views[denied["child_id"]],
+        )
     by_attempt = {a["trial_id"]: a for a in pool["attempt_order"]}
     settlements = {p["trial_id"]: p for p in transcript["settlements"]}
     expired = {
@@ -529,9 +629,9 @@ def validate_controller_evidence(evidence, pool, original, *, require_complete=T
                     != "verified"
                 ):
                     raise PermissionError("begun worker lacks native termination")
-    if len(total_rows) > 18 or len({r["reservation_id"] for r in total_rows}) != len(
-        total_rows
-    ):
+    if len(total_rows) > selected.future_physical_limit or len(
+        {r["reservation_id"] for r in total_rows}
+    ) != len(total_rows):
         raise PermissionError("pool physical cap or unique reservation violated")
     budgets = {str(c["budget_path"]) for c in contexts.values()}
     if len(budgets) != 1:

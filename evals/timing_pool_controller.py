@@ -47,7 +47,16 @@ def _digest(value):
 
 
 class PoolJournal:
-    def __init__(self, path, *, pool_sha256):
+    def __init__(self, path, *, pool_sha256, policy=None):
+        from evals.timing_pool import REGISTRATION_SCHEMA, pool_policy
+
+        self.policy = (
+            pool_policy(REGISTRATION_SCHEMA)
+            if policy is None
+            else pool_policy(policy.registration_schema)
+        )
+        if policy is not None and self.policy != policy:
+            raise PoolStopped("invalid pool policy")
         self.path = Path(path).absolute()
         self.lock_path = self.path.with_suffix(self.path.suffix + ".lock")
         self.pool_sha256 = _digest(pool_sha256)
@@ -66,16 +75,28 @@ class PoolJournal:
         now,
         initial_spent_yuan="0",
         imported_max_seconds=0,
+        policy=None,
+        migration_grant=None,
+        quarantined_predecessor=None,
     ):
+        j = cls(path, pool_sha256=pool_sha256, policy=policy)
         if (
-            len(attempts) != 6
-            or len(set(attempts)) != 6
+            len(attempts) != j.policy.future_logical_limit
+            or len(set(attempts)) != j.policy.future_logical_limit
             or imported_trial_id in attempts
         ):
             raise PoolStopped("six unique future attempts required")
         if now.tzinfo is None or now >= DEADLINE:
             raise PoolStopped("deadline expired")
-        j = cls(path, pool_sha256=pool_sha256)
+        recovery = j.policy.future_logical_limit == 5
+        if recovery:
+            from evals.timing_pool import validate_recovery_bindings
+
+            migration_grant = validate_recovery_bindings(
+                migration_grant, quarantined_predecessor
+            )
+        elif migration_grant is not None or quarantined_predecessor is not None:
+            raise PoolStopped("legacy policy cannot carry recovery genesis")
         with j.lock():
             if j.path.exists():
                 raise PoolStopped("journal already exists; never reset")
@@ -85,6 +106,12 @@ class PoolJournal:
                 "initial_spent_yuan": str(_money(initial_spent_yuan)),
                 "imported_max_seconds": imported_max_seconds,
             }
+            if recovery:
+                payload.update(
+                    policy=j.policy.registration_schema,
+                    migration_grant=migration_grant,
+                    quarantined_predecessor=quarantined_predecessor,
+                )
             j._append("prepare", payload, [])
         return j
 
@@ -136,6 +163,28 @@ class PoolJournal:
             result.append(event)
         if not result or result[0]["kind"] != "prepare":
             raise PoolStopped("journal genesis missing")
+        genesis = result[0]["payload"]
+        from evals.timing_pool import (
+            RECOVERY_REGISTRATION_SCHEMA,
+            validate_recovery_bindings,
+        )
+
+        if self.policy.registration_schema == RECOVERY_REGISTRATION_SCHEMA:
+            if genesis.get("policy") != self.policy.registration_schema:
+                raise PoolStopped("recovery journal policy genesis missing")
+            validate_recovery_bindings(
+                genesis.get("migration_grant"), genesis.get("quarantined_predecessor")
+            )
+        elif any(
+            key in genesis
+            for key in ("policy", "migration_grant", "quarantined_predecessor")
+        ):
+            raise PoolStopped("legacy journal rejects recovery policy genesis")
+        if (
+            len(genesis["attempts"]) != self.policy.future_logical_limit
+            or len(set(genesis["attempts"])) != self.policy.future_logical_limit
+        ):
+            raise PoolStopped("pool policy genesis attempts differ")
         return result
 
     def _append(self, kind, payload, events):
@@ -194,9 +243,12 @@ class PoolJournal:
             else:
                 raise PoolStopped("unknown journal event")
         state.update(
-            consumed_logical=7 + state["attempted"],
-            physical_upper_bound=21 + 3 * state["attempted"],
-            analysis_inclusive_upper_bound=22 + 3 * state["attempted"],
+            consumed_logical=self.policy.historical_logical + state["attempted"],
+            physical_upper_bound=self.policy.historical_physical
+            + 3 * state["attempted"],
+            analysis_inclusive_upper_bound=self.policy.historical_physical
+            + 1
+            + 3 * state["attempted"],
             pool_sha256=self.pool_sha256,
             journal_head=events[-1]["sha256"],
         )
@@ -212,7 +264,7 @@ class PoolJournal:
                 raise PoolStopped("STOP: " + s["stopped"])
             if s["qualified"] >= 3:
                 raise PoolStopped("target reached")
-            if s["attempted"] >= 6:
+            if s["attempted"] >= self.policy.future_logical_limit:
                 raise PoolStopped("pool exhausted")
             if trial_id != events[0]["payload"]["attempts"][s["attempted"]]:
                 raise PoolStopped("sequence mismatch")
@@ -346,6 +398,29 @@ def pool_scope_proposal(pool):
         formal["epoch_manifest_sha256"] = "0" * 64
         if formal.get("model_identity_binding") is not None:
             formal["model_identity_binding"]["model_identity_sha256"] = "0" * 64
+    from evals.timing_pool import RECOVERY_REGISTRATION_SCHEMA
+
+    if pool.get("schema_version") == RECOVERY_REGISTRATION_SCHEMA:
+        from evals.e_planning import planning_requests
+
+        grant = proposal["migration_grant"]
+        grant["scope_packet_sha256"] = "0" * 64
+        grant["decision_record_sha256"] = "0" * 64
+        for child, bound, allowed in zip(
+            proposal["children"], grant["children"], (3, 2), strict=True
+        ):
+            timing = child["registration"]
+            planning = timing["planning_registration"]
+            requests = [
+                canonical_hash(request) for request in planning_requests(planning)
+            ]
+            bound.update(
+                registration_sha256=canonical_hash(planning),
+                request_sha256s=requests,
+                authorized_request_sha256s=requests[:allowed],
+                denied_request_sha256s=requests[allowed:],
+            )
+        proposal["migration_grant_sha256"] = canonical_hash(grant)
     return proposal
 
 
@@ -358,7 +433,12 @@ def validate_pool_journal_evidence(evidence, pool):
     from evals.contracts import canonical_hash
 
     pin = evidence["pool_journal"]
-    journal = PoolJournal(pin["path"], pool_sha256=canonical_hash(pool))
+    from evals.timing_pool import pool_policy
+
+    selected = pool_policy(pool)
+    journal = PoolJournal(
+        pin["path"], pool_sha256=canonical_hash(pool), policy=selected
+    )
     if sha256(journal.path.read_bytes()).hexdigest() != _digest(pin["sha256"]):
         raise PoolStopped("pool journal raw pin differs")
     events = journal._events()
@@ -367,12 +447,17 @@ def validate_pool_journal_evidence(evidence, pool):
     genesis = events[0]["payload"]
     order = [a["trial_id"] for a in pool["attempt_order"]]
     if (
-        len(order) != 6
-        or len(set(order)) != 6
+        len(order) != selected.future_logical_limit
+        or len(set(order)) != selected.future_logical_limit
         or genesis["attempts"] != order
         or genesis["imported_trial_id"] != pool["imported_observations"][0]["trial_id"]
     ):
         raise PoolStopped("pool identity or attempt sequence differs")
+    if selected.future_logical_limit == 5 and (
+        genesis["migration_grant"] != pool["migration_grant"]
+        or genesis["quarantined_predecessor"] != pool["quarantined_predecessor"]
+    ):
+        raise PoolStopped("journal recovery genesis differs from frozen pool")
     pending = None
     attempted = 0
     qualified = 1
@@ -391,7 +476,7 @@ def validate_pool_journal_evidence(evidence, pool):
             if (
                 pending
                 or stopped
-                or attempted >= 6
+                or attempted >= selected.future_logical_limit
                 or qualified >= 3
                 or p["trial_id"] != order[attempted]
             ):
@@ -550,7 +635,11 @@ def require_pool_phase_lease(pool, child_id, trial_id, phase, lease):
     if path.name != "pool-journal.jsonl" or path != lease.journal_path:
         raise PoolStopped("phase journal differs from approved pool path")
     _require_unfenced(path)
-    journal = PoolJournal(path, pool_sha256=canonical_hash(pool))
+    from evals.timing_pool import pool_policy
+
+    journal = PoolJournal(
+        path, pool_sha256=canonical_hash(pool), policy=pool_policy(pool)
+    )
     owner = json.loads(require_plain_path(journal.lock_path, file=True).read_bytes())
     if owner != {"pid": os.getpid(), "nonce": lease.nonce}:
         raise PoolStopped("parent phase lock is not owned by current process")
@@ -572,7 +661,7 @@ def require_pool_phase_lease(pool, child_id, trial_id, phase, lease):
         or state["pending"] != trial_id
         or state["stopped"]
         or state["qualified"] >= 3
-        or not 1 <= state["attempted"] <= 6
+        or not 1 <= state["attempted"] <= journal.policy.future_logical_limit
     ):
         raise PoolStopped("parent phase claim stale, mismatched or outside pool caps")
     expected = events[0]["payload"]["attempts"][state["attempted"] - 1]

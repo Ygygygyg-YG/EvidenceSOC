@@ -193,7 +193,10 @@ def test_parent_membership_is_explicit_and_exact(tmp_path):
     from scripts import task13_e_trial as host
 
     timing = registration(tmp_path)
-    pool = {"children": [{"child_id": "a", "registration": timing}]}
+    pool = {
+        "schema_version": "task13-e-timing-pool-registration-v1",
+        "children": [{"child_id": "a", "registration": timing}],
+    }
     proposal = pool_scope_proposal(pool)
     packet = {
         "pool_proposal": proposal,
@@ -306,7 +309,10 @@ async def test_native_known_ttl_settles_then_free_resume(tmp_path):
         return {"fresh": True}
 
     controller.quiescence = quiet
-    controller.pool = {"attempt_order": [{"trial_id": "t0", "child_id": "a"}]}
+    controller.pool = {
+        "schema_version": "task13-e-timing-pool-registration-v1",
+        "attempt_order": [{"trial_id": "t0", "child_id": "a"}],
+    }
     terminal = {
         "trial_id": "t0",
         "status": "rejected",
@@ -356,7 +362,10 @@ async def test_completed_reads_can_poll_but_decisions_cannot_replay(tmp_path):
         return {"status": "approved"}
 
     controller.quiescence = quiet
-    controller.pool = {"attempt_order": [{"trial_id": "t0", "child_id": "a"}]}
+    controller.pool = {
+        "schema_version": "task13-e-timing-pool-registration-v1",
+        "attempt_order": [{"trial_id": "t0", "child_id": "a"}],
+    }
     controller.hosts = {
         "a": SimpleNamespace(
             _requests=[SimpleNamespace(trial_id="t0", ordinal=1)],
@@ -409,6 +418,7 @@ def test_proposal_masks_only_runtime_authority_and_rebuilds_native_hashes(tmp_pa
 
     timing = registration(tmp_path)
     pool = {
+        "schema_version": "task13-e-timing-pool-registration-v1",
         "children": [{"child_id": "a", "registration": timing}],
         "limits": {"logical": 6},
     }
@@ -503,6 +513,7 @@ def test_receipt_journal_verifier_rejects_hashvalid_double_claim(tmp_path):
     from evals.timing_pool_controller import PoolJournal, validate_pool_journal_evidence
 
     pool = {
+        "schema_version": "task13-e-timing-pool-registration-v1",
         "attempt_order": [{"trial_id": f"t{i}"} for i in range(6)],
         "imported_observations": [{"trial_id": "C10-1"}],
     }
@@ -536,6 +547,7 @@ async def test_fresh_quiescence_checks_only_owned_container_and_excludes_keys(
     from scripts import task13_timing_pool as module
 
     controller = object.__new__(module.NativePoolController)
+    controller.pool = {"schema_version": "task13-e-timing-pool-registration-v1"}
     directory = tmp_path / "request"
     directory.mkdir()
     nonce = "a" * 32
@@ -585,6 +597,7 @@ def test_receipt_journal_validates_complete_prefix_and_stops_after_target(tmp_pa
     from evals.timing_pool_controller import PoolJournal, validate_pool_journal_evidence
 
     pool = {
+        "schema_version": "task13-e-timing-pool-registration-v1",
         "attempt_order": [{"trial_id": f"t{i}"} for i in range(6)],
         "imported_observations": [{"trial_id": "C10-1"}],
     }
@@ -652,6 +665,7 @@ def test_pool_phase_lease_requires_live_owned_lock_and_exact_child_phase(tmp_pat
     from evals.timing_pool_controller import PoolPhaseLease, require_pool_phase_lease
 
     pool = {
+        "schema_version": "task13-e-timing-pool-registration-v1",
         "execution_journal_path": str(tmp_path / "pool-journal.jsonl"),
         "children": [
             {"child_id": "a", "registration": {"trials": [{"trial_id": "t0"}]}}
@@ -850,6 +864,7 @@ async def test_real_native_plan_runs_only_under_wrapper_parent_lease(
     host = fixture.controller
     trial = host._requests[0].trial_id
     pool = {
+        "schema_version": "task13-e-timing-pool-registration-v1",
         "execution_journal_path": str(tmp_path / "pool-journal.jsonl"),
         "children": [{"child_id": "a", "registration": host._timing}],
         "attempt_order": [{"trial_id": trial, "child_id": "a"}]
@@ -920,7 +935,10 @@ def test_each_plan_requires_fresh_bound_zero_provider_admission(tmp_path, fault)
     timing = registration(tmp_path)
     request = planning_requests(timing["planning_registration"])[0]
     now = datetime(2026, 11, 1, tzinfo=timezone.utc)
-    pool = {"free_admission": {"gate_root": str(tmp_path)}}
+    pool = {
+        "schema_version": "task13-e-timing-pool-registration-v1",
+        "free_admission": {"gate_root": str(tmp_path)},
+    }
     host = SimpleNamespace(_manifest_pin={"path": "host", "sha256": "a" * 64})
     gate = {
         "schema_version": "task13-host-readonly-paid-dispatch-gate-v1",
@@ -1110,6 +1128,7 @@ async def test_readonly_expiry_auditor_then_next_native_slot_without_replaying(
     host = fixture.controller
     actual = [r.trial_id for r in host._requests]
     pool = {
+        "schema_version": "task13-e-timing-pool-registration-v1",
         "execution_journal_path": str(tmp_path / "pool-journal.jsonl"),
         "children": [{"child_id": "a", "registration": host._timing}],
         "attempt_order": [
@@ -1413,6 +1432,7 @@ def test_guard_review_unlocks_only_same_fresh_closed_prefix(tmp_path):
 
     now = datetime(2026, 11, 1, tzinfo=timezone.utc)
     pool = {
+        "schema_version": "task13-e-timing-pool-registration-v1",
         "attempt_order": [{"trial_id": f"t{i}"} for i in range(6)],
         "imported_observations": [{"trial_id": "old"}],
     }
@@ -1521,6 +1541,7 @@ def native_guard_review_evidence():
     from evals.timing_pool_evidence import guard_observations
 
     pool = {
+        "schema_version": "task13-e-timing-pool-registration-v1",
         "imported_observations": [
             {
                 "evidence_root": str(C10_EVIDENCE_ROOT),

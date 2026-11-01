@@ -164,6 +164,13 @@ def _validation_source_hashes():
 
 def _validate_recovery_validation_sources(manifest, blobs):
     """Authenticate original bytes before the narrow, proved AST exceptions."""
+    from evals.adapters.planning_recovery import (
+        validate_identity_contract_equivalence,
+        validate_registration_validator_delegation,
+        validate_response_transport_equivalence,
+        validate_timing_registry_equivalence,
+    )
+
     current = _validation_source_hashes()
     old = manifest.validation_source_sha256
     contract = blobs.get("original_source:evals/adapters/e_planning_contracts.py")
@@ -171,6 +178,9 @@ def _validate_recovery_validation_sources(manifest, blobs):
     transport = blobs.get("original_source:evals/adapters/model_client.py")
     registry = blobs.get("original_source:evals/adapters/source_epochs.py")
     registry_changed = old.get("source_epoch") != current.get("source_epoch")
+    registration_delegated = (
+        registry_changed or old.get("model_identity") != current.get("model_identity")
+    ) and validate_registration_validator_delegation(manifest, blobs)
     if (
         old.keys() != current.keys()
         or contract is None
@@ -191,20 +201,15 @@ def _validate_recovery_validation_sources(manifest, blobs):
             for name, digest in current.items()
             if name
             not in {"model_identity_contract", "model_transport", "source_epoch"}
+            and not (name == "model_identity" and registration_delegated)
         )
     ):
         raise ValueError(
             "recovery analysis validator semantics or original metadata drift"
         )
-    from evals.adapters.planning_recovery import (
-        validate_identity_contract_equivalence,
-        validate_response_transport_equivalence,
-        validate_timing_registry_equivalence,
-    )
-
     validate_identity_contract_equivalence(contract)
     validate_response_transport_equivalence(transport)
-    if registry_changed:
+    if registry_changed and not registration_delegated:
         validate_timing_registry_equivalence(registry)
 
 

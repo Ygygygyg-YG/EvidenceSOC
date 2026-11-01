@@ -66,8 +66,9 @@ def compile_fixture_documents(
     """Publish test metadata only; a caller may rebase inputs into its copied DB.
 
     ``data_override`` is a complete copied/rebased original_templates() result.
-    The source export uses the real original commit/117 map; changed control files
-    are independently frozen in the current full host inventory.
+    The source export uses the real original commit/117 map. Native legacy v1
+    integration runs in the full compatible frozen host tree, covering every
+    evaluated implementation and test file in that tree.
     """
     data = deepcopy(
         data_override if data_override is not None else original_templates()

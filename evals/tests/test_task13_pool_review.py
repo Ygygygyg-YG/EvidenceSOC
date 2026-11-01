@@ -50,6 +50,7 @@ def test_export_meets_explicit_non_synthetic_receipt_contract(monkeypatch):
         }
     )
     controller.pool = {
+        "schema_version": "task13-e-timing-pool-registration-v1",
         "identity": {},
         "formal_binding": {},
         "imported_observations": [{"trial_id": "old"}],

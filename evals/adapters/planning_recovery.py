@@ -105,6 +105,57 @@ def validate_response_transport_equivalence(original_bytes):
         raise ValueError("original analysis transport semantics differ")
 
 
+def _reviewed_registration_validator_delegations():
+    """Independent audit may pin exact registration-control transformations here.
+
+    Records bind manifest canonical SHA, original source/model raw SHAs, the
+    2f360b77 source/model raw SHAs, and current source/model raw SHAs, in order.
+    This registry supplies no registration, approval or execution authority.
+    """
+    return frozenset(
+        {
+            (
+                "5c0077552276f4d1a8e064e7bfa3351fe9ee82c3d3c83ba0e878ec2eb705163c",
+                "79a558025fd167dcaf997284af0371ae0d92d626a97a42c76a2dc77da7596178",
+                "f83a791001de4fcefe3cf278b66ef535bfe0f4f7445a1d638bf54fd89e63bcc1",
+                "7c52c2e84095082a915d1735f728f25dabe9496a7f579bf075cfef53bd108390",
+                "f83a791001de4fcefe3cf278b66ef535bfe0f4f7445a1d638bf54fd89e63bcc1",
+                "5eda0d325dd7dea386aeb37324066ec5338c21184ef9c8744316a9848f3b4dc9",
+                "d64473127a31f8392dfb72e7a14ac1c8f5189395ee3a578f04a7b29436b21114",
+            )
+        }
+    )
+
+
+def validate_registration_validator_delegation(manifest, blobs):
+    """Recognize only an independently reviewed exact-byte registration chain."""
+    from hashlib import sha256
+
+    reviewed = _reviewed_registration_validator_delegations()
+    if not reviewed:
+        return False
+    source = blobs.get("original_source:evals/adapters/source_epochs.py")
+    model = blobs.get("original_source:evals/adapters/model_identities.py")
+    if source is None or model is None:
+        return False
+    source_sha, model_sha = sha256(source).hexdigest(), sha256(model).hexdigest()
+    old = manifest.validation_source_sha256
+    if old.get("source_epoch") != source_sha or old.get("model_identity") != model_sha:
+        return False
+    root = Path(__file__).resolve().parent
+    candidate = (
+        canonical_hash(manifest),
+        source_sha,
+        model_sha,
+        # Exact read-only, previously verified 2f360b77 baseline; never execute it.
+        "7c52c2e84095082a915d1735f728f25dabe9496a7f579bf075cfef53bd108390",
+        "f83a791001de4fcefe3cf278b66ef535bfe0f4f7445a1d638bf54fd89e63bcc1",
+        sha256((root / "source_epochs.py").read_bytes()).hexdigest(),
+        sha256((root / "model_identities.py").read_bytes()).hexdigest(),
+    )
+    return candidate in reviewed
+
+
 def validate_timing_registry_equivalence(original_bytes):
     """Prove the sole v1-to-v1/v2 timing dispatch addition, without running code."""
     current = (Path(__file__).resolve().parent / "source_epochs.py").read_bytes()
