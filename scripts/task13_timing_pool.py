@@ -617,6 +617,54 @@ class NativePoolController:
         )
         return self.journal.status()
 
+    async def _first_guard_workers_absent(self, host, request):
+        environment = {
+            k: os.environ[k]
+            for k in (
+                "PATH",
+                "SYSTEMROOT",
+                "WINDIR",
+                "TEMP",
+                "TMP",
+                "USERPROFILE",
+                "DOCKER_HOST",
+                "DOCKER_CONTEXT",
+            )
+            if k in os.environ
+        }
+        workers = []
+        for phase in ("plan", "decision"):
+            terminal = host._terminal(request, phase)
+            if not terminal or terminal["status"] not in {
+                "awaiting_approval",
+                "approved",
+            }:
+                raise PoolStopped("guard worker terminal is unknown")
+            pin = terminal["runtime_result"]
+            value = _decode(_read_pin(pin))
+            container = value["isolation_evidence"]["container"]["container_id"]
+            if re.fullmatch("[0-9a-f]{64}", container) is None:
+                raise PoolStopped("guard owned container identity invalid")
+            record, stdout = await _docker(
+                [
+                    "container",
+                    "ls",
+                    "--all",
+                    "--no-trunc",
+                    "--filter",
+                    "id=" + container,
+                    "--format",
+                    "{{.ID}}",
+                ],
+                environment,
+            )
+            if record.get("returncode") != 0 or stdout is None or stdout.strip():
+                raise PoolStopped("guard owned container absence is unknown")
+            workers.append(
+                {"phase": phase, "runtime_result": pin, "inspection": record}
+            )
+        return {"inspected_at": host._now().isoformat(), "workers": workers}
+
     async def run(
         self, phase, *, packet_sha256=None, chat_record=None, free_admission_pin=None
     ):
@@ -777,7 +825,49 @@ class NativePoolController:
             )
             after = self.budget()
             fresh = await self.quiescence()
-            if terminal["status"] == "completed":
+            guard_evidence = None
+            if result.get("status") == "ttl_guard_rejected":
+                try:
+                    from evals.timing_pool_controller import (
+                        validate_first_dispatch_guard,
+                    )
+
+                    request = host._requests[ordinal - 1]
+                    decided = host._terminal(request, "decision")
+                    actual = _decode(_read_pin(decided["runtime_result"]))
+                    retained, resources = host._retained(request)
+                    source = host._source(
+                        request, actual["source"]["state"], retained, resources
+                    )
+                    guard_proof = _decode(_read_pin(result["guard_receipt"]))
+                    validate_first_dispatch_guard(
+                        guard_proof, source, state["observed_max_seconds"]
+                    )
+                    if (
+                        guard_proof["native_snapshot"] != native
+                        or guard_proof["approval_receipt"] != actual["approval_receipt"]
+                    ):
+                        raise PoolStopped(
+                            "first dispatch guard original evidence differs"
+                        )
+                    host_workers = await self._first_guard_workers_absent(host, request)
+                    fresh = await self.quiescence()
+                    if self.budget() != after:
+                        raise PoolStopped("guard cost changed during settlement")
+                    guard_evidence = {
+                        "host_workers": host_workers,
+                        "subtype": "first_dispatch_ttl_guard",
+                        "guard_receipt": result["guard_receipt"],
+                        "native": native,
+                        "quiescence": fresh,
+                    }
+                    observation = native
+                    outcome = "ttl_infrastructure_failure"
+                    maximum = 0
+                except BaseException:
+                    self.journal.stop("unknown_native_execution")
+                    raise
+            elif terminal["status"] == "completed":
                 observation = read_native_observation(
                     str(host._root / "timing"), attempt["trial_id"]
                 )
@@ -813,9 +903,9 @@ class NativePoolController:
                 quiescent=True,
                 observed_max_seconds=maximum,
                 evidence_sha256=canonical_hash(
-                    {"native": observation, "quiescence": fresh}
+                    guard_evidence or {"native": observation, "quiescence": fresh}
                 ),
-                evidence={"native": observation, "quiescence": fresh},
+                evidence=guard_evidence or {"native": observation, "quiescence": fresh},
             )
         elif result.get("status") in {"blocked", "rejected", "unknown"}:
             self.journal.stop("native_" + result["status"])

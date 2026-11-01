@@ -43,6 +43,16 @@ def validate_attempt_inventory(
             if status != "completed":
                 raise PermissionError("failed native trial cannot earn timing credit")
             qualified.append(trial_id)
+        elif (
+            settlement.get("evidence", {}).get("subtype") == "first_dispatch_ttl_guard"
+        ):
+            if settlement["outcome"] != "ttl_infrastructure_failure" or status not in {
+                "not_started",
+                "dispatched",
+            }:
+                raise PermissionError(
+                    "host guard cannot relabel a native terminal or unknown outcome"
+                )
         elif settlement.get("evidence", {}).get("subtype") == "pre_timing_expired":
             from evals.timing_pool_controller import validate_pre_timing_expiry_audit
 
@@ -334,6 +344,11 @@ def validate_controller_evidence(evidence, pool, original, *, require_complete=T
         for trial_id, p in settlements.items()
         if p.get("evidence", {}).get("subtype") == "pre_timing_expired"
     }
+    guarded = {
+        trial_id
+        for trial_id, p in settlements.items()
+        if p.get("evidence", {}).get("subtype") == "first_dispatch_ttl_guard"
+    }
     resources, seen = set(), set()
     old = _view(pool["imported_observations"][0]["evidence_root"])
     _branches(old, original, resources, seen)
@@ -470,6 +485,10 @@ def validate_controller_evidence(evidence, pool, original, *, require_complete=T
             _archive_context({}),
             approved_before=before,
         )
+        if trial_id in guarded:
+            validate_first_dispatch_guard_evidence(
+                context, request, view, source, settlements[trial_id], prior_maximum
+            )
         validate_dispatch_boundary(
             view,
             trial_id,
@@ -551,7 +570,9 @@ def validate_controller_evidence(evidence, pool, original, *, require_complete=T
                 "registration_sha256"
             ] != canonical_hash(views[by_attempt[trial_id]["child_id"]].registration):
                 raise PermissionError("qualified settlement native identity differs")
-        elif trial_id not in expired and native != state_row:
+        elif (
+            trial_id not in expired and trial_id not in guarded and native != state_row
+        ):
             raise PermissionError(
                 "TTL settlement does not retain exact native terminal"
             )
@@ -640,7 +661,19 @@ def validate_controller_evidence(evidence, pool, original, *, require_complete=T
                 )
         elif event["kind"] == "phase_finish" and p["phase"] == "trial":
             view = views[by_attempt[p["trial_id"]]["child_id"]]
-            if not _native_progress_matches(view, p["trial_id"], p["result_sha256"]):
+            if p["trial_id"] in guarded:
+                expected = {
+                    "status": "ttl_guard_rejected",
+                    "trial_id": p["trial_id"],
+                    "guard_receipt": settlements[p["trial_id"]]["evidence"][
+                        "guard_receipt"
+                    ],
+                }
+                if p["result_sha256"] != canonical_hash(expected):
+                    raise PermissionError(
+                        "host guard phase differs from exact typed receipt"
+                    )
+            elif not _native_progress_matches(view, p["trial_id"], p["result_sha256"]):
                 raise PermissionError(
                     "controller trial finish differs from original native journal prefix"
                 )
@@ -1077,3 +1110,94 @@ def _completed_native_prefix(view, trial_id, expected_head):
             )
         )
     return False
+
+
+def validate_first_dispatch_guard_evidence(
+    context, request, view, source, settlement, prior_maximum
+):
+    from evals.timing_pool import _plain, _time
+    from evals.timing_pool_controller import validate_first_dispatch_guard
+
+    evidence = settlement["evidence"]
+    pin = evidence["guard_receipt"]
+    proof = _pin(pin)
+    if (
+        _plain(pin["path"])
+        != context["reader"]._root
+        / "artifacts"
+        / "first-dispatch-guard"
+        / pin["sha256"]
+    ):
+        raise PermissionError("first dispatch guard outside original host artifacts")
+    validate_first_dispatch_guard(proof, source, prior_maximum)
+    if (
+        proof["trial_id"] != request.trial_id
+        or proof["registration_sha256"] != canonical_hash(view.registration)
+        or evidence["native"] != proof["native_snapshot"]
+    ):
+        raise PermissionError("first dispatch guard native identity differs")
+    prefixes = dict(_native_progresses(view))
+    start = prefixes.get(proof["native_start_head_sha256"])
+    end = prefixes.get(proof["native_head_sha256"])
+    if start is None or end != proof["native_snapshot"]:
+        raise PermissionError("first dispatch guard is not an immutable native prefix")
+    start_trial = next(t for t in start["trials"] if t["trial_id"] == request.trial_id)
+    end_trial = next(t for t in end["trials"] if t["trial_id"] == request.trial_id)
+    if (
+        start_trial["status"] != "not_started"
+        or start_trial.get("binding")
+        or view.trials[request.trial_id] != end_trial
+        or any(
+            r["status"] != "not_started"
+            for r in view.records.values()
+            if r["trial_id"] == request.trial_id
+        )
+    ):
+        raise PermissionError(
+            "first dispatch guard reused or obscured native execution"
+        )
+    from hashlib import sha256
+
+    workers = evidence["host_workers"]
+    if [r["phase"] for r in workers["workers"]] != ["plan", "decision"] or not _time(
+        proof["sampled_at"]
+    ) <= _time(workers["inspected_at"]) <= _time(
+        evidence["quiescence"]["inspected_at"]
+    ):
+        raise PermissionError(
+            "guard resources lack fresh complete owned worker inspection"
+        )
+    for row in workers["workers"]:
+        terminal = context["reader"]._terminal(request, row["phase"])
+        if row["runtime_result"] != terminal["runtime_result"]:
+            raise PermissionError("guard inspected different original worker")
+        value = _pin(row["runtime_result"])
+        container = value["isolation_evidence"]["container"]["container_id"]
+        expected = {
+            "argv": [
+                "docker",
+                "container",
+                "ls",
+                "--all",
+                "--no-trunc",
+                "--filter",
+                "id=" + container,
+                "--format",
+                "{{.ID}}",
+            ],
+            "returncode": 0,
+            "stdout_sha256": sha256(b"").hexdigest(),
+            "stderr_sha256": sha256(b"").hexdigest(),
+        }
+        if row["inspection"] != expected:
+            raise PermissionError(
+                "guard owned worker absence is not independently inspected"
+            )
+    decided = context["reader"]._terminal(request, "decision")
+    actual = _pin(decided["runtime_result"])
+    if proof["approval_receipt"] != actual["approval_receipt"] or not _time(
+        source["state"]["approval"]["decided_at"]
+    ) <= _time(proof["sampled_at"]) <= _time(evidence["quiescence"]["inspected_at"]):
+        raise PermissionError(
+            "first dispatch guard actual approval or sample time differs"
+        )

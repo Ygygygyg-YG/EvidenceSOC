@@ -294,6 +294,64 @@ class ETrialController:
         validate_pre_timing_expiry_audit(proof["evidence"]["audit"])
         return True
 
+    def _pool_previous_dispatch_guard(self, request):
+        if "pool_authority" not in self._inputs or request.ordinal <= 1:
+            return False
+        self._require_pool_phase(request, "plan")
+        from evals.timing_pool_controller import (
+            PoolJournal,
+            validate_first_dispatch_guard,
+        )
+
+        pool = self._inputs["pool_authority"]
+        previous = self._requests[request.ordinal - 2]
+        journal = PoolJournal(
+            pool["execution_journal_path"], pool_sha256=canonical_hash(pool)
+        )
+        matches = [
+            e["payload"]
+            for e in journal._events()
+            if e["kind"] == "settle"
+            and e["payload"]["trial_id"] == previous.trial_id
+            and e["payload"].get("evidence", {}).get("subtype")
+            == "first_dispatch_ttl_guard"
+        ]
+        if len(matches) != 1:
+            return False
+        settled = matches[0]
+        evidence = settled["evidence"]
+        if (
+            settled["outcome"] != "ttl_infrastructure_failure"
+            or canonical_hash(evidence) != settled["evidence_sha256"]
+        ):
+            raise PermissionError("prior guard settlement differs")
+        proof = _decode(_read_pin(evidence["guard_receipt"]))
+        actual = _decode(
+            _read_pin(self._terminal(previous, "decision")["runtime_result"])
+        )
+        retained, resources = self._retained(previous)
+        source = self._source(previous, actual["source"]["state"], retained, resources)
+        validate_first_dispatch_guard(proof, source, proof["observed_max_seconds"])
+        campaign = self._campaign()
+        current = campaign.snapshot()
+        old = next(
+            t
+            for t in proof["native_snapshot"]["trials"]
+            if t["trial_id"] == previous.trial_id
+        )
+        now = next(t for t in current["trials"] if t["trial_id"] == previous.trial_id)
+        if (
+            now != old
+            or proof["approval_receipt"] != actual["approval_receipt"]
+            or any(
+                r["status"] != "not_started"
+                for r in current["records"]
+                if r["trial_id"] == previous.trial_id
+            )
+        ):
+            raise PermissionError("prior first dispatch guard changed")
+        return True
+
     def _slot(self, request):
         return self._root / "slots" / request.planning_slot_id
 
@@ -892,15 +950,20 @@ class ETrialController:
                 else:
                     campaign = self._campaign()
                     previous = campaign.snapshot()["trials"][ordinal - 2]
-                    if previous["status"] not in {
-                        "completed",
-                        "failed",
-                        "expired",
-                        "rejected",
-                        "not_applicable",
-                    } and (
-                        previous["status"] != "not_started"
-                        or not self._pool_previous_expiry(request)
+                    if (
+                        previous["status"]
+                        not in {
+                            "completed",
+                            "failed",
+                            "expired",
+                            "rejected",
+                            "not_applicable",
+                        }
+                        and not self._pool_previous_dispatch_guard(request)
+                        and (
+                            previous["status"] != "not_started"
+                            or not self._pool_previous_expiry(request)
+                        )
                     ):
                         raise PermissionError("preceding trial is pending or unknown")
             started = {
@@ -1351,9 +1414,24 @@ class ETrialController:
                     self._options("verification", verification=True),
                 )
 
-            return await self._campaign(
-                approval_verifier=verify, now=admission_clock
-            ).run_trial(request.trial_id, source, run_worker=run_worker)
+            campaign = self._campaign(approval_verifier=verify, now=admission_clock)
+            if admission_clock is None:
+                return await campaign.run_trial(
+                    request.trial_id, source, run_worker=run_worker
+                )
+            from evals.timing_pool_controller import run_first_dispatch_guarded
+
+            result = await run_first_dispatch_guarded(
+                campaign, request.trial_id, source, run_worker, admission_clock
+            )
+            if result.get("status") == "ttl_guard_rejected":
+                pin = self._save("first-dispatch-guard", _bytes(result["guard"]))
+                return {
+                    "status": "ttl_guard_rejected",
+                    "trial_id": request.trial_id,
+                    "guard_receipt": pin,
+                }
+            return result
 
     def status(self):
         """Read-only status. Started or worker-claimed ambiguity remains unknown."""

@@ -592,6 +592,9 @@ class FirstDispatchClock:
         self.now = now
         self.expires_at = expires_at
         self.required_remaining = shared_remaining_threshold(shared_max)
+        self.shared_max = shared_max
+        self.guard_enabled = True
+        self.rejection = None
         self.admitted = False
         self.last = None
 
@@ -602,9 +605,14 @@ class FirstDispatchClock:
         if (
             not self.admitted
             and self.expires_at is not None
-            and (self.expires_at - value).total_seconds() <= self.required_remaining
+            and self.guard_enabled
+            and self.shared_max > 800
+            and 1500
+            < (self.expires_at - value).total_seconds()
+            <= self.required_remaining
         ):
-            raise PoolStopped("shared M first dispatch remaining TTL insufficient")
+            self.rejection = FirstDispatchTTLGuard(value)
+            raise self.rejection
         self.last = value
         return value
 
@@ -872,3 +880,111 @@ def require_current_guard_review(events, pool_digest, now, maximum):
     return validate_guard_review(
         events[-1]["payload"], pool_digest, events[:-1], now, maximum
     )
+
+
+class FirstDispatchTTLGuard(PoolStopped):
+    """Only the live clock may issue this extra shared-M rejection."""
+
+    def __init__(self, sample):
+        super().__init__("shared M first dispatch remaining TTL insufficient")
+        self.sample = sample
+
+
+def validate_first_dispatch_guard(proof, source, maximum):
+    from evals.contracts import canonical_hash
+
+    threshold = shared_remaining_threshold(maximum)
+    sampled = datetime.fromisoformat(proof["sampled_at"])
+    expires = datetime.fromisoformat(source["state"]["response_plan"]["expires_at"])
+    remaining = (expires - sampled).total_seconds()
+    if (
+        proof["schema_version"] != "task13-pool-first-dispatch-guard-v1"
+        or proof["source_sha256"] != canonical_hash(source)
+        or proof["observed_max_seconds"] != maximum
+        or proof["expires_at"] != expires.isoformat()
+        or proof["required_remaining_seconds"] != threshold
+        or proof["remaining_seconds"] != remaining
+        or sampled >= DEADLINE
+        or maximum <= 800
+        or not 1500 < remaining <= threshold
+        or not proof["approval_receipt"]
+    ):
+        raise PoolStopped("first dispatch guard is not an exact live shared-M failure")
+    snapshot = proof["native_snapshot"]
+    trials = [t for t in snapshot["trials"] if t["trial_id"] == proof["trial_id"]]
+    branches = [r for r in snapshot["records"] if r["trial_id"] == proof["trial_id"]]
+    if (
+        len(trials) != 1
+        or len(branches) != 6
+        or trials[0]["status"] not in {"not_started", "dispatched"}
+        or trials[0].get("started_at")
+        or trials[0].get("started_monotonic_ns")
+        or any(
+            r["status"] != "not_started"
+            or any(
+                r.get(k) is not None
+                for k in (
+                    "dispatched_at",
+                    "dispatched_monotonic_ns",
+                    "input_sha256",
+                    "output_sha256",
+                    "host_receipt_sha256",
+                )
+            )
+            for r in branches
+        )
+    ):
+        raise PoolStopped("first dispatch guard has actual or unknown branch execution")
+    _digest(proof["native_start_head_sha256"])
+    _digest(proof["native_head_sha256"])
+
+
+async def run_first_dispatch_guarded(campaign, trial_id, source, run_worker, clock):
+    """Classify only this invocation's typed guard, without writing native state."""
+    from evals.contracts import canonical_hash
+
+    original_verifier = campaign.approval_verifier
+    if original_verifier is None:
+        raise PoolStopped("actual approval verifier required for shared-M guard")
+    start_head = canonical_hash(campaign.events[-1])
+    clock.guard_enabled = False
+    approval = None
+
+    async def verify(current):
+        nonlocal approval
+        approval = await original_verifier(current)
+        if not approval:
+            raise PoolStopped("missing actual approval receipt")
+        clock.guard_enabled = True
+        return approval
+
+    async def worker(request):
+        clock.admit()
+        return await run_worker(request)
+
+    try:
+        return await campaign.run_trial(
+            trial_id, source, run_worker=worker, approval_verifier=verify
+        )
+    except FirstDispatchTTLGuard as error:
+        if error is not clock.rejection or clock.admitted or approval is None:
+            raise
+        # Native writer lock has exited. Snapshot validates original immutable files.
+        snapshot = campaign.snapshot()
+        proof = {
+            "schema_version": "task13-pool-first-dispatch-guard-v1",
+            "trial_id": trial_id,
+            "registration_sha256": canonical_hash(campaign.registration),
+            "source_sha256": canonical_hash(source),
+            "approval_receipt": approval,
+            "sampled_at": error.sample.isoformat(),
+            "expires_at": clock.expires_at.isoformat(),
+            "observed_max_seconds": clock.shared_max,
+            "required_remaining_seconds": clock.required_remaining,
+            "remaining_seconds": (clock.expires_at - error.sample).total_seconds(),
+            "native_start_head_sha256": start_head,
+            "native_head_sha256": canonical_hash(campaign.events[-1]),
+            "native_snapshot": snapshot,
+        }
+        validate_first_dispatch_guard(proof, source, clock.shared_max)
+        return {"status": "ttl_guard_rejected", "guard": proof}
