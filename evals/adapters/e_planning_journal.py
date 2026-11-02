@@ -169,6 +169,55 @@ class ManualRecoveryGrant(Contract):
         return self
 
 
+class StartupRecoveryGrant(ManualRecoveryGrant):
+    """Closed recovery after the predecessor's conservatively consumed startup."""
+
+    schema_version: Literal["task13-manual-startup-recovery-grant-v1"]
+    consumed_logical: Literal[9]
+    consumed_physical: Literal[27]
+    remaining_logical: Literal[4]
+    remaining_physical: Literal[12]
+
+    @model_validator(mode="after")
+    def exact_remaining_grant(self) -> Self:
+        if (
+            [len(child.authorized_request_sha256s) for child in self.children] != [3, 1]
+            or len({child.registration_sha256 for child in self.children}) != 2
+            or len({child.journal_path for child in self.children}) != 2
+            or len(
+                {digest for child in self.children for digest in child.request_sha256s}
+            )
+            != 6
+            or any(
+                getattr(self, key) == "0" * 64
+                for key in (
+                    "recovery_plan_sha256",
+                    "quarantine_record_sha256",
+                    "predecessor_pool_registration_sha256",
+                    "predecessor_pool_journal_sha256",
+                    "predecessor_pool_head_sha256",
+                    "scope_packet_sha256",
+                    "decision_record_sha256",
+                )
+            )
+        ):
+            raise ValueError(
+                "startup recovery requires exact distinct three-plus-one grants and pins"
+            )
+        return self
+
+
+def parse_recovery_grant(value) -> ManualRecoveryGrant | StartupRecoveryGrant:
+    """Dispatch only the two explicitly supported, independently closed grants."""
+    if not isinstance(value, dict):
+        raise ValueError("an explicit versioned recovery grant is required")  # noqa: TRY004 - invalid external grant.
+    if value.get("schema_version") == "task13-manual-recovery-grant-v1":
+        return ManualRecoveryGrant.model_validate(value)
+    if value.get("schema_version") == "task13-manual-startup-recovery-grant-v1":
+        return StartupRecoveryGrant.model_validate(value)
+    raise ValueError("unsupported recovery grant version")
+
+
 class LimitedEPlanningAuthority(Contract):
     """Explicit subset of a three-slot native registration under one migration."""
 
@@ -225,7 +274,16 @@ class LimitedEPlanningAuthority(Contract):
         return self
 
 
-def parse_authority(value) -> EPlanningAuthority | LimitedEPlanningAuthority:
+class StartupLimitedEPlanningAuthority(LimitedEPlanningAuthority):
+    """Same native three-slot partition, bound only to the closed startup grant."""
+
+    schema_version: Literal["task13-e-planning-authority-v3"]
+    migration_grant: StartupRecoveryGrant
+
+
+def parse_authority(
+    value,
+) -> EPlanningAuthority | LimitedEPlanningAuthority | StartupLimitedEPlanningAuthority:
     """Parse an explicit version without changing legacy canonical values."""
     if not isinstance(value, dict):
         raise ValueError("an explicit versioned planning authority is required")  # noqa: TRY004 - invalid external authority.
@@ -233,12 +291,15 @@ def parse_authority(value) -> EPlanningAuthority | LimitedEPlanningAuthority:
         return EPlanningAuthority.model_validate(value)
     if value.get("schema_version") == "task13-e-planning-authority-v2":
         return LimitedEPlanningAuthority.model_validate(value)
+    if value.get("schema_version") == "task13-e-planning-authority-v3":
+        return StartupLimitedEPlanningAuthority.model_validate(value)
     raise ValueError("unsupported planning authority version")
 
 
 def _require_authorized_request(authority, request):
     if (
-        authority["schema_version"] == "task13-e-planning-authority-v2"
+        authority["schema_version"]
+        in {"task13-e-planning-authority-v2", "task13-e-planning-authority-v3"}
         and canonical_hash(request) not in authority["authorized_request_sha256s"]
     ):
         raise PermissionError("planning request is not authorized by its limited grant")

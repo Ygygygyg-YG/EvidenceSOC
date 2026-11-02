@@ -32,7 +32,11 @@ def validate_attempt_inventory(
     policy=None,
     denied_trial_ids=(),
 ):
-    from evals.timing_pool import REGISTRATION_SCHEMA, pool_policy
+    from evals.timing_pool import (
+        RECOVERY_REGISTRATION_SCHEMAS,
+        REGISTRATION_SCHEMA,
+        pool_policy,
+    )
 
     selected = (
         pool_policy(REGISTRATION_SCHEMA)
@@ -48,13 +52,14 @@ def validate_attempt_inventory(
         or [s["trial_id"] for s in settlements] != begun
     ):
         raise PermissionError("all begun attempts must form one settled frozen prefix")
-    if limit == 5:
+    if selected.registration_schema in RECOVERY_REGISTRATION_SCHEMAS:
         if (
-            len(denied_trial_ids) != 1
+            len(denied_trial_ids) != 6 - limit
+            or len(set(denied_trial_ids)) != 6 - limit
             or set(denied_trial_ids) & set(order)
             or set(states) != set(order) | set(denied_trial_ids)
         ):
-            raise PermissionError("exact excluded sixth native slot required")
+            raise PermissionError("exact excluded native slots required")
         for trial in denied_trial_ids:
             row = states[trial]
             if (
@@ -258,7 +263,7 @@ def _quiescence(proof, contexts):
                 "fresh recovery guard does not establish container absence"
             )
     from evals.timing_pool import (
-        RECOVERY_REGISTRATION_SCHEMA,
+        RECOVERY_REGISTRATION_SCHEMAS,
         validate_recovery_quarantine,
     )
 
@@ -267,7 +272,7 @@ def _quiescence(proof, contexts):
         for c in contexts.values()
     ]
     recovery = [
-        p for p in pools if p.get("schema_version") == RECOVERY_REGISTRATION_SCHEMA
+        p for p in pools if p.get("schema_version") in RECOVERY_REGISTRATION_SCHEMAS
     ]
     if recovery:
         pool = recovery[0]
@@ -312,6 +317,10 @@ def validate_controller_evidence(evidence, pool, original, *, require_complete=T
     from evals.adapters.verification_worker import VerificationWorkerRequest
     from evals.e_planning import planning_requests
     from evals.timing_pool import (
+        RECOVERY_REGISTRATION_SCHEMA,
+        RECOVERY_REGISTRATION_SCHEMAS,
+        REGISTRATION_SCHEMA,
+        STARTUP_RECOVERY_REGISTRATION_SCHEMA,
         _branches,
         _json,
         _plain,
@@ -328,11 +337,11 @@ def validate_controller_evidence(evidence, pool, original, *, require_complete=T
 
     selected = pool_policy(pool)
     manifest = _pin(evidence["pool_host_manifest"])
-    host_schema = (
-        "task13-e-timing-pool-host-v2"
-        if selected.future_logical_limit == 5
-        else "task13-e-timing-pool-host-v1"
-    )
+    host_schema = {
+        REGISTRATION_SCHEMA: "task13-e-timing-pool-host-v1",
+        RECOVERY_REGISTRATION_SCHEMA: "task13-e-timing-pool-host-v2",
+        STARTUP_RECOVERY_REGISTRATION_SCHEMA: "task13-e-timing-pool-host-v3",
+    }[selected.registration_schema]
     if (
         manifest["schema_version"] != host_schema
         or _pin(manifest["pool_registration"]) != pool
@@ -345,7 +354,7 @@ def validate_controller_evidence(evidence, pool, original, *, require_complete=T
         raise PermissionError("actual pool host manifest differs")
     _plain(evidence["pool_journal"]["path"])
     if (
-        selected.future_logical_limit == 5
+        selected.registration_schema in RECOVERY_REGISTRATION_SCHEMAS
         and manifest["migration_marker"] != pool["quarantine_record"]
     ):
         raise PermissionError("pool host quarantine raw reference differs")

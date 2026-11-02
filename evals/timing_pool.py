@@ -27,6 +27,11 @@ REGISTRATION_SCHEMA = "task13-e-timing-pool-registration-v1"
 RECEIPT_SCHEMA = "task13-e-timing-pool-receipt-v1"
 RECOVERY_REGISTRATION_SCHEMA = "task13-e-timing-pool-registration-v2"
 RECOVERY_RECEIPT_SCHEMA = "task13-e-timing-pool-receipt-v2"
+STARTUP_RECOVERY_REGISTRATION_SCHEMA = "task13-e-timing-pool-registration-v3"
+STARTUP_RECOVERY_RECEIPT_SCHEMA = "task13-e-timing-pool-receipt-v3"
+RECOVERY_REGISTRATION_SCHEMAS = frozenset(
+    {RECOVERY_REGISTRATION_SCHEMA, STARTUP_RECOVERY_REGISTRATION_SCHEMA}
+)
 
 
 @dataclass(frozen=True)
@@ -52,14 +57,30 @@ def pool_policy(pool_or_schema):
         return PoolPolicy(
             RECOVERY_REGISTRATION_SCHEMA, RECOVERY_RECEIPT_SCHEMA, 5, 15, 8, 24
         )
+    if schema == STARTUP_RECOVERY_REGISTRATION_SCHEMA:
+        return PoolPolicy(
+            STARTUP_RECOVERY_REGISTRATION_SCHEMA,
+            STARTUP_RECOVERY_RECEIPT_SCHEMA,
+            4,
+            12,
+            9,
+            27,
+        )
     raise PermissionError("unsupported explicit pool policy")
 
 
-def validate_recovery_bindings(grant, predecessor):
-    from evals.adapters.e_planning_journal import ManualRecoveryGrant
+def validate_recovery_bindings(grant, predecessor, *, pool_schema=None):
+    from evals.adapters.e_planning_journal import parse_recovery_grant
 
     try:
-        value = ManualRecoveryGrant.model_validate(grant).model_dump(mode="json")
+        value = parse_recovery_grant(grant).model_dump(mode="json")
+        if pool_schema is not None:
+            expected_schema = {
+                RECOVERY_REGISTRATION_SCHEMA: "task13-manual-recovery-grant-v1",
+                STARTUP_RECOVERY_REGISTRATION_SCHEMA: "task13-manual-startup-recovery-grant-v1",
+            }.get(pool_schema)
+            if value["schema_version"] != expected_schema:
+                raise PermissionError("pool policy and recovery grant version differ")
         expected = {
             "pool_registration": value["predecessor_pool_registration_sha256"],
             "pool_journal": value["predecessor_pool_journal_sha256"],
@@ -366,7 +387,7 @@ def _validated_registration(pool, runtime_audit):
             "order": [list(x) for x in ORDER],
         }:
             raise PermissionError("measurement constants differ")
-        if selected.registration_schema == RECOVERY_REGISTRATION_SCHEMA:
+        if selected.registration_schema in RECOVERY_REGISTRATION_SCHEMAS:
             validate_recovery_measurement_equivalence(pool)
             validate_recovery_quarantine(pool)
         else:
@@ -390,7 +411,7 @@ def _validated_registration(pool, runtime_audit):
         )
         if original["registration_sha256"] != C10_REGISTRATION:
             raise PermissionError("original C10 registration differs")
-        if selected.registration_schema == RECOVERY_REGISTRATION_SCHEMA:
+        if selected.registration_schema in RECOVERY_REGISTRATION_SCHEMAS:
             validate_recovery_equivalence_join(pool, original)
         children = pool["children"]
         if len(children) != 2 or len({c["child_id"] for c in children}) != 2:
@@ -912,7 +933,7 @@ def validate_pool_structure(pool):
             or C10_TRIAL in {x["trial_id"] for x in order}
         ):
             raise PermissionError("frozen attempt order differs")
-        if selected.registration_schema == RECOVERY_REGISTRATION_SCHEMA:
+        if selected.registration_schema in RECOVERY_REGISTRATION_SCHEMAS:
             _validate_recovery_structure(pool, order)
         elif (
             len(pool["measurement_files"]) != 117
@@ -930,11 +951,14 @@ def _validate_recovery_structure(pool, native_order):
     from evals.e_planning import planning_requests
 
     grant = validate_recovery_bindings(
-        pool["migration_grant"], pool["quarantined_predecessor"]
+        pool["migration_grant"],
+        pool["quarantined_predecessor"],
+        pool_schema=pool["schema_version"],
     )
     if (
         canonical_hash(grant) != pool["migration_grant_sha256"]
-        or pool["denied_attempts"] != native_order[5:]
+        or pool["denied_attempts"]
+        != native_order[pool_policy(pool).future_logical_limit :]
         or pool["quarantine_record"]
         != pool["quarantined_predecessor"]["quarantine_record"]
         or pool["recovery_plan"]["sha256"] != grant["recovery_plan_sha256"]
@@ -947,7 +971,11 @@ def _validate_recovery_structure(pool, native_order):
     }:
         raise PermissionError("explicit recovery equivalence proof required")
     for index, (child, allowed) in enumerate(
-        zip(pool["children"], (3, 2), strict=True)
+        zip(
+            pool["children"],
+            (3, pool_policy(pool).future_logical_limit - 3),
+            strict=True,
+        )
     ):
         registration = child["registration"]
         planning = registration["planning_registration"]
@@ -1048,12 +1076,17 @@ def validate_recovery_equivalence_join(pool, original):
 def require_recovery_child_authority(pool, timing, authority):
     from evals.adapters.e_planning_journal import (
         LimitedEPlanningAuthority,
+        StartupLimitedEPlanningAuthority,
         parse_authority,
     )
 
     parsed = parse_authority(authority)
+    expected_type = {
+        RECOVERY_REGISTRATION_SCHEMA: LimitedEPlanningAuthority,
+        STARTUP_RECOVERY_REGISTRATION_SCHEMA: StartupLimitedEPlanningAuthority,
+    }.get(pool.get("schema_version"))
     if (
-        not isinstance(parsed, LimitedEPlanningAuthority)
+        type(parsed) is not expected_type
         or parsed.registration_sha256 != canonical_hash(timing["planning_registration"])
         or parsed.journal_path
         != timing["planning_dispatch_registration_receipt"]["journal_path"]
@@ -1450,9 +1483,11 @@ def _finish_archives(context):
 
 
 def validate_migration_marker(marker, pool, parent_packet_pin, parent_decision_pin):
-    if pool.get("schema_version") == RECOVERY_REGISTRATION_SCHEMA:
+    if pool.get("schema_version") in RECOVERY_REGISTRATION_SCHEMAS:
         grant = validate_recovery_bindings(
-            pool["migration_grant"], pool["quarantined_predecessor"]
+            pool["migration_grant"],
+            pool["quarantined_predecessor"],
+            pool_schema=pool["schema_version"],
         )
         if (
             parent_packet_pin["sha256"] != grant["scope_packet_sha256"]

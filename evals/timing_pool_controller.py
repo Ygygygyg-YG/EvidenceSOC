@@ -88,12 +88,16 @@ class PoolJournal:
             raise PoolStopped("six unique future attempts required")
         if now.tzinfo is None or now >= DEADLINE:
             raise PoolStopped("deadline expired")
-        recovery = j.policy.future_logical_limit == 5
+        from evals.timing_pool import RECOVERY_REGISTRATION_SCHEMAS
+
+        recovery = j.policy.registration_schema in RECOVERY_REGISTRATION_SCHEMAS
         if recovery:
             from evals.timing_pool import validate_recovery_bindings
 
             migration_grant = validate_recovery_bindings(
-                migration_grant, quarantined_predecessor
+                migration_grant,
+                quarantined_predecessor,
+                pool_schema=j.policy.registration_schema,
             )
         elif migration_grant is not None or quarantined_predecessor is not None:
             raise PoolStopped("legacy policy cannot carry recovery genesis")
@@ -165,15 +169,17 @@ class PoolJournal:
             raise PoolStopped("journal genesis missing")
         genesis = result[0]["payload"]
         from evals.timing_pool import (
-            RECOVERY_REGISTRATION_SCHEMA,
+            RECOVERY_REGISTRATION_SCHEMAS,
             validate_recovery_bindings,
         )
 
-        if self.policy.registration_schema == RECOVERY_REGISTRATION_SCHEMA:
+        if self.policy.registration_schema in RECOVERY_REGISTRATION_SCHEMAS:
             if genesis.get("policy") != self.policy.registration_schema:
                 raise PoolStopped("recovery journal policy genesis missing")
             validate_recovery_bindings(
-                genesis.get("migration_grant"), genesis.get("quarantined_predecessor")
+                genesis.get("migration_grant"),
+                genesis.get("quarantined_predecessor"),
+                pool_schema=self.policy.registration_schema,
             )
         elif any(
             key in genesis
@@ -398,16 +404,19 @@ def pool_scope_proposal(pool):
         formal["epoch_manifest_sha256"] = "0" * 64
         if formal.get("model_identity_binding") is not None:
             formal["model_identity_binding"]["model_identity_sha256"] = "0" * 64
-    from evals.timing_pool import RECOVERY_REGISTRATION_SCHEMA
+    from evals.timing_pool import RECOVERY_REGISTRATION_SCHEMAS, pool_policy
 
-    if pool.get("schema_version") == RECOVERY_REGISTRATION_SCHEMA:
+    if pool.get("schema_version") in RECOVERY_REGISTRATION_SCHEMAS:
         from evals.e_planning import planning_requests
 
         grant = proposal["migration_grant"]
         grant["scope_packet_sha256"] = "0" * 64
         grant["decision_record_sha256"] = "0" * 64
         for child, bound, allowed in zip(
-            proposal["children"], grant["children"], (3, 2), strict=True
+            proposal["children"],
+            grant["children"],
+            (3, pool_policy(pool).future_logical_limit - 3),
+            strict=True,
         ):
             timing = child["registration"]
             planning = timing["planning_registration"]
@@ -453,7 +462,9 @@ def validate_pool_journal_evidence(evidence, pool):
         or genesis["imported_trial_id"] != pool["imported_observations"][0]["trial_id"]
     ):
         raise PoolStopped("pool identity or attempt sequence differs")
-    if selected.future_logical_limit == 5 and (
+    from evals.timing_pool import RECOVERY_REGISTRATION_SCHEMAS
+
+    if selected.registration_schema in RECOVERY_REGISTRATION_SCHEMAS and (
         genesis["migration_grant"] != pool["migration_grant"]
         or genesis["quarantined_predecessor"] != pool["quarantined_predecessor"]
     ):

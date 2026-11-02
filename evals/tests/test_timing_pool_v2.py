@@ -265,7 +265,7 @@ def test_policy_is_explicit_and_legacy_limits_stay_fixed():
         policy().historical_logical,
         policy().historical_physical,
     ) == (5, 15, 8, 24)
-    for unknown in (None, {}, "task13-e-timing-pool-registration-v3"):
+    for unknown in (None, {}, "task13-e-timing-pool-registration-v4"):
         with pytest.raises(PermissionError):
             timing_pool.pool_policy(unknown)
 
