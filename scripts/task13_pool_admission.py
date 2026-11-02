@@ -17,9 +17,11 @@ import re
 import sqlite3
 import ssl
 import subprocess
+import tempfile
 import time
 import urllib.request
 import uuid
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from html.parser import HTMLParser
@@ -304,7 +306,53 @@ def copy_sqlite(source, target):
         original.backup(copied)
 
 
+@contextmanager
+def production_startup_canaries(runtime):
+    """Use the actual worker's staging, literal path encoding and boundaries."""
+    staging = Path(
+        runtime.get(
+            "temporary_root", str(Path(runtime["output_dir"]) / ".controller-staging")
+        )
+    )
+    staging.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(
+        prefix="task13-runtime-", dir=staging
+    ) as temporary:
+        root = Path(temporary)
+        forbidden = {}
+        for kind in ("scoring", "git", "other_case"):
+            canary = root / kind / "canary.txt"
+            canary.parent.mkdir()
+            write_raw(canary, uuid.uuid4().hex.encode())
+            forbidden[kind] = [
+                str(canary.resolve()),
+                f"/app/{kind}/canary.txt",
+                f"/workspace/{kind}/canary.txt",
+            ]
+        forbidden["git"] += [
+            "/app/source/.git/config",
+            "/app/.git/config",
+            "/.git/config",
+        ]
+        yield (
+            forbidden,
+            {
+                "schema_version": "task13-production-startup-canaries-v1",
+                "staging_root": str(staging.resolve()),
+                "canary_root": str(root.resolve()),
+            },
+        )
+
+
 async def native_probe(host, request, out):
+    with production_startup_canaries(host._inputs["runtime_options"]) as (
+        forbidden,
+        layout,
+    ):
+        return await _native_probe_with_canaries(host, request, out, forbidden, layout)
+
+
+async def _native_probe_with_canaries(host, request, out, forbidden, layout):
     """Run the frozen worker main through its complete pre-GO handshake only."""
     from scripts.task13_worker_runtime import (
         e_planning_runtime_binding,
@@ -328,15 +376,6 @@ async def native_probe(host, request, out):
         == request.agent_sha256,
         "original case events changed",
     )
-    forbidden = {}
-    for kind in ("scoring", "git", "other_case"):
-        canary = out / kind / "canary.txt"
-        canary.parent.mkdir()
-        write_raw(canary, uuid.uuid4().hex.encode())
-        # Linux treats Windows backslashes as literal filename characters. Long
-        # COW roots would become one >255-byte component instead of an absent path.
-        forbidden[kind] = [canary.resolve().as_posix(), "/app/" + kind + "/canary.txt"]
-    forbidden["git"] += ["/app/source/.git/config", "/.git/config"]
     nonce = uuid.uuid4().hex
     name = "task13-free-startup-" + nonce
     envs = {
@@ -427,6 +466,7 @@ async def native_probe(host, request, out):
         "provider_calls": 0,
         "GO_sent": False,
         "actual_timing_credit": 0,
+        "startup_canary_layout": layout,
     }
     process = None
     started = time.monotonic()
@@ -944,6 +984,66 @@ def validate_native_artifacts(receipt, host, request, *, root):
         "native raw spec differs from current request",
     )
     process = _decode(raw_evidence(artifacts["process.json"], root=root))
+    layout = receipt.get("startup_canary_layout")
+    current_helper = pin(__file__)
+    if (
+        host._timing["source_files"].get(current_helper["path"])
+        == current_helper["sha256"]
+    ):
+        require(
+            layout is not None, "current admission must cover production canary paths"
+        )
+    if layout is not None:
+        staging = Path(
+            runtime.get(
+                "temporary_root",
+                str(Path(runtime["output_dir"]) / ".controller-staging"),
+            )
+        ).resolve()
+        canary_root = Path(layout["canary_root"])
+        require(
+            set(layout) == {"schema_version", "staging_root", "canary_root"}
+            and layout["schema_version"] == "task13-production-startup-canaries-v1"
+            and layout["staging_root"] == str(staging)
+            and canary_root.parent == staging
+            and re.fullmatch(r"task13-runtime-[a-z0-9_]{8}", canary_root.name)
+            is not None,
+            "native production canary staging differs",
+        )
+        expected_forbidden = {
+            kind: [
+                str(canary_root / kind / "canary.txt"),
+                f"/app/{kind}/canary.txt",
+                f"/workspace/{kind}/canary.txt",
+            ]
+            for kind in ("scoring", "git", "other_case")
+        }
+        expected_forbidden["git"] += [
+            "/app/source/.git/config",
+            "/app/.git/config",
+            "/.git/config",
+        ]
+        envs = [
+            process["argv"][index + 1]
+            for index, value in enumerate(process["argv"])
+            if value == "--env"
+        ]
+        paths = [
+            value.split("=", 1)[1]
+            for value in envs
+            if value.startswith("TASK13_FORBIDDEN_PATHS=")
+        ]
+        require(
+            len(paths) == 1 and json.loads(paths[0]) == expected_forbidden,
+            "native probe changed production path representation",
+        )
+        require(
+            all(
+                len(probe["boundaries"][kind]) == len(values)
+                for kind, values in expected_forbidden.items()
+            ),
+            "native production boundary probes incomplete",
+        )
     require(
         process["argv"][:3] == ["docker", "run", "--interactive"]
         and process["argv"][-6:]

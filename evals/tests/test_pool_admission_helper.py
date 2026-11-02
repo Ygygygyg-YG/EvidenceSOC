@@ -146,9 +146,11 @@ def test_native_probe_real_validators_and_owned_cleanup(tmp_path, monkeypatch):
         "import_source_dir": str(tmp_path / "import"),
         "planning_authority_sha256": "a" * 64,
         "image_id": "sha256:" + "b" * 64,
+        "output_dir": str(tmp_path / "worker-output"),
     }
     host = SimpleNamespace(
         _agent=agent,
+        _timing={"source_files": {}},
         _inputs={
             "runtime_options": runtime,
             "planning_authority": {"journal_path": str(journal)},
@@ -172,8 +174,13 @@ def test_native_probe_real_validators_and_owned_cleanup(tmp_path, monkeypatch):
             if argument.startswith("TASK13_FORBIDDEN_PATHS=")
         )
         forbidden_paths = json.loads(forbidden_argument.split("=", 1)[1])
-        assert all("\\" not in paths[0] for paths in forbidden_paths.values()), (
-            "Windows host canaries must be segmented POSIX paths in Linux; otherwise long COW paths exceed NAME_MAX"
+        assert all(
+            paths[0] == str(Path(paths[0]).resolve())
+            for paths in forbidden_paths.values()
+        )
+        assert all(
+            paths[2] == f"/workspace/{kind}/canary.txt"
+            for kind, paths in forbidden_paths.items()
         )
         assert all(
             len(component.encode("utf-8")) <= 255
@@ -238,7 +245,8 @@ def test_native_probe_real_validators_and_owned_cleanup(tmp_path, monkeypatch):
             "agent_readable": True,
             "agent_sha256": request.agent_sha256,
             "boundaries": {
-                k: [{"readable": False}] for k in ("scoring", "git", "other_case")
+                k: [{"readable": False} for _ in forbidden_paths[k]]
+                for k in ("scoring", "git", "other_case")
             },
             "forbidden_reads": [{"readable": False}],
             "planning": {
@@ -787,6 +795,11 @@ def native_raw_fixture(m, host, request, out):
     from evals.contracts import canonical_hash
 
     runtime = host._inputs["runtime_options"]
+    runtime.setdefault("output_dir", str(out / "host-output"))
+    if not hasattr(host, "_timing"):
+        host._timing = {"source_files": {}}
+    with m.production_startup_canaries(runtime) as (forbidden, layout):
+        pass
     nonce = "a" * 32
     name = "task13-free-startup-" + nonce
     mounts = [
@@ -808,7 +821,8 @@ def native_raw_fixture(m, host, request, out):
         "agent_readable": True,
         "agent_sha256": request.agent_sha256,
         "boundaries": {
-            k: [{"readable": False}] for k in ("scoring", "git", "other_case")
+            k: [{"readable": False} for _ in forbidden[k]]
+            for k in ("scoring", "git", "other_case")
         },
         "forbidden_reads": [{"readable": False}],
         "planning": {
@@ -839,6 +853,8 @@ def native_raw_fixture(m, host, request, out):
                     "docker",
                     "run",
                     "--interactive",
+                    "--env",
+                    "TASK13_FORBIDDEN_PATHS=" + json.dumps(forbidden),
                     "--entrypoint",
                     "python3",
                     runtime["image_id"],
@@ -865,6 +881,7 @@ def native_raw_fixture(m, host, request, out):
             "provider_calls": 0,
             "GO_sent": False,
             "actual_timing_credit": 0,
+            "startup_canary_layout": layout,
             "container_absent": True,
             "probe_elapsed_seconds": 1,
             "finished_at": datetime.now(UTC).isoformat(),

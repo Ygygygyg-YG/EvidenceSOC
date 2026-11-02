@@ -247,6 +247,7 @@ def observed_timing_max(receipt, identity):
     if isinstance(receipt, dict) and receipt.get("schema_version") in {
         "task13-e-timing-pool-receipt-v1",
         "task13-e-timing-pool-receipt-v2",
+        "task13-e-timing-pool-receipt-v3",
     }:
         from evals.timing_pool import validate_pool_receipt
 

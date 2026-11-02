@@ -436,11 +436,11 @@ class ETrialController:
             pool = validate_pool_structure(self._inputs["pool_authority"])
             require_pool_membership(pool, packet, self._timing)
             from evals.timing_pool import (
-                RECOVERY_REGISTRATION_SCHEMA,
+                RECOVERY_REGISTRATION_SCHEMAS,
                 require_recovery_child_authority,
             )
 
-            if pool["schema_version"] == RECOVERY_REGISTRATION_SCHEMA:
+            if pool["schema_version"] in RECOVERY_REGISTRATION_SCHEMAS:
                 require_recovery_child_authority(pool, self._timing, authority)
             # Both child dispatch authorities still bind their own native planning
             # registration and the same parent scope/actual user decision above.
