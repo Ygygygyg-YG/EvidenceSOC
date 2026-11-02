@@ -27,7 +27,10 @@ ORIGINAL_SOURCE_RECEIPT_SHA256 = (
 # and must be verified by the external native evidence and scope validators.
 # Excluding that future metadata avoids a policy/commit registration cycle.
 REVIEWED_RECOVERY_POLICIES: frozenset[str] = frozenset(
-    {"e53f7d7dbfcf2aa0121de613d7e3e3e63e0548c1cc798734d619fad38b1c281a"}
+    {
+        "e53f7d7dbfcf2aa0121de613d7e3e3e63e0548c1cc798734d619fad38b1c281a",
+        "bb63fafc94d8205fa9593b458dedf00b744ab2c9af8927d4c72ada8d51ad09e4",
+    }
 )
 
 TRANSFORMATION_FIELDS = frozenset(
