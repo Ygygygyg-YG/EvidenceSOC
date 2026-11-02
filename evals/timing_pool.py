@@ -1489,8 +1489,84 @@ def validate_migration_marker(marker, pool, parent_packet_pin, parent_decision_p
     return deepcopy(marker)
 
 
+def _validate_historical_direct_approval(context, request, source, chat, started, ref):
+    """Recognize only the frozen unknown-prefix root capture, never new consent."""
+    from evals.timing_pool_recovery import (
+        APPROVAL_SHA256,
+        FROZEN,
+        PACKET_SHA256,
+        PLAN_ID,
+        TRIAL_ID,
+    )
+
+    authority = context["reader"]._inputs.get("pool_authority")
+    if (
+        not isinstance(ref, dict)
+        or set(ref) != {"path", "sha256"}
+        or ref != started["chat_record"]
+        or ref["sha256"] != APPROVAL_SHA256
+        or not isinstance(authority, dict)
+        or authority.get("schema_version") != REGISTRATION_SCHEMA
+        or canonical_hash(authority) != FROZEN["pool_sha256"]
+        or request.trial_id != TRIAL_ID
+        or canonical_hash(request)
+        != "085313f34f67a5fc2690a23e9108a823f38f79fddc800be1ec80bbd5903fd259"
+        or chat["packet_sha256"] != PACKET_SHA256
+        or source["state"]["response_plan"]["response_plan_id"] != PLAN_ID
+        or "prepared_question" in chat
+        or "actual_question_reply" in chat
+        or chat.get("source") != "actual_current_send_user_message_question_reply"
+        or chat.get("decision") != "approved"
+    ):
+        raise PermissionError("historical direct approval is not the frozen original")
+    replies = chat.get("actual_incoming_reply")
+    if (
+        not isinstance(replies, list)
+        or len(replies) != 1
+        or not isinstance(replies[0], dict)
+        or set(replies[0]) != {"question", "answer", "questionItemId"}
+    ):
+        raise PermissionError("historical direct approval lacks its exact reply")
+    reply = replies[0]
+    try:
+        item = json.loads(reply["questionItemId"])
+    except (TypeError, ValueError) as error:
+        raise PermissionError(
+            "historical direct approval question ID is invalid"
+        ) from error
+    if (
+        not isinstance(item, list)
+        or len(item) != 3
+        or item[0] != "request_user_input_async"
+        or not isinstance(item[1], str)
+        or not item[1].startswith("call_")
+        or type(item[2]) is not int
+        or item[2] != 0
+        or chat["record_id"] != "actual-current-chat/" + reply["questionItemId"]
+        or reply["answer"] != chat["reason"]
+        or not isinstance(reply["question"], str)
+        or any(
+            value not in reply["question"]
+            for value in (PLAN_ID, request.case_id, PACKET_SHA256)
+        )
+        or chat["text"] != reply["question"] + "\n" + reply["answer"]
+    ):
+        raise PermissionError(
+            "historical direct approval question/reply binding differs"
+        )
+
+
 def _validate_approval_semantics(
-    context, trial, source, chat, started, decided, archives, *, approved_before=None
+    context,
+    trial,
+    source,
+    chat,
+    started,
+    decided,
+    archives,
+    *,
+    approved_before=None,
+    historical_direct_capture=None,
 ):
     from evals.adapters.e_planning_review import build_review_request
     from evals.adapters.retained_workflow import build_approval_packet
@@ -1523,30 +1599,39 @@ def _validate_approval_semantics(
         or _archived_json(started["chat_record"], archives) != chat
     ):
         raise PermissionError("actual chat does not bind exact original pending plan")
-    question = _archived_json(chat["prepared_question"], archives)
-    if (
-        question.get("schema_version") != "task13-preloaded-specific-plan-question-v1"
-        or question.get("synthetic_control_fixture") is not False
-        or question.get("automatic_approval") is not False
-        or question.get("record_kind") != "prepared_question_not_user_consent"
-        or any(
-            question.get(k) != chat[k]
-            for k in ("case_id", "incident_id", "packet_sha256", "scope")
+    if historical_direct_capture is not None:
+        _validate_historical_direct_approval(
+            context, request, source, chat, started, historical_direct_capture
         )
-        or len(chat["actual_question_reply"]) != 1
-        or chat["actual_question_reply"][0].get("question") != question["question"]
-        or chat["actual_question_reply"][0].get("answer") != question["approved_answer"]
-        or chat["reason"] != question["approved_answer"]
-        or not chat["actual_question_reply"][0].get("questionItemId")
-        or _time(question["created_at"]) > _time(chat["decided_at"])
-    ):
-        raise PermissionError(
-            "actual question response does not match prepared plan question"
-        )
-    # Preserve and verify all explicitly pinned presentation/preview bytes.
-    for key in ("presentation_source", "preview"):
-        if key in question:
-            _archived_json(question[key], archives)
+    else:
+        if "prepared_question" not in chat or "actual_incoming_reply" in chat:
+            raise PermissionError("actual prepared plan question evidence required")
+        question = _archived_json(chat["prepared_question"], archives)
+        if (
+            question.get("schema_version")
+            != "task13-preloaded-specific-plan-question-v1"
+            or question.get("synthetic_control_fixture") is not False
+            or question.get("automatic_approval") is not False
+            or question.get("record_kind") != "prepared_question_not_user_consent"
+            or any(
+                question.get(k) != chat[k]
+                for k in ("case_id", "incident_id", "packet_sha256", "scope")
+            )
+            or len(chat["actual_question_reply"]) != 1
+            or chat["actual_question_reply"][0].get("question") != question["question"]
+            or chat["actual_question_reply"][0].get("answer")
+            != question["approved_answer"]
+            or chat["reason"] != question["approved_answer"]
+            or not chat["actual_question_reply"][0].get("questionItemId")
+            or _time(question["created_at"]) > _time(chat["decided_at"])
+        ):
+            raise PermissionError(
+                "actual question response does not match prepared plan question"
+            )
+        # Preserve and verify all explicitly pinned presentation/preview bytes.
+        for key in ("presentation_source", "preview"):
+            if key in question:
+                _archived_json(question[key], archives)
     state = source["state"]
     approval = state["approval"]
     if (

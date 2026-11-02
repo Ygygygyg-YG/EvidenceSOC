@@ -712,6 +712,7 @@ def _audit_prefix(spec, lease):
         decided,
         _archive_context({}),
         approved_before=events[8]["payload"]["quiescence"]["inspected_at"],
+        historical_direct_capture=stop["actual_plan_approval"],
     )
     if source["state"]["response_plan"][
         "response_plan_id"
