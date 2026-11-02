@@ -68,10 +68,42 @@ AUTHORIZATION_WORKER_FILES = frozenset(
 )
 
 
-def recovery_core(original, model_id):
+STARTUP_COUNTS = {
+    **RECOVERY_COUNTS,
+    "new_planning_logical_max": 4,
+    "new_planning_physical_max": 12,
+    "planning_logical_already_consumed": 9,
+    "planning_physical_already_consumed": 27,
+}
+
+
+def _profile(profile):
+    require(
+        profile in {"manual-v2", "startup-v3"},
+        "explicit closed recovery profile required",
+    )
+    return profile == "startup-v3"
+
+
+def _schema(kind, startup=False):
+    return (
+        "task13-manual-" + ("startup-" if startup else "") + "recovery-" + kind + "-v1"
+    )
+
+
+def _startup_schema(value, kind):
+    require(
+        value in {_schema(kind), _schema(kind, True)},
+        "explicit recovery schema required",
+    )
+    return value == _schema(kind, True)
+
+
+def recovery_core(original, model_id, *, profile="manual-v2"):
+    startup = _profile(profile)
     require(
         canonical_hash(original["combined_development_calls"])
-        == canonical_hash(ORIGINAL_COUNTS),
+        == canonical_hash(RECOVERY_COUNTS if startup else ORIGINAL_COUNTS),
         "exact predecessor quota required; no extra attempts or analysis",
     )
     require(original["deadline"] == DEADLINE, "engineering deadline cannot change")
@@ -79,15 +111,23 @@ def recovery_core(original, model_id):
         isinstance(model_id, str) and bool(model_id.strip()), "model epoch ID required"
     )
     core = deepcopy(original)
-    core["combined_development_calls"] = deepcopy(RECOVERY_COUNTS)
+    core["combined_development_calls"] = deepcopy(
+        STARTUP_COUNTS if startup else RECOVERY_COUNTS
+    )
     core["model_identity"]["id"] = model_id
     return core
 
 
 def prepared_scope_question(packet, packet_pin):
+    startup = packet.get("schema_version") == "task13-e-timing-pool-pending-v3"
     require(
-        packet["schema_version"] == "task13-e-timing-pool-pending-v2"
-        and packet["quota"] == RECOVERY_COUNTS,
+        packet["schema_version"]
+        == (
+            "task13-e-timing-pool-pending-v3"
+            if startup
+            else "task13-e-timing-pool-pending-v2"
+        )
+        and packet["quota"] == (STARTUP_COUNTS if startup else RECOVERY_COUNTS),
         "exact five-attempt recovery packet required",
     )
     summary = {
@@ -121,13 +161,17 @@ def prepared_scope_question(packet, packet_pin):
     }
     question = (
         "是否批准以下具体人工审计恢复范围及新source/model元数据登记？"
-        "旧池unknown及原记录保留，仅迁移原剩余5次逻辑规划/最多15次物理请求，"
-        "不增加额度；C10原成绩须按本包等价核验使用。复用原合格分析，"
+        + (
+            "旧池unknown及原记录保留，仅迁移原剩余4次逻辑规划/最多12次物理请求，"
+            if startup
+            else "旧池unknown及原记录保留，仅迁移原剩余5次逻辑规划/最多15次物理请求，"
+        )
+        + "不增加额度；C10原成绩须按本包等价核验使用。复用原合格分析，"
         "每份实际计划仍单独批准；不批准新分析、续期、正式176或F8。\n"
         + json.dumps(summary, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     )
     return {
-        "schema_version": "task13-manual-recovery-prepared-question-v1",
+        "schema_version": _schema("prepared-question", startup),
         "record_kind": "prepared_question_not_user_consent",
         "scope_packet": packet_pin,
         "question": question,
@@ -291,10 +335,22 @@ def build_limited_children(
     from evals.adapters.e_planning_journal import (
         LimitedEPlanningAuthority,
         ManualRecoveryGrant,
+        StartupLimitedEPlanningAuthority,
+        StartupRecoveryGrant,
     )
     from evals.e_planning import planning_requests
     from evals.e_timing import build_e_timing_registration
 
+    startup = grant_base["schema_version"] == "task13-manual-startup-recovery-grant-v1"
+    require(
+        grant_base["schema_version"]
+        in {
+            "task13-manual-recovery-grant-v1",
+            "task13-manual-startup-recovery-grant-v1",
+        },
+        "explicit grant schema required",
+    )
+    child_limit = 1 if startup else 2
     children, binding = build_children(
         source,
         model,
@@ -324,12 +380,14 @@ def build_limited_children(
                     "journal_path"
                 ],
                 "request_sha256s": hashes,
-                "authorized_request_sha256s": hashes if index == 0 else hashes[:2],
-                "denied_request_sha256s": [] if index == 0 else hashes[2:],
+                "authorized_request_sha256s": hashes
+                if index == 0
+                else hashes[:child_limit],
+                "denied_request_sha256s": [] if index == 0 else hashes[child_limit:],
             }
         )
     if packet_pin:
-        ManualRecoveryGrant.model_validate(grant)
+        (StartupRecoveryGrant if startup else ManualRecoveryGrant).model_validate(grant)
     for child, child_grant in zip(children, grant["children"], strict=True):
         original = child.pop("authority")
         authority = None
@@ -339,13 +397,19 @@ def build_limited_children(
         if packet_pin:
             authority = {
                 **original,
-                "schema_version": "task13-e-planning-authority-v2",
+                "schema_version": "task13-e-planning-authority-v3"
+                if startup
+                else "task13-e-planning-authority-v2",
                 "authorized_request_sha256s": child_grant["authorized_request_sha256s"],
                 "denied_request_sha256s": child_grant["denied_request_sha256s"],
                 "migration_grant": grant,
                 "migration_grant_sha256": canonical_hash(grant),
             }
-            LimitedEPlanningAuthority.model_validate(authority)
+            (
+                StartupLimitedEPlanningAuthority
+                if startup
+                else LimitedEPlanningAuthority
+            ).model_validate(authority)
             dispatch["authority_sha256"] = canonical_hash(authority)
         child["registration"] = build_e_timing_registration(
             child["registration"]["planning_registration"],
@@ -370,16 +434,19 @@ def compile_draft(
     host_files,
     predecessor_materialization,
     predecessor_preparation,
+    profile="manual-v2",
 ):
     """Pure inert construction. No native registration or execution journal."""
     from scripts.task13_pool_prepare import refs
 
     require(re.fullmatch("[0-9a-f]{32}", identity), "fixed recovery identity required")
+    startup = _profile(profile)
     root, tree = Path(root), Path(tree)
     docs = Documents(root)
     old_source, old_model = predecessor["source"], predecessor["model"]
     require(
-        old_source["epoch_number"] == 10 and old_model["model_epoch_number"] == 7,
+        old_source["epoch_number"] == (11 if startup else 10)
+        and old_model["model_epoch_number"] == (8 if startup else 7),
         "exact stopped source10/model7 required",
     )
     require(
@@ -393,7 +460,7 @@ def compile_draft(
         )
         docs.stage("source/" + name, worker_bytes[name])
     receipt_pin = docs.stage("source/source_receipt.json", source_receipt)
-    core = recovery_core(p["core"], "model-manual-" + identity[:24])
+    core = recovery_core(p["core"], "model-manual-" + identity[:24], profile=profile)
     core_pin = docs.stage("core-config.json", core)
     entries = {}
     for name, digest in host_files.items():
@@ -428,6 +495,10 @@ def compile_draft(
     )
     controller_pin = docs.stage("controller-code-manifest.json", controller)
     roots = set(old_source["controller_state_roots"]) | {str(root / "pool-state")}
+    if startup:
+        roots.update(
+            str(Path(f"D:/传智杯/.tmp/t13v3-{identity[:12]}-{i}")) for i in (1, 2)
+        )
     for ordinal in (1, 2):
         roots.update(
             str(root / f"manual-{identity}-child-{ordinal}" / name)
@@ -440,7 +511,7 @@ def compile_draft(
         )
     source = deepcopy(old_source)
     source.update(
-        epoch_id="e11-manual-" + identity,
+        epoch_id=("e12-manual-" if startup else "e11-manual-") + identity,
         epoch_number=old_source["epoch_number"] + 1,
         predecessor_epoch_id=old_source["epoch_id"],
         source_commit=commit,
@@ -483,12 +554,14 @@ def compile_draft(
     )
     lineage_pin = docs.stage("recovery-lineage.json", lineage)
     plan = {
-        "schema_version": "task13-manual-recovery-plan-v1",
+        "schema_version": _schema("plan", startup),
         "recovery_id": identity,
         "predecessor_materialization": predecessor_materialization,
         "predecessor_preparation": predecessor_preparation,
         "predecessor_pool_host": predecessor["pool_host_manifest"],
-        "predecessor_head_sha256": PREDECESSOR_HEAD,
+        "predecessor_head_sha256": "39be936e93a21e627e33deb4d8b8cbc215379b3629454cefb697fe1f454b0bf5"
+        if startup
+        else PREDECESSOR_HEAD,
         "source_commit": commit,
         "source_tree": str(tree),
         "source_epoch_id": source["epoch_id"],
@@ -497,13 +570,17 @@ def compile_draft(
         "controller_manifest": controller_pin,
         "core_config": core_pin,
         "recovery_lineage": lineage_pin,
-        "quota": RECOVERY_COUNTS,
+        "quota": STARTUP_COUNTS if startup else RECOVERY_COUNTS,
         "deadline": DEADLINE,
         "development_cap_cny": 6,
         "actual_authority": None,
         "provider_requests": 0,
         "timing_credit": 0,
     }
+    if startup:
+        plan["temporary_roots"] = [
+            f"D:/传智杯/.tmp/t13v3-{identity[:12]}-{i}" for i in (1, 2)
+        ]
     plan_pin = docs.stage("recovery-plan.json", plan)
     preservation = {
         r["path"]: r
@@ -515,7 +592,7 @@ def compile_draft(
         ]
     }
     value = {
-        "schema_version": "task13-manual-recovery-draft-v1",
+        "schema_version": _schema("draft", startup),
         "status": "inert_no_authority",
         "recovery_plan": plan_pin,
         "source": source,
@@ -592,10 +669,14 @@ def compile_preparation(
     from evals.timing_pool_controller import pool_scope_proposal
     from scripts.task13_pool_prepare import refs
 
+    startup = _startup_schema(draft.get("schema_version"), "draft")
     p = deepcopy(draft)
     root = Path(draft_pin["path"]).parent.parent
     docs = Documents(root)
     plan = read(p["recovery_plan"])
+    require(
+        plan["schema_version"] == _schema("plan", startup), "draft/plan version differs"
+    )
     old_host = read(plan["predecessor_pool_host"])
     quarantine = read(quarantine_pin)
     old_journal = quarantine["parent_journal"]
@@ -606,7 +687,7 @@ def compile_preparation(
         "quarantine_record": quarantine_pin,
     }
     grant_base = {
-        "schema_version": "task13-manual-recovery-grant-v1",
+        "schema_version": _schema("grant", startup),
         "recovery_id": plan["recovery_id"],
         "recovery_plan_sha256": p["recovery_plan"]["sha256"],
         "quarantine_record_sha256": quarantine_pin["sha256"],
@@ -615,10 +696,10 @@ def compile_preparation(
         ],
         "predecessor_pool_journal_sha256": predecessor["pool_journal"]["sha256"],
         "predecessor_pool_head_sha256": predecessor["pool_head_sha256"],
-        "consumed_logical": 8,
-        "consumed_physical": 24,
-        "remaining_logical": 5,
-        "remaining_physical": 15,
+        "consumed_logical": 9 if startup else 8,
+        "consumed_physical": 27 if startup else 24,
+        "remaining_logical": 4 if startup else 5,
+        "remaining_physical": 12 if startup else 15,
         "total_logical_limit": 13,
         "total_physical_limit": 39,
         "analysis_inclusive_limit": 40,
@@ -639,9 +720,11 @@ def compile_preparation(
         child.pop("authority")
     pool = deepcopy(p.pop("pool_template"))
     pool.update(
-        schema_version="task13-e-timing-pool-registration-v2",
-        future_logical_limit=5,
-        future_physical_limit=15,
+        schema_version="task13-e-timing-pool-registration-v3"
+        if startup
+        else "task13-e-timing-pool-registration-v2",
+        future_logical_limit=4 if startup else 5,
+        future_physical_limit=12 if startup else 15,
         children=children,
         recovery_plan=p["recovery_plan"],
         quarantine_record=quarantine_pin,
@@ -665,7 +748,11 @@ def compile_preparation(
         for c in children
         for t in c["registration"]["trials"]
     ]
-    pool["attempt_order"], pool["denied_attempts"] = attempts[:5], attempts[5:]
+    allowed = 4 if startup else 5
+    pool["attempt_order"], pool["denied_attempts"] = (
+        attempts[:allowed],
+        attempts[allowed:],
+    )
     baseline = read(pool["original_account_baseline"])
     baseline["development_ledger"] = development_ledger(
         Path(p["source"]["budget_path"])
@@ -676,7 +763,9 @@ def compile_preparation(
     proposal = pool_scope_proposal(pool)
     scope = p.pop("scope_template")
     packet = {
-        "schema_version": "task13-e-timing-pool-pending-v2",
+        "schema_version": "task13-e-timing-pool-pending-v3"
+        if startup
+        else "task13-e-timing-pool-pending-v2",
         "status": "pending_actual_concrete_recovery_scope",
         "registrable": False,
         "actual_authority": None,
@@ -701,7 +790,7 @@ def compile_preparation(
         "pool_proposal": proposal,
         "pool_proposal_sha256": canonical_hash(proposal),
         "free_acceptance": acceptance_pin,
-        "quota": RECOVERY_COUNTS,
+        "quota": STARTUP_COUNTS if startup else RECOVERY_COUNTS,
         "data_scope": scope["data_scope"],
         "endpoint": scope["endpoint"],
         "qualified_original_analysis": scope["qualified_original_analysis"],
@@ -717,7 +806,7 @@ def compile_preparation(
     }
     packet_pin = docs.stage("scope-packet.json", packet)
     p.update(
-        schema_version="task13-manual-recovery-preparation-v1",
+        schema_version=_schema("preparation", startup),
         status="pending_no_authority_or_registration",
         draft=draft_pin,
         scope_packet=packet_pin,
@@ -745,10 +834,12 @@ def compile_preparation(
 
 
 def validate_actual_scope_review(review, spec, preparation):
+    startup = _startup_schema(
+        preparation.get("schema_version", _schema("preparation")), "preparation"
+    )
     require(
         isinstance(review, dict)
-        and review.get("schema_version")
-        == "task13-manual-recovery-actual-scope-review-v1"
+        and review.get("schema_version") == _schema("actual-scope-review", startup)
         and review.get("status") == "passed"
         and review.get("review_kind") == "independent_actual_scope"
         and isinstance(review.get("reviewer_identity"), str)
@@ -783,8 +874,9 @@ def draft(spec):
     from evals.freeze import required_freeze_files
     from scripts.task13_pool_prepare import assert_preserved
 
+    startup = _startup_schema(spec.get("schema_version"), "draft-spec")
     require(
-        spec.get("schema_version") == "task13-manual-recovery-draft-spec-v1",
+        spec.get("schema_version") == _schema("draft-spec", startup),
         "explicit draft schema required",
     )
     root = plain(spec["candidate_output"], exists=False)
@@ -799,8 +891,21 @@ def draft(spec):
     )
     from evals.timing_pool_recovery import FROZEN
 
+    if startup:
+        from evals.timing_pool_startup_recovery import STARTUP_FROZEN
+
+        frozen = STARTUP_FROZEN
+    else:
+        frozen = FROZEN
+    if startup:
+        require(
+            spec["predecessor_materialization"]["sha256"] == frozen["materialization"]
+            and spec["predecessor_preparation"]["sha256"] == frozen["preparation"],
+            "exact startup predecessor materialization/preparation required",
+        )
+
     require(
-        m["pool_host_manifest"]["sha256"] == FROZEN["pool_host_manifest"]
+        m["pool_host_manifest"]["sha256"] == frozen["pool_host_manifest"]
         and read(read(m["pool_host_manifest"])["pool_registration"]) == m["pool"],
         "exact stopped predecessor pool required",
     )
@@ -834,6 +939,7 @@ def draft(spec):
         host_files=host_files,
         predecessor_materialization=spec["predecessor_materialization"],
         predecessor_preparation=spec["predecessor_preparation"],
+        profile="startup-v3" if startup else "manual-v2",
     )
     value = json.loads(docs.values[Path(result_pin["path"])])
     value["database_snapshots"] = {
@@ -863,13 +969,14 @@ def prepare(spec):
     from evals.timing_pool_recovery import validate_quarantine_evidence
     from scripts.task13_pool_prepare import assert_preserved, refs
 
+    startup = _startup_schema(spec.get("schema_version"), "prepare-spec")
     require(
-        spec.get("schema_version") == "task13-manual-recovery-prepare-spec-v1",
+        spec.get("schema_version") == _schema("prepare-spec", startup),
         "explicit preparation schema required",
     )
     p = read(spec["draft"])
     require(
-        p["schema_version"] == "task13-manual-recovery-draft-v1"
+        p["schema_version"] == _schema("draft", startup)
         and p["actual_authority_created"] == 0,
         "inert draft required",
     )
@@ -990,6 +1097,7 @@ def compile_adoption(preparation, preparation_pin, request_pin, chat_pin):
     from scripts.task13_e_trial import SCOPE
     from scripts.task13_timing_pool import derive_next_three_bound
 
+    startup = _startup_schema(preparation.get("schema_version"), "preparation")
     require(read(preparation_pin) == preparation, "exact pinned preparation required")
     p = deepcopy(preparation)
     root = Path(preparation_pin["path"]).parent.parent
@@ -1117,7 +1225,7 @@ def compile_adoption(preparation, preparation_pin, request_pin, chat_pin):
     )
     pool_pin = docs.stage("activation/pool-registration.json", pool)
     hosts, materialized_children, bounds = {}, [], []
-    for child in children:
+    for ordinal, child in enumerate(children, 1):
         cid = child["child_id"]
         authority, timing = authorities[cid], child["registration"]
         planning = timing["planning_registration"]
@@ -1131,6 +1239,16 @@ def compile_adoption(preparation, preparation_pin, request_pin, chat_pin):
             controller_manifest_path=p["controller_manifest"]["path"],
             model_identity_binding=binding["model_identity_binding"],
         )
+        if startup:
+            plan = read(p["recovery_plan"])
+            roots = [
+                f"D:/传智杯/.tmp/t13v3-{plan['recovery_id'][:12]}-{i}" for i in (1, 2)
+            ]
+            require(
+                plan.get("temporary_roots") == roots,
+                "pinned owned temporary roots differ",
+            )
+            runtime["temporary_root"] = roots[ordinal - 1]
         base = cid + "/activation/"
         inputs = {
             "planning_registration": docs.stage(
@@ -1199,7 +1317,9 @@ def compile_adoption(preparation, preparation_pin, request_pin, chat_pin):
     }
     capacity_pin = docs.stage("activation/capacity-proof.json", capacity)
     manifest = {
-        "schema_version": "task13-e-timing-pool-host-v2",
+        "schema_version": "task13-e-timing-pool-host-v3"
+        if startup
+        else "task13-e-timing-pool-host-v2",
         "pool_registration": pool_pin,
         "hosts": hosts,
         "journal_path": pool["execution_journal_path"],
@@ -1209,7 +1329,7 @@ def compile_adoption(preparation, preparation_pin, request_pin, chat_pin):
     }
     manifest_pin = docs.stage("activation/pool-host-manifest.json", manifest)
     materialization = {
-        "schema_version": "task13-manual-recovery-materialization-v1",
+        "schema_version": _schema("materialization", startup),
         "preparation": preparation_pin,
         "scope_packet": packet_pin,
         "scope_decision": decision_pin,
@@ -1366,9 +1486,13 @@ def audit_registered_prefix(lease, budget, materialization, baseline, quarantine
                 "exact registered metadata prefix required",
             )
             require_native_prefix(budget, materialization, (True, True))
-            lease.locked_audit(expected_evidence=quarantine)(
-                db=db, controller_state_roots=tuple(roots), owned_locks=owned_locks
-            )
+            lease.locked_audit(
+                expected_evidence=quarantine,
+                expected_target=materialization
+                if materialization["pool"]["schema_version"]
+                == "task13-e-timing-pool-registration-v3"
+                else None,
+            )(db=db, controller_state_roots=tuple(roots), owned_locks=owned_locks)
 
 
 def adopt(spec, *, resume=False):
@@ -1409,8 +1533,9 @@ def adopt(spec, *, resume=False):
         "deadline elapsed or invalid resume mode",
     )
     p = read(spec["preparation"])
+    startup = _startup_schema(p.get("schema_version"), "preparation")
     require(
-        p.get("schema_version") == "task13-manual-recovery-preparation-v1"
+        p.get("schema_version") == _schema("preparation", startup)
         and p.get("status") == "pending_no_authority_or_registration"
         and p.get("actual_authority_created") == 0,
         "inert original manual recovery preparation required",
@@ -1440,7 +1565,7 @@ def adopt(spec, *, resume=False):
     )
     start = root / "activation/adoption-started.json"
     expected_start = adoption_marker(spec, materialization_pin)
-    expected_start["schema_version"] = "task13-manual-recovery-adoption-start-v1"
+    expected_start["schema_version"] = _schema("adoption-start", startup)
     if resume:
         require(
             start.exists() and read(pin(start)) == expected_start,
@@ -1479,15 +1604,28 @@ def adopt(spec, *, resume=False):
     for path in roots:
         plain(path, exists=False)
         if not path.exists():
+            staging = set()
+            if startup:
+                plan = read(p["recovery_plan"])
+                expected = [
+                    f"D:/传智杯/.tmp/t13v3-{plan['recovery_id'][:12]}-{i}"
+                    for i in (1, 2)
+                ]
+                require(
+                    plan.get("temporary_roots") == expected,
+                    "owned startup staging roots differ",
+                )
+                staging = {Path(value) for value in expected}
             require(
-                path.is_relative_to(root), "cannot reconstruct missing historical root"
+                path.is_relative_to(root) or path in staging,
+                "cannot reconstruct missing historical or unpinned staging root",
             )
             path.mkdir(parents=True)
     marker = Documents(root)
     marker.stage("activation/adoption-started.json", expected_start)
     marker.publish_missing() if resume else marker.publish()
     lock_spec = {
-        "schema_version": "task13-manual-recovery-lock-spec-v1",
+        "schema_version": _schema("lock-spec", startup),
         "pool_host_manifest": quarantine["pool_host_manifest"],
         "expected_scope": p["recovery_plan"],
         "stop_evidence": quarantine["stop_evidence"],
@@ -1514,7 +1652,10 @@ def adopt(spec, *, resume=False):
                     budget_identity=m["source"]["budget_identity"],
                     authority=authority,
                     expected_authority_sha256=canonical_hash(authority),
-                    locked_audit=lease.locked_audit(expected_evidence=quarantine),
+                    locked_audit=lease.locked_audit(
+                        expected_evidence=quarantine,
+                        expected_target=m if startup else None,
+                    ),
                 )
         if prefix == (True, True):
             audit_registered_prefix(lease, budget, m, original_budget, quarantine)
@@ -1574,7 +1715,7 @@ def adopt(spec, *, resume=False):
     )
     assert_preserved(p, skip_budget=budget)
     result = adoption_result(m, materialization_pin)
-    result["schema_version"] = "task13-manual-recovery-adoption-result-v1"
+    result["schema_version"] = _schema("adoption-result", startup)
     result["new_unclaimed_logical_slots"] = pool_policy(pool).future_logical_limit
     result["denied_structural_slots"] = len(pool["denied_attempts"])
     result_docs = Documents(root)

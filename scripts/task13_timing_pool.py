@@ -24,7 +24,7 @@ from pathlib import Path
 
 from evals.contracts import canonical_hash
 from evals.timing_pool import (
-    RECOVERY_REGISTRATION_SCHEMA,
+    RECOVERY_REGISTRATION_SCHEMAS,
     pool_policy,
     read_native_observation,
     validate_pool_receipt,
@@ -415,20 +415,21 @@ class NativePoolController:
         if self.manifest["schema_version"] not in {
             "task13-e-timing-pool-host-v1",
             "task13-e-timing-pool-host-v2",
+            "task13-e-timing-pool-host-v3",
         }:
             raise PoolStopped("pool host manifest schema differs")
         self.pool = validate_pool_registration(
             _decode(_read_pin(self.manifest["pool_registration"]))
         )
-        expected_host = (
-            "task13-e-timing-pool-host-v2"
-            if pool_policy(self.pool).future_logical_limit == 5
-            else "task13-e-timing-pool-host-v1"
-        )
+        expected_host = {
+            "task13-e-timing-pool-registration-v1": "task13-e-timing-pool-host-v1",
+            "task13-e-timing-pool-registration-v2": "task13-e-timing-pool-host-v2",
+            "task13-e-timing-pool-registration-v3": "task13-e-timing-pool-host-v3",
+        }[self.pool["schema_version"]]
         if self.manifest["schema_version"] != expected_host:
             raise PoolStopped("pool host and registration version differ")
         if (
-            self.pool["schema_version"] == RECOVERY_REGISTRATION_SCHEMA
+            self.pool["schema_version"] in RECOVERY_REGISTRATION_SCHEMAS
             and self.manifest["migration_marker"] != self.pool["quarantine_record"]
         ):
             raise PoolStopped("pool host quarantine raw reference differs")
@@ -482,7 +483,7 @@ class NativePoolController:
         from evals.timing_pool import validate_migration_marker
 
         if (
-            self.pool["schema_version"] == RECOVERY_REGISTRATION_SCHEMA
+            self.pool["schema_version"] in RECOVERY_REGISTRATION_SCHEMAS
             and self.manifest["migration_marker"] != self.pool["quarantine_record"]
         ):
             raise PoolStopped("pool host quarantine raw reference differs")
@@ -496,7 +497,7 @@ class NativePoolController:
         )
         for host in self.hosts.values():
             host._preflight(host._requests[0])
-        if self.pool["schema_version"] == RECOVERY_REGISTRATION_SCHEMA:
+        if self.pool["schema_version"] in RECOVERY_REGISTRATION_SCHEMAS:
             from types import SimpleNamespace
 
             from evals.timing_pool import _view, validate_denied_native_slot
@@ -624,7 +625,7 @@ class NativePoolController:
                     raise PoolStopped("owned native worker is not freshly absent")
                 proofs.append({"receipt_sha256": digest, "inspection": record})
         proof = {"inspected_at": datetime.now(UTC).isoformat(), "proofs": proofs}
-        if self.pool["schema_version"] == RECOVERY_REGISTRATION_SCHEMA:
+        if self.pool["schema_version"] in RECOVERY_REGISTRATION_SCHEMAS:
             from evals.timing_pool import validate_recovery_quarantine
             from evals.timing_pool_recovery import fresh_quarantine_workers_absent
 

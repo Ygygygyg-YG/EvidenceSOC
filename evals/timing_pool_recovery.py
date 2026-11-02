@@ -48,6 +48,13 @@ def _pin(ref):
 
 
 def _spec(spec):
+    if (
+        isinstance(spec, dict)
+        and spec.get("schema_version") == "task13-manual-startup-recovery-lock-spec-v1"
+    ):
+        from evals.timing_pool_startup_recovery import validate_startup_spec
+
+        return validate_startup_spec(spec)
     required = {
         "schema_version",
         "pool_host_manifest",
@@ -97,23 +104,36 @@ def _target_registration(spec):
     """Admit one independently pinned target, never a self-declared policy."""
     from evals.timing_pool import (
         RECOVERY_REGISTRATION_SCHEMA,
+        STARTUP_RECOVERY_REGISTRATION_SCHEMA,
         validate_recovery_bindings,
     )
 
+    startup = spec["schema_version"] == "task13-manual-startup-recovery-lock-spec-v1"
+    if startup:
+        from evals.timing_pool_startup_recovery import STARTUP_FROZEN
+    frozen = STARTUP_FROZEN if startup else FROZEN
+    expected_schema = (
+        STARTUP_RECOVERY_REGISTRATION_SCHEMA
+        if startup
+        else RECOVERY_REGISTRATION_SCHEMA
+    )
+    count = 4 if startup else 5
     target = _pin(spec["target_pool_registration"])
     old_host = _pin(spec["pool_host_manifest"])
     stop = _pin(spec["stop_evidence"])
     try:
         path = require_plain_path(target["execution_journal_path"])
         predecessor = target["quarantined_predecessor"]
-        grant = validate_recovery_bindings(target["migration_grant"], predecessor)
+        grant = validate_recovery_bindings(
+            target["migration_grant"], predecessor, pool_schema=expected_schema
+        )
         order = [entry["trial_id"] for entry in target["attempt_order"]]
         if (
-            target["schema_version"] != RECOVERY_REGISTRATION_SCHEMA
-            or target["future_logical_limit"] != 5
-            or target["future_physical_limit"] != 15
-            or len(order) != 5
-            or len(set(order)) != 5
+            target["schema_version"] != expected_schema
+            or target["future_logical_limit"] != count
+            or target["future_physical_limit"] != count * 3
+            or len(order) != count
+            or len(set(order)) != count
             or len(target["imported_observations"]) != 1
             or path.name != "pool-journal.jsonl"
             or str(path) == stop["pool_journal"]["path"]
@@ -126,7 +146,7 @@ def _target_registration(spec):
             or grant["recovery_plan_sha256"] != spec["expected_scope"]["sha256"]
             or predecessor["pool_registration"] != old_host["pool_registration"]
             or predecessor["pool_journal"] != stop["pool_journal"]
-            or predecessor["pool_head_sha256"] != FROZEN["journal_head"]
+            or predecessor["pool_head_sha256"] != frozen["journal_head"]
             or predecessor["quarantine_record"] != target["quarantine_record"]
         ):
             raise ValueError("target identity or predecessor")
@@ -182,11 +202,19 @@ class RecoveryLease:
         self.journals = journals
         self.native = None
         self.evidence = None
+        self.expected_target = None
+        self._expected_target_sha256 = None
         self._spec_sha256 = canonical_hash(spec)
 
-    def locked_audit(self, inputs=None, expected_evidence=None):
+    def locked_audit(
+        self, inputs=None, expected_evidence=None, *, expected_target=None
+    ):
         """Return the strengthening callback used inside native registration."""
         spec = self.spec if inputs is None else inputs
+        if expected_target is not None:
+            from evals.timing_pool_startup_recovery import bind_expected_target
+
+            bind_expected_target(self, expected_target)
 
         def check(*, db, controller_state_roots, owned_locks):
             _require_lease(self)
@@ -221,6 +249,11 @@ def _require_lease(lease):
         raise PermissionError("live manual recovery lease required")
     if canonical_hash(lease.spec) != lease._spec_sha256:
         raise PermissionError("manual recovery lease spec changed")
+    if (
+        lease.expected_target is not None
+        and canonical_hash(lease.expected_target) != lease._expected_target_sha256
+    ):
+        raise PermissionError("manual recovery target material changed")
     for path, owner in lease.owned.items():
         _require_owned_lock(path, owner)
     for journal, owner in lease.journals:
@@ -279,13 +312,15 @@ def _sealed_additional_outputs(roots, spec, target):
             ):
                 _additional_terminal(path.parent, start)
                 sealed.add(path.parent)
-    host = _pin(spec["pool_host_manifest"])
-    control_roots = {Path(host["journal_path"]).parent}
-    for pin in host["hosts"].values():
-        child_host = _pin(pin)
-        if child_host.get("schema_version") != "task13-e-host-controller-v1":
-            raise PermissionError("pinned predecessor host schema differs")
-        control_roots.add(require_plain_path(child_host["output_dir"]))
+    control_roots = set()
+    for predecessor in _closed_predecessors(spec):
+        host = _pin(predecessor["host"])
+        control_roots.add(Path(host["journal_path"]).parent)
+        for pin in host["hosts"].values():
+            child_host = _pin(pin)
+            if child_host.get("schema_version") != "task13-e-host-controller-v1":
+                raise PermissionError("pinned predecessor host schema differs")
+            control_roots.add(require_plain_path(child_host["output_dir"]))
     if target is not None:
         control_roots.add(Path(target["execution_journal_path"]).parent)
         control_roots.update(
@@ -309,6 +344,23 @@ def _sealed_additional_outputs(roots, spec, target):
     return sealed
 
 
+def _closed_predecessors(spec):
+    if spec["schema_version"] == "task13-manual-startup-recovery-lock-spec-v1":
+        from evals.timing_pool_startup_recovery import closed_predecessors
+
+        return closed_predecessors(spec)
+    stop = _pin(spec["stop_evidence"])
+    return [
+        {
+            "host": spec["pool_host_manifest"],
+            "journal": stop["pool_journal"],
+            "head": FROZEN["journal_head"],
+            "pool_sha256": FROZEN["pool_sha256"],
+            "schema": "task13-e-timing-pool-registration-v1",
+        }
+    ]
+
+
 @contextmanager
 def manual_recovery_quiescence(spec):
     """Hold all old host/pool locks; native locks remain owned by registration."""
@@ -319,7 +371,7 @@ def manual_recovery_quiescence(spec):
     raw = json.dumps({"pid": os.getpid(), "nonce": nonce}).encode()
     owned, journals = {}, []
     roots = [Path(p) for p in spec["controller_state_roots"]]
-    old = _pin(spec["stop_evidence"])["pool_journal"]
+    predecessors = {p["journal"]["path"]: p for p in _closed_predecessors(spec)}
     target = _target_registration(spec) if "target_pool_registration" in spec else None
     sealed = _sealed_additional_outputs(roots, spec, target)
     with ExitStack() as stack:
@@ -353,11 +405,18 @@ def manual_recovery_quiescence(spec):
                 require_plain_path(path, file=path.is_file())
                 if path.name == "pool-journal.jsonl":
                     found.add(path)
-        if Path(old["path"]) not in found:
+        if not {Path(p) for p in predecessors} <= found:
             raise PermissionError("frozen pool omitted from locked roots")
         for path in sorted(found):
-            if str(path) == old["path"]:
-                journal = PoolJournal(path, pool_sha256=FROZEN["pool_sha256"])
+            if str(path) in predecessors:
+                from evals.timing_pool import pool_policy
+
+                predecessor = predecessors[str(path)]
+                journal = PoolJournal(
+                    path,
+                    pool_sha256=predecessor["pool_sha256"],
+                    policy=pool_policy(predecessor["schema"]),
+                )
             elif target is not None and str(path) == target["execution_journal_path"]:
                 from evals.timing_pool import pool_policy
 
@@ -369,12 +428,20 @@ def manual_recovery_quiescence(spec):
             owner = stack.enter_context(journal.lock(_adoption=True))
             journals.append((journal, owner))
             state = journal.status()
-            if str(path) == old["path"]:
+            if str(path) in predecessors:
+                predecessor = predecessors[str(path)]
+                expected_stop = (
+                    "native_unknown"
+                    if predecessor["schema"] == "task13-e-timing-pool-registration-v2"
+                    else "unknown_native_execution"
+                )
                 if (
-                    state["journal_head"] != FROZEN["journal_head"]
-                    or state["pool_sha256"] != FROZEN["pool_sha256"]
+                    state["journal_head"] != predecessor["head"]
+                    or state["pool_sha256"] != predecessor["pool_sha256"]
+                    or sha256(path.read_bytes()).hexdigest()
+                    != predecessor["journal"]["sha256"]
                     or not state["pending"]
-                    or state["stopped"] != "unknown_native_execution"
+                    or state["stopped"] != expected_stop
                 ):
                     raise PermissionError("frozen unknown parent prefix differs")
             else:
@@ -417,7 +484,12 @@ def audit_old_pool_locked(inputs, *, lease):
         raise PermissionError("manual recovery lease spec differs")
     before = _tree_snapshot(spec["controller_state_roots"])
     try:
-        evidence = _audit_prefix(spec, lease)
+        if spec["schema_version"] == "task13-manual-startup-recovery-lock-spec-v1":
+            from evals.timing_pool_startup_recovery import audit_startup_prefix
+
+            evidence = audit_startup_prefix(spec, lease)
+        else:
+            evidence = _audit_prefix(spec, lease)
     except PermissionError:
         raise
     except (ValueError, KeyError, TypeError, OSError, sqlite3.Error) as error:
@@ -1094,6 +1166,17 @@ def fresh_quarantine_workers_absent(evidence):
     value = validate_quarantine_evidence(
         evidence, expected_scope=evidence["expected_scope"]
     )
+    if value.get("schema_version") == "task13-manual-startup-pool-quarantine-v1":
+        from evals.timing_pool_startup_recovery import fresh_startup_workers_absent
+
+        startup = fresh_startup_workers_absent(_pin(value["stop_evidence"]))
+        older = fresh_quarantine_workers_absent(_pin(value["older_quarantine"]))
+        return {
+            "schema_version": "task13-startup-quarantine-worker-absence-v1",
+            "status": "verified",
+            "startup": startup,
+            "older": older,
+        }
     return {
         "schema_version": "task13-manual-quarantine-worker-absence-v1",
         "status": "verified",
@@ -1109,6 +1192,25 @@ def fresh_quarantine_workers_absent(evidence):
 
 def validate_quarantine_evidence(evidence, *, expected_scope):
     """Validate the independent proof schema; never infer adoption or TTL credit."""
+    if (
+        isinstance(evidence, dict)
+        and evidence.get("schema_version") == "task13-manual-startup-pool-quarantine-v1"
+    ):
+        from evals.timing_pool_startup_recovery import validate_startup_quarantine
+
+        try:
+            return validate_startup_quarantine(evidence, expected_scope=expected_scope)
+        except (
+            ValueError,
+            KeyError,
+            TypeError,
+            OSError,
+            sqlite3.Error,
+            InvalidOperation,
+        ) as error:
+            raise PermissionError(
+                "invalid independent startup quarantine evidence"
+            ) from error
     required = {
         "schema_version",
         "status",

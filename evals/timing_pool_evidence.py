@@ -280,6 +280,13 @@ def _quiescence(proof, contexts):
             raise PermissionError("quarantine parent pool differs across contexts")
         quarantine = validate_recovery_quarantine(pool)
         absence = proof.get("quarantined_predecessor_workers")
+        if pool["schema_version"] == "task13-e-timing-pool-registration-v3":
+            from evals.timing_pool_startup_recovery import validate_startup_absence
+
+            validate_startup_absence(
+                absence, quarantine, inspected_at=proof["inspected_at"]
+            )
+            return when
         expected_workers = []
         for worker in quarantine["workers"]:
             container = worker["container_id"]

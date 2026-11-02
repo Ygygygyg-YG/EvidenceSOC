@@ -360,39 +360,16 @@ def test_v3_fresh_quiescence_requires_quarantined_predecessor_absence(
             )
         }
     }
+    from evals.tests.test_startup_pool_quarantine import startup_absence_fixture
+
+    absence, quarantine, when = startup_absence_fixture()
     monkeypatch.setattr(
-        timing_pool,
-        "validate_recovery_quarantine",
-        lambda p: {"workers": [{"container_id": "old-container"}]},
+        timing_pool, "validate_recovery_quarantine", lambda p: quarantine
     )
-    proof = {"inspected_at": "2026-11-01T00:00:00+00:00", "proofs": []}
+    proof = {"inspected_at": when, "proofs": []}
     with pytest.raises(PermissionError, match="quarantine predecessor"):
         _quiescence(proof, contexts)
-    proof["quarantined_predecessor_workers"] = {
-        "schema_version": "task13-manual-quarantine-worker-absence-v1",
-        "status": "verified",
-        "workers": [
-            {
-                "container_id": "old-container",
-                "inspection": {
-                    "argv": [
-                        "docker",
-                        "container",
-                        "ls",
-                        "--all",
-                        "--no-trunc",
-                        "--filter",
-                        "id=old-container",
-                        "--format",
-                        "{{.ID}}",
-                    ],
-                    "returncode": 0,
-                    "stdout_sha256": sha256(b"").hexdigest(),
-                    "stderr_sha256": sha256(b"").hexdigest(),
-                },
-            }
-        ],
-    }
+    proof["quarantined_predecessor_workers"] = absence
     assert _quiescence(proof, contexts).isoformat() == proof["inspected_at"]
 
 
