@@ -345,6 +345,27 @@ def test_startup_spec_rejects_caller_selected_predecessor():
         )
 
 
+def test_only_authentic_live_lease_writer_paths_are_transient(tmp_path, monkeypatch):
+    from evals.tests.test_timing_pool_recovery import synthetic_spec
+    from evals.timing_pool_startup_recovery import _owned_transient_paths
+
+    recovery, spec, journal = synthetic_spec(tmp_path, monkeypatch)
+    assert _owned_transient_paths(spec) == set()
+    with recovery.manual_recovery_quiescence(spec) as lease:
+        lock = journal.path.parent / "host-writer.lock"
+        assert _owned_transient_paths(spec) == {lock}
+        original = lock.read_bytes()
+        lock.write_bytes(b"forged-owner")
+        lease.owned[lock] = b"forged-owner"
+        try:
+            with pytest.raises(PermissionError):
+                _owned_transient_paths(spec)
+        finally:
+            lock.write_bytes(original)
+            lease.owned[lock] = original
+    assert _owned_transient_paths(spec) == set()
+
+
 def startup_absence_fixture():
     from evals.timing_pool_recovery import _pin
 

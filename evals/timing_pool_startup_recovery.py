@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import re
 import sqlite3
 import subprocess
@@ -561,6 +562,40 @@ def validate_startup_absence(absence, quarantine, *, inspected_at):
         ) from error
 
 
+def _owned_transient_paths(spec):
+    """Ignore only writer files authenticated by the matching live outer lease."""
+    from evals.timing_pool_recovery import _ACTIVE_LEASES, _require_lease
+
+    owned = set()
+    for lease in _ACTIVE_LEASES.values():
+        if any(
+            lease.spec.get(k) != spec.get(k)
+            for k in (
+                "expected_scope",
+                "pool_host_manifest",
+                "stop_evidence",
+                "fee_audit",
+            )
+        ):
+            continue
+        _require_lease(lease)
+        roots = {Path(p) for p in lease.spec["controller_state_roots"]}
+        _require(
+            {Path(p) for p in spec["controller_state_roots"]} <= roots,
+            "live startup lease root coverage differs",
+        )
+        raw = json.dumps({"pid": os.getpid(), "nonce": lease.nonce}).encode()
+        for path, owner in lease.owned.items():
+            if isinstance(owner, tuple):
+                continue
+            _require(
+                path in {root / "host-writer.lock" for root in roots} and owner == raw,
+                "live startup writer path or nonce owner differs",
+            )
+            owned.add(path)
+    return owned
+
+
 def _facts(spec):
     from evals.adapters.e_planning_journal import _read
     from evals.adapters.model_identities import require_registered_model_identity
@@ -623,6 +658,7 @@ def _facts(spec):
         "older quarantine binding differs",
     )
     validate_quarantine_evidence(old, expected_scope=old["expected_scope"])
+    transients = _owned_transient_paths(spec)
     natives, source = [], None
     for child, native in zip(pool["children"], fee["native_children"], strict=True):
         child_host = _pin(host["hosts"][child["child_id"]])
@@ -691,7 +727,9 @@ def _facts(spec):
             "startup genuine budget/source identity differs",
         )
         worker_root = Path(inputs["runtime_options"]["output_dir"])
-        worker_files = {p for p in worker_root.rglob("*") if p.is_file()}
+        worker_files = {
+            p for p in worker_root.rglob("*") if p.is_file() and p not in transients
+        }
         expected_worker_files = (
             {Path(stop["startup_failure"]["path"])}
             if child["child_id"] == pool["attempt_order"][0]["child_id"]
@@ -700,7 +738,8 @@ def _facts(spec):
         _require(
             worker_files == expected_worker_files
             and not any(
-                p.is_file() for p in Path(child_host["host_termination_dir"]).rglob("*")
+                p.is_file() and p not in transients
+                for p in Path(child_host["host_termination_dir"]).rglob("*")
             ),
             "unexpected native worker or termination output exists",
         )
