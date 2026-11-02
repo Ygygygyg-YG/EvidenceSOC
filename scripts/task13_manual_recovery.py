@@ -97,7 +97,16 @@ def prepared_scope_question(packet, packet_pin):
         "model_proposal": packet["model_proposal"],
         "recovery_plan": packet["recovery_plan"],
         "quarantine_record": packet["quarantine_record"],
-        "recovery_equivalence": packet["recovery_equivalence"],
+        "recovery_equivalence": {
+            "full_execution_dtos": "完整保留于scope_packet原包的recovery_equivalence字段",
+            "policy_pin": packet["recovery_equivalence"]["policy_pin"],
+            "original_execution_canonical_sha256": canonical_hash(
+                packet["recovery_equivalence"]["original_execution"]
+            ),
+            "candidate_execution_canonical_sha256": canonical_hash(
+                packet["recovery_equivalence"]["candidate_execution"]
+            ),
+        },
         "pool_proposal_sha256": packet["pool_proposal_sha256"],
         "data_scope": packet["data_scope"],
         "endpoint": packet["endpoint"],
@@ -1263,21 +1272,64 @@ def initialize_timing_genesis(child):
     require_timing_genesis(child)
 
 
-def require_inert_outputs(pool):
+def require_inert_outputs(pool, *, lease=None):
     """No planning, read, decision, trial, worker or denied-slot artifacts."""
+    owned = set()
+    if lease is not None:
+        import os
+
+        from evals.timing_pool_recovery import _require_lease
+
+        _require_lease(lease)
+        roots = {
+            plain(path, exists=False) for path in lease.spec["controller_state_roots"]
+        }
+        output_roots = set()
+        for child in pool["children"]:
+            timing = plain(child["evidence_root"], exists=False)
+            output_roots.update(
+                (
+                    timing,
+                    timing.parent,
+                    timing.parent.parent / "worker-output",
+                    timing.parent.parent / "host-termination",
+                )
+            )
+        fences = {root / ".pool-adoption-fence" for root in roots}
+        locks = {root / "host-writer.lock" for root in roots}
+        require(
+            output_roots <= roots
+            and fences <= lease.owned.keys() <= fences | locks
+            and {root / "host-writer.lock" for root in output_roots}
+            <= lease.owned.keys(),
+            "live recovery lease does not own the exact pool output roots",
+        )
+        owner_bytes = json.dumps({"pid": os.getpid(), "nonce": lease.nonce}).encode()
+        for path, owner in lease.owned.items():
+            require(
+                isinstance(owner, tuple)
+                if path in fences
+                else isinstance(owner, bytes) and owner == owner_bytes,
+                "native recovery metadata lock owner differs",
+            )
+        owned = set(lease.owned)
     for child in pool["children"]:
         timing = plain(child["evidence_root"], exists=False)
         host, base = timing.parent, timing.parent.parent
         for name in ("worker-output", "host-termination"):
             path = plain(base / name, exists=False)
             require(
-                not path.exists() or path.is_dir() and not any(path.iterdir()),
+                not path.exists()
+                or path.is_dir()
+                and all(entry in owned for entry in path.iterdir()),
                 "native execution output prevents metadata-only recovery",
             )
         if not host.exists():
             continue
         for path in host.rglob("*"):
             plain(path, exists=False)
+            if path in owned:
+                continue
             relative = path.relative_to(host).as_posix()
             require(
                 relative
@@ -1290,6 +1342,8 @@ def require_inert_outputs(pool):
                 or re.fullmatch(r"timing/events/00000000-[0-9a-f]{64}\.json", relative),
                 "planning or unknown native output prevents metadata-only recovery",
             )
+    if lease is not None:
+        _require_lease(lease)
 
 
 def audit_registered_prefix(lease, budget, materialization, baseline, quarantine):
@@ -1491,7 +1545,7 @@ def adopt(spec, *, resume=False):
         docs.publish_missing() if resume else docs.publish()
         for child in m["pool"]["children"]:
             initialize_timing_genesis(child)
-        require_inert_outputs(m["pool"])
+        require_inert_outputs(m["pool"], lease=lease)
         require(
             snapshot(budget) == registered_budget,
             "metadata initialization changed unrelated account rows",
