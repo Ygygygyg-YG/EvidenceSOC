@@ -890,3 +890,52 @@ def test_head_change_during_append_cannot_be_overwritten(tmp_path, monkeypatch):
     monkeypatch.setattr(m, "_write_rolling", changed)
     with pytest.raises(PermissionError, match="head"):
         ctl._append("test_append")
+
+
+@pytest.mark.parametrize("change", [None, "unknown", "extra", "null", "wrong_bundle"])
+def test_frozen_scope_validates_optional_human16_policy_without_execution(
+    tmp_path, monkeypatch, change
+):
+    from copy import deepcopy
+
+    from evals.tests.test_human_review_anytime import save, successor_authority
+    from evals.tests.test_human_review_v2 import frozen_view
+
+    m = module()
+    view = frozen_view(tmp_path)
+    # Keep the native fixture's complete scope; only add the optional human field.
+    human_dir = tmp_path / "human"
+    human_dir.mkdir()
+    scope, _, _, _ = successor_authority(human_dir)
+    policy = deepcopy(scope["human_review_participation"])
+    policy.update(
+        campaign_id=view.scope["campaign_id"], bundle_sha256=view.scope["bundle_sha256"]
+    )
+    if change == "unknown":
+        policy["schema_version"] = "unknown"
+    if change == "extra":
+        policy["automatic_credit"] = True
+    if change == "wrong_bundle":
+        policy["bundle_sha256"] = "0" * 64
+    view.scope["human_review_participation"] = None if change == "null" else policy
+    view.scope_pin = save(tmp_path, "scope", view.scope)
+    view.decision["scope_packet_sha256"] = view.scope_pin["sha256"]
+    view.decision_pin = save(tmp_path, "decision", view.decision)
+    packet, decision = m.materialize_regression_scope(
+        m.regression_host_proposal(view.host._manifest),
+        view.scope,
+        view.scope_pin["sha256"],
+        view.decision,
+        view.decision_pin["sha256"],
+    )
+    view.host._load().update(scope_packet=packet, scope_decision=decision)
+
+    def no_execution(*args, **kwargs):
+        raise AssertionError("read-only frozen audit must not admit execution")
+
+    monkeypatch.setattr(view, "_check_scope", no_execution)
+    if change is None:
+        assert view._check_frozen_scope()["bundle"]["bundle_sha256"] == "b" * 64
+    else:
+        with pytest.raises((ValueError, PermissionError)):
+            view._check_frozen_scope()

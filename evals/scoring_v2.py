@@ -252,6 +252,10 @@ def validate_f8_scope(
     view.policy = read_pin(view.scope["participation_policy"])
     view.identity, view.rows = deepcopy(campaign.identity), deepcopy(bundle["rows"])
     view._check_frozen_scope()
+    return {
+        "joint_scope": deepcopy(view.scope_pin),
+        "joint_decision": deepcopy(view.decision_pin),
+    }
 
 
 def score_bundle(
@@ -273,7 +277,7 @@ def score_bundle(
     """
     bundle = read_pin(bundle_pin)
     plans = load_original_plans(scoring_plan_pins)
-    validate_f8_scope(
+    authority = validate_f8_scope(
         joint_scope_pin,
         bundle,
         verification_campaign,
@@ -282,7 +286,23 @@ def score_bundle(
         output_root=output_root,
     )
     rows = collect_regression(bundle_pin, output_root)
-    reviews = validate_reviews(prepared_pin, captures, rows) if prepared_pin else {}
+    prepared = read_pin(prepared_pin) if prepared_pin else None
+    successor = (
+        prepared and prepared.get("schema_version") == "task13-human-review-prepared-v3"
+    )
+    human_authority = (
+        {
+            "joint_scope_pin": authority["joint_scope"],
+            "joint_decision_pin": authority["joint_decision"],
+        }
+        if successor
+        else {}
+    )
+    reviews = (
+        validate_reviews(prepared_pin, captures, rows, **human_authority)
+        if prepared_pin
+        else {}
+    )
     if captures and not prepared_pin:
         raise ValueError("human capture requires the original prepared packet")
     groups = {d: {g: [] for g in ("B2", "B3")} for d in ("ait", "dedale")}
@@ -346,6 +366,14 @@ def score_bundle(
             "prepared": prepared_pin,
             "records": reviews,
             "captures": list(captures),
+            "review_window": ("anytime" if successor else "19:00-00:00 Asia/Shanghai")
+            if prepared
+            else None,
+            "human_review_participation": (
+                prepared["human_review_participation"] if successor else None
+            ),
+            "joint_scope": authority["joint_scope"] if successor else None,
+            "joint_decision": authority["joint_decision"] if successor else None,
         },
         "verification_journal_head_sha256": verification.get("journal_head_sha256")
         if verification

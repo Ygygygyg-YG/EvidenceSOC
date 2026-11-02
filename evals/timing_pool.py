@@ -1254,10 +1254,11 @@ def _validate_source_semantics(view, trial, source):
 def _validate_host_semantics(view, host, inputs):
     from datetime import UTC, datetime
 
+    from evals.adapters.e_planning_journal import parse_authority
     from evals.adapters.model_identities import require_registered_model_identity
     from evals.adapters.source_epochs import require_registered_epoch
     from evals.e_planning import planning_requests
-    from scripts.task13_e_trial import INPUTS, ETrialController
+    from scripts.task13_e_trial import INPUTS
 
     if (
         host.get("schema_version") != "task13-e-host-controller-v1"
@@ -1268,33 +1269,11 @@ def _validate_host_semantics(view, host, inputs):
         or Path(host["output_dir"]) != view.root.parent
     ):
         raise PermissionError("native host identity or rooted output differs")
-    # Existing methods below are read-only. Never invoke a native constructor,
-    # preflight dispatcher, product factory, approval writer or provider.
-    reader = object.__new__(ETrialController)
-    reader._manifest = host
-    reader._inputs = inputs
-    reader._planning = inputs["planning_registration"]
-    reader._timing = view.registration
-    reader._requests = planning_requests(reader._planning)
-    reader._root = view.root.parent
-    reader._termination = _directory(host["host_termination_dir"])
-    reader._agent = _directory(host["agent_dir"])
-    reader._now = lambda: datetime.now(UTC)
-    reader._scope()
-    journal = reader._journal()
-    authority = inputs["planning_authority"]
-    denied = set(authority.get("denied_request_sha256s", []))
-    claims = {
-        t["trial_id"]: (
-            {"status": "unclaimed"}
-            if canonical_hash(request) in denied
-            else journal.validate_request(request)
-        )
-        for t, request in zip(
-            view.registration["trials"], reader._requests, strict=True
-        )
-    }
-    request = reader._requests[0]
+    # Authenticate the original native identities before any historical code
+    # can run. SQL lookups are read-only and retain the original budget path.
+    validate_registration(view.registration)
+    requests = planning_requests(inputs["planning_registration"])
+    request = requests[0]
     options = inputs["runtime_options"]
     budget = _plain(Path(options["budget_dir"]) / "campaign.sqlite")
     epoch = require_registered_epoch(
@@ -1312,12 +1291,14 @@ def _validate_host_semantics(view, host, inputs):
         "decision_record_sha256": host["inputs"]["scope_decision"]["sha256"],
     }:
         raise PermissionError("registered native source epoch authority differs")
+    if epoch["source_commit"] != request.source_commit:
+        raise PermissionError("registered native source commit differs")
     roots = [_directory(p) for p in epoch["controller_state_roots"]]
     if any(
         not any(path.is_relative_to(root) for root in roots)
         for path in (
-            reader._root,
-            reader._termination,
+            view.root.parent,
+            _directory(host["host_termination_dir"]),
             _directory(options["output_dir"]),
         )
     ):
@@ -1351,10 +1332,59 @@ def _validate_host_semantics(view, host, inputs):
     )
     if (
         descriptor["expected_model"]
-        != reader._planning["core_config"]["model_identity"]
+        != inputs["planning_registration"]["core_config"]["model_identity"]
     ):
         raise PermissionError("registered model descriptor differs")
-    from evals.timing_pool_history import read_historical_planning_analysis
+    authority = inputs["planning_authority"]
+    if (
+        authority.get("scope_packet_sha256") != host["inputs"]["scope_packet"]["sha256"]
+        or authority.get("decision_record_sha256")
+        != host["inputs"]["scope_decision"]["sha256"]
+    ):
+        raise PermissionError("original native planning scope authority differs")
+    parsed_authority = parse_authority(authority)
+    dispatch = view.registration["planning_dispatch_registration_receipt"]
+    if (
+        canonical_hash(parsed_authority) != dispatch["authority_sha256"]
+        or parsed_authority.registration_sha256
+        != canonical_hash(inputs["planning_registration"])
+        or parsed_authority.synthetic != host["synthetic"]
+        or parsed_authority.journal_path != dispatch["journal_path"]
+        or parsed_authority.scope_packet_sha256
+        != host["inputs"]["scope_packet"]["sha256"]
+        or parsed_authority.decision_record_sha256
+        != host["inputs"]["scope_decision"]["sha256"]
+    ):
+        raise PermissionError("original native planning authority binding differs")
+    from evals.timing_pool_history import (
+        historical_controller_type,
+        read_historical_planning_analysis,
+    )
+
+    controller = historical_controller_type(view, host, inputs, epoch)
+    # Only native read methods are called. No constructor, preflight, provider,
+    # decision, product factory or dispatch is part of this evidence reader.
+    reader = object.__new__(controller)
+    reader._manifest = host
+    reader._inputs = inputs
+    reader._planning = inputs["planning_registration"]
+    reader._timing = view.registration
+    reader._requests = requests
+    reader._root = view.root.parent
+    reader._termination = _directory(host["host_termination_dir"])
+    reader._agent = _directory(host["agent_dir"])
+    reader._now = lambda: datetime.now(UTC)
+    reader._scope()
+    journal = reader._journal()
+    denied = set(authority.get("denied_request_sha256s", []))
+    claims = {
+        t["trial_id"]: (
+            {"status": "unclaimed"}
+            if canonical_hash(item) in denied
+            else journal.validate_request(item)
+        )
+        for t, item in zip(view.registration["trials"], requests, strict=True)
+    }
 
     before = file_sha256(budget)
     imported = read_historical_planning_analysis(

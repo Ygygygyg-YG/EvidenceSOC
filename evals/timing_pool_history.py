@@ -8,6 +8,125 @@ from types import FunctionType, SimpleNamespace
 from evals.adapters.planning_recovery import validate_recovery_lineage
 
 
+def historical_controller_type(view, host, inputs, epoch):
+    """Select an authenticated v1 host, after the caller's SQL identity checks.
+
+    This replays the original host's read methods, using current compatible
+    native validator imports. It is not a replay of the entire old environment.
+    Current/v2 hosts never enter this branch or fall back after scope failure.
+    """
+    import sys
+    from hashlib import sha256
+    from importlib.util import module_from_spec, spec_from_file_location
+    from pathlib import Path, PurePosixPath
+    from uuid import uuid4
+
+    from evals.contracts import canonical_hash
+    from evals.timing_pool import (
+        REGISTRATION_SCHEMA,
+        _directory,
+        _json,
+        _load_host_inputs,
+        _plain,
+    )
+    from scripts import task13_e_trial as current
+
+    pool = inputs.get("pool_authority")
+    if pool is None or pool["schema_version"] != REGISTRATION_SCHEMA:
+        return current.ETrialController
+    if os.getpid() == 1 or os.environ.get("TASK13_WORKER_NONCE"):
+        raise PermissionError("historical scope reader is host-only")
+    if host != _json(
+        view.root.parent / "host-binding.json"
+    ) or inputs != _load_host_inputs(view, host):
+        raise PermissionError("original historical host manifest or input pin differs")
+    packet = inputs["scope_packet"]
+    root = _directory(packet["source_tree"])
+    script = _plain(root / "scripts/task13_e_trial.py")
+    if script == Path(current.__file__).resolve():
+        return current.ETrialController
+
+    # Exact root-relative mapping rejects aliases, duplicate relative names,
+    # mixed source roots and unregistered extra files before loading any code.
+    files = view.registration["source_files"]
+    mapped = {}
+    script_raw = None
+    for original, digest in files.items():
+        path = _plain(original)
+        if str(path) != str(path.resolve()) or not path.is_relative_to(root):
+            raise PermissionError("historical source has noncanonical or mixed roots")
+        relative = path.relative_to(root).as_posix()
+        if relative in mapped:
+            raise PermissionError("duplicate historical source path")
+        mapped[relative] = digest
+        raw = path.read_bytes()
+        if sha256(raw).hexdigest() != digest:
+            raise PermissionError("historical frozen source bytes differ")
+        if path == script:
+            script_raw = raw
+    if mapped != epoch["entrypoints"] or script_raw is None:
+        raise PermissionError("historical source map differs from registered epoch")
+
+    def pinned(ref):
+        if not isinstance(ref, dict) or set(ref) != {"path", "sha256"}:
+            raise PermissionError("historical manifest requires an exact raw pin")
+        raw = _plain(ref["path"]).read_bytes()
+        if sha256(raw).hexdigest() != ref["sha256"]:
+            raise PermissionError("historical manifest raw pin differs")
+        return current._decode(raw)
+
+    controller = pinned(packet["controller_manifest"])
+    options = inputs["runtime_options"]
+    if (
+        packet["controller_manifest"]["sha256"]
+        != epoch["runtime_binding"]["controller_manifest_sha256"]
+        or Path(packet["controller_manifest"]["path"])
+        != Path(options["controller_manifest_path"])
+        or controller["entrypoints"] != mapped
+        or controller["entrypoints_sha256"] != canonical_hash(mapped)
+        or controller["source_commit"] != epoch["source_commit"]
+        or view.registration["source_commit"] != epoch["source_commit"]
+        or packet["source_commit"] != epoch["source_commit"]
+    ):
+        raise PermissionError("historical controller manifest binding differs")
+    receipt = pinned(packet["source_receipt"])
+    worker_root = _directory(options["source_dir"])
+    if (
+        Path(packet["source_receipt"]["path"]) != worker_root / "source_receipt.json"
+        or canonical_hash(receipt) != epoch["source_sha256"]
+        or packet["source_sha256"] != epoch["source_sha256"]
+        or receipt["source_commit"] != epoch["source_commit"]
+    ):
+        raise PermissionError("historical worker source receipt binding differs")
+    for relative, digest in receipt["files"].items():
+        name = PurePosixPath(relative)
+        if (
+            name.is_absolute()
+            or ".." in name.parts
+            or str(name) != relative
+            or "\\" in relative
+            or ":" in relative
+            or sha256(_plain(worker_root / relative).read_bytes()).hexdigest() != digest
+        ):
+            raise PermissionError("historical worker source bytes differ")
+
+    # Execute exactly the authenticated buffer, with its truthful original
+    # filename. Never ask a loader to reread disk or create a bytecode cache.
+    # A private temporary entry supports dataclass annotation resolution only.
+    name = (
+        "_task13_historical_host_" + sha256(script_raw).hexdigest() + "_" + uuid4().hex
+    )
+    spec = spec_from_file_location(name, script)
+    module = module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        exec(compile(script_raw, str(script), "exec"), module.__dict__)  # noqa: S102 - original registered raw bytes, authenticated above.
+        return module.ETrialController
+    finally:
+        if sys.modules.get(name) is module:
+            del sys.modules[name]
+
+
 def _historical_identity_ledger(path, request, ledger, lineage):
     """SELECT only, full original physical mapping; never permits a reservation."""
     from evals.adapters.model_identities import require_model_identity_in_transaction

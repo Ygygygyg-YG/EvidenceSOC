@@ -10,6 +10,8 @@ elapsed time, not active reading time. Missing observations remain null.
 """
 
 import json
+import re
+from copy import deepcopy
 from datetime import UTC, datetime, timedelta, timezone
 from hashlib import sha256
 
@@ -19,6 +21,104 @@ from evals.task13_rolling import _read_rolling
 
 PLAN_SHA256 = "af9c8444012be08252fdfafecfa6cc846476c13b8508db425363553ee4db07fe"
 ORDER_SHA256 = "0397985ccc72aef8fe6b101630d76f7c486c9c67938b09f9977c31716bd193e4"
+ANYTIME_AUTHORIZATION_SHA256 = (
+    "decdef181118f852fbde86758f8ee2660a6fb2f0d556364df25b125d1cec4035"
+)
+
+
+def _strict_pin(pin):
+    if (
+        not isinstance(pin, dict)
+        or set(pin) != {"path", "sha256"}
+        or not isinstance(pin["path"], str)
+        or not pin["path"].strip()
+        or not isinstance(pin["sha256"], str)
+        or not re.fullmatch("[0-9a-f]{64}", pin["sha256"])
+    ):
+        raise ValueError("exact raw artifact pin required")
+    return read_pin(pin)
+
+
+def validate_human_participation(joint_scope_pin, joint_decision_pin):
+    """Read-only successor authority; callers independently choose both raw pins.
+
+    This checks the human subsection, not native execution authority. The native
+    scorer additionally audits the sealed formal host and complete joint scope.
+    No historical deadline limits offline human submission.
+    """
+    scope, decision = _strict_pin(joint_scope_pin), _strict_pin(joint_decision_pin)
+    if (
+        not isinstance(scope, dict)
+        or scope.get("schema_version") != "task13-rolling-joint-scope-v1"
+        or not isinstance(scope.get("campaign_id"), str)
+        or not scope["campaign_id"].strip()
+        or not isinstance(scope.get("bundle_sha256"), str)
+        or not re.fullmatch("[0-9a-f]{64}", scope["bundle_sha256"])
+    ):
+        raise ValueError("actual new formal joint scope identity required")
+    policy = scope.get("human_review_participation")
+    literals = {
+        "schema_version": "task13-human16-participation-v1",
+        "review_window": "anytime",
+        "reviewer": "user",
+        "applies_to": "new-registered-sixteen-slot-sample-only",
+        "judgment_mode": "individual-actual-user",
+        "campaign_id": scope["campaign_id"],
+        "bundle_sha256": scope["bundle_sha256"],
+    }
+    pinned = {
+        "human_plan": PLAN_SHA256,
+        "presentation_order": ORDER_SHA256,
+        "anytime_authorization": ANYTIME_AUTHORIZATION_SHA256,
+    }
+    if (
+        not isinstance(policy, dict)
+        or set(policy) != set(literals) | set(pinned)
+        or any(policy[k] != v for k, v in literals.items())
+    ):
+        raise ValueError("explicit exact human16 anytime participation required")
+    for key, digest in pinned.items():
+        value = _strict_pin(policy[key])
+        if policy[key]["sha256"] != digest:
+            raise ValueError(
+                "original human registration/actual anytime instruction required"
+            )
+        if key == "anytime_authorization" and (
+            value.get("schema_version")
+            != "task13-startup-recovery-actual-user-instructions-v1"
+            or value.get("role") != "user"
+            or value.get("source") != "actual_user_messages_in_current_chat"
+            or value.get("dispatch_window") != "anytime"
+            or value.get("user_presence_required") is not False
+            or value.get("plan_approval_credit") != 0
+            or value.get("formal176_or_f8_sending_approval_credit") is not False
+            or "remove time-window and continuous-presence restriction"
+            not in value.get("scope_delta", [])
+        ):
+            raise ValueError(
+                "retained actual-user anytime instruction provenance required"
+            )
+    if (
+        not isinstance(decision, dict)
+        or decision.get("schema_version") != "task13-rolling-joint-user-decision-v1"
+        or decision.get("role") != "user"
+        or decision.get("decision") != "approved"
+        or decision.get("scope_packet_sha256") != joint_scope_pin["sha256"]
+        or decision.get("synthetic_control_fixture", False) is not False
+        or decision.get("automatic_approval", False) is not False
+        or any(
+            not isinstance(decision.get(k), str) or not decision[k].strip()
+            for k in ("record_id", "text", "decided_at")
+        )
+    ):
+        raise ValueError("actual joint human16 scope approval required")
+    return deepcopy(policy), _time(decision["decided_at"])
+
+
+def _authority_pair(joint_scope_pin, joint_decision_pin):
+    if (joint_scope_pin is None) != (joint_decision_pin is None):
+        raise ValueError("both external joint scope and actual decision pins required")
+    return joint_scope_pin is not None
 
 
 def _blind(value):
@@ -66,7 +166,18 @@ def review_question(prepared_pin, slot_id):
     }
 
 
-def prepare_reviews(plan_pin, order_pin, rows):
+def prepare_reviews(
+    plan_pin, order_pin, rows, *, joint_scope_pin=None, joint_decision_pin=None
+):
+    successor = _authority_pair(joint_scope_pin, joint_decision_pin)
+    policy = None
+    if successor:
+        policy, _ = validate_human_participation(joint_scope_pin, joint_decision_pin)
+        if (
+            policy["human_plan"] != plan_pin
+            or policy["presentation_order"] != order_pin
+        ):
+            raise ValueError("human16 policy registration pins differ from preparation")
     if plan_pin["sha256"] != PLAN_SHA256 or order_pin["sha256"] != ORDER_SHA256:
         raise ValueError("original sixteen-slot registration required")
     plan, order = read_pin(plan_pin), read_pin(order_pin)
@@ -109,15 +220,25 @@ def prepare_reviews(plan_pin, order_pin, rows):
                 "unavailable_reason": reason,
             }
         )
-    return {
+    prepared = {
         "schema_version": "task13-human-review-prepared-v2",
         "human_plan": plan_pin,
         "presentation_order": order_pin,
         "records": records,
     }
+    if successor:
+        prepared.update(
+            schema_version="task13-human-review-prepared-v3",
+            joint_scope=deepcopy(joint_scope_pin),
+            joint_decision=deepcopy(joint_decision_pin),
+            human_review_participation=policy,
+        )
+    return prepared
 
 
-def validate_reviews(prepared_pin, captures, rows):
+def validate_reviews(
+    prepared_pin, captures, rows, *, joint_scope_pin=None, joint_decision_pin=None
+):
     """Return scorer dictionaries keyed by NEW regression slot, all sixteen kept.
 
     captures is [{presentation: rawpin, reply: rawpin}], in completed slot order.
@@ -127,9 +248,35 @@ def validate_reviews(prepared_pin, captures, rows):
     This validates retained provenance, not the honesty of a fabricated local file;
     the operator must retain the actual incoming UI records, never author consent.
     """
+    supplied = _authority_pair(joint_scope_pin, joint_decision_pin)
     prepared = read_pin(prepared_pin)
+    schema = prepared.get("schema_version")
+    successor = schema == "task13-human-review-prepared-v3"
+    if schema not in {
+        "task13-human-review-prepared-v2",
+        "task13-human-review-prepared-v3",
+    }:
+        raise ValueError("unknown human prepared schema")
+    authority = {}
+    activation = None
+    if successor:
+        if (
+            not supplied
+            or prepared.get("joint_scope") != joint_scope_pin
+            or prepared.get("joint_decision") != joint_decision_pin
+        ):
+            raise ValueError(
+                "successor requires exact external joint scope/decision pins"
+            )
+        _, activation = validate_human_participation(
+            joint_scope_pin, joint_decision_pin
+        )
+        authority = {
+            "joint_scope_pin": joint_scope_pin,
+            "joint_decision_pin": joint_decision_pin,
+        }
     expected = prepare_reviews(
-        prepared["human_plan"], prepared["presentation_order"], rows
+        prepared["human_plan"], prepared["presentation_order"], rows, **authority
     )
     if prepared != expected:
         raise ValueError("prepared reports no longer match actual sealed output")
@@ -203,11 +350,15 @@ def validate_reviews(prepared_pin, captures, rows):
         ) or (reply.get("title") != title or reply.get("question") != question):
             raise ValueError("reply differs from actual blinded presentation")
         started, ended = _time(start["captured_at"]), _time(reply["captured_at"])
+        if successor and (started < activation or ended < activation):
+            raise ValueError(
+                "human16 successor capture predates actual joint activation"
+            )
         if ended < started or (previous_capture and started < previous_capture):
             raise ValueError("actual captures out of order")
         previous_capture = ended
         local = ended.astimezone(timezone(timedelta(hours=8)))
-        if local.hour < 19:
+        if not successor and local.hour < 19:
             raise ValueError(
                 "registered human review window is 19:00-00:00 Asia/Shanghai"
             )

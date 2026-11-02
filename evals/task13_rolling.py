@@ -1002,6 +1002,11 @@ class NativeRollingOperations:
             > datetime.now(timezone.utc)
         ):
             raise PermissionError("actual joint user scope approval required")
+        if "human_review_participation" in scope:
+            # Runtime import avoids the human bridge's guarded-reader import cycle.
+            from evals.human_review_v2 import validate_human_participation
+
+            validate_human_participation(self.scope_pin, self.decision_pin)
         identity = {
             "campaign_id": bundle["campaign_id"],
             "source_commit": bundle["source_commit"],
