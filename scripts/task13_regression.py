@@ -93,15 +93,25 @@ class FreeDependencies:
 class RegressionHost:
     """Independent raw pins are caller admission inputs, never self-reported hashes."""
 
+    HOST_SCHEMA = "task13-regression-host-v1"
+    SCOPE_SCHEMA = "task13-regression-scope-v1"
+    DECISION_SCHEMA = "task13-regression-user-scope-decision-v1"
+    FREEZE_SCHEMA = "task13-regression-final-freeze-v1"
+    SCOPE = SCOPE
+    INPUTS = INPUTS
+    FROZEN_INPUTS = FROZEN_INPUTS
+    HOST_ENTRYPOINT = HOST_ENTRYPOINT
+    HOST_ENTRIES = HOST_ENTRIES
+
     def __init__(self, manifest_path, manifest_sha256, *, free_dependencies=None):
         self._pin = {"path": str(manifest_path), "sha256": manifest_sha256}
         self._raw = _read_pin(self._pin)
         self._manifest = _decode(self._raw)
         m = self._manifest
         if (
-            m.get("schema_version") != "task13-regression-host-v1"
+            m.get("schema_version") != self.HOST_SCHEMA
             or type(m.get("synthetic")) is not bool
-            or set(m.get("inputs", {})) != INPUTS
+            or set(m.get("inputs", {})) != self.INPUTS
             or set(m.get("case_roots", {})) != {"ait", "dedale"}
             or type(m.get("max_evidence_age_seconds")) is not int
             or not 1 <= m["max_evidence_age_seconds"] <= 86400
@@ -120,9 +130,16 @@ class RegressionHost:
             free_dependencies.now if free_dependencies else lambda: datetime.now(UTC)
         )
         self._root = _path(m["output_dir"])
-        _time(m["deadline_at"])
+        self._validate_deadline()
         for path in m["case_roots"].values():
             _path(path)
+
+    def _validate_deadline(self):
+        _time(self._manifest["deadline_at"])
+
+    def _check_deadline(self):
+        if self._now() >= _time(self._manifest["deadline_at"]):
+            raise PermissionError("registered regression deadline has passed")
 
     def _load(self):
         if _read_pin(self._pin) != self._raw:
@@ -143,21 +160,19 @@ class RegressionHost:
     def _scope(self, data):
         m, packet, record = self._manifest, data["scope_packet"], data["scope_decision"]
         refs = m["inputs"]
-        if self._now() >= _time(m["deadline_at"]):
-            raise PermissionError("registered regression deadline has passed")
+        self._check_deadline()
         if (
-            packet.get("schema_version") != "task13-regression-scope-v1"
-            or packet.get("scope") != SCOPE
+            packet.get("schema_version") != self.SCOPE_SCHEMA
+            or packet.get("scope") != self.SCOPE
             or packet.get("campaign_id") != data["bundle"]["campaign_id"]
             or packet.get("final_freeze_sha256") != refs["final_freeze"]["sha256"]
             or packet.get("bundle_sha256") != data["bundle"]["bundle_sha256"]
             or type(packet.get("registered_rows")) is not int
             or packet["registered_rows"] != 176
             or packet.get("deadline_at") != m["deadline_at"]
-            or record.get("schema_version")
-            != "task13-regression-user-scope-decision-v1"
+            or record.get("schema_version") != self.DECISION_SCHEMA
             or record.get("role") != "user"
-            or record.get("scope") != SCOPE
+            or record.get("scope") != self.SCOPE
             or record.get("decision") != "approved"
             or record.get("scope_packet_sha256") != refs["scope_packet"]["sha256"]
             or any(
@@ -207,7 +222,7 @@ class RegressionHost:
             or "timing_receipt_sha256" in core
             or canonical_hash(source) != b["source_sha256"]
             or source.get("source_commit") != b["source_commit"]
-            or freeze.get("schema_version") != "task13-regression-final-freeze-v1"
+            or freeze.get("schema_version") != self.FREEZE_SCHEMA
             or freeze.get("status") != "frozen"
             or freeze.get("synthetic") is not self._manifest["synthetic"]
             or freeze.get("campaign_id") != b["campaign_id"]
@@ -222,21 +237,24 @@ class RegressionHost:
                 )
             )
             or freeze.get("bindings")
-            != {key: self._manifest["inputs"][key]["sha256"] for key in FROZEN_INPUTS}
+            != {
+                key: self._manifest["inputs"][key]["sha256"]
+                for key in self.FROZEN_INPUTS
+            }
         ):
             raise PermissionError(
                 "final freeze, exact registration or shared E core configuration differs"
             )
         files = freeze.get("source_files")
-        actual_host = Path(__file__).resolve()
+        actual_host = Path(__file__).resolve().parents[1] / self.HOST_ENTRYPOINT
         actual_hash = sha256(actual_host.read_bytes()).hexdigest()
         if (
             not isinstance(files, dict)
             or not files
             or files.get(str(actual_host)) != actual_hash
             or (
-                HOST_ENTRYPOINT in source.get("files", {})
-                and source["files"][HOST_ENTRYPOINT] != actual_hash
+                self.HOST_ENTRYPOINT in source.get("files", {})
+                and source["files"][self.HOST_ENTRYPOINT] != actual_hash
             )
         ):
             raise PermissionError("actual frozen regression host entrypoint is missing")
@@ -245,7 +263,7 @@ class RegressionHost:
                 raise PermissionError("frozen E source file changed")
         if not self._manifest["synthetic"]:
             root = actual_host.parents[1]
-            required_host_entries = HOST_ENTRIES | (
+            required_host_entries = self.HOST_ENTRIES | (
                 {
                     "evals/adapters/model_identity_runtime.py",
                     "evals/adapters/model_identities.py",
@@ -477,7 +495,7 @@ class RegressionHost:
                 "actual R1/R2 evaluated source coverage is incomplete"
             )
 
-    def _rag(self, data):
+    def _rag(self, data, *, fresh=True):
         index = data["rag_receipt"]
         if (
             index.get("schema_version") != "task13-rag-gate-index-v2"
@@ -485,7 +503,9 @@ class RegressionHost:
             or not _zero(index.get("paid_model_requests"))
         ):
             raise PermissionError("fresh zero-paid actual R1/R2 gate index required")
-        self._fresh(index["created_at"])
+        _time(index["created_at"])
+        if fresh:
+            self._fresh(index["created_at"])
         self._source_binding(index["source"], data)
         for filename, label in (("r1-channel.json", "R1"), ("r2-isolation.json", "R2")):
             gate = _decode(_read_pin(index["gates"][filename]))
@@ -499,7 +519,9 @@ class RegressionHost:
                 or gate.get("source") != index["source"]
             ):
                 raise PermissionError("actual R1/R2 primary receipt failed or differs")
-            self._fresh(gate["created_at"])
+            _time(gate["created_at"])
+            if fresh:
+                self._fresh(gate["created_at"])
 
     def _test_report(self, specification, data):
         report = _decode(_read_pin(specification["evidence"]))
@@ -620,7 +642,7 @@ class RegressionHost:
                     "actual accepted agent bytes differ from registration"
                 )
 
-    def _price(self, data):
+    def _price(self, data, *, fresh=True):
         price, core = data["model_price_receipt"], data["core_config"]
         checks = price.get("checks")
         if (
@@ -639,19 +661,22 @@ class RegressionHost:
             or not isinstance(checks, dict)
             or len(checks) < 8
             or any(value is not True for value in checks.values())
-            or _time(price["valid_until"]) <= self._now()
+            or (fresh and _time(price["valid_until"]) <= self._now())
             or not isinstance(price.get("evidence"), list)
             or not price["evidence"]
         ):
             raise PermissionError(
                 "fresh external model/version/price comparison required"
             )
-        self._fresh(price["checked_at"])
+        _time(price["valid_until"])
+        _time(price["checked_at"])
+        if fresh:
+            self._fresh(price["checked_at"])
         for ref in price["evidence"]:
             if not _read_pin(ref):
                 raise PermissionError("public provider evidence is empty")
 
-    def _runtime(self, data):
+    def _runtime_binding(self, data):
         options, bundle, core = (
             data[key] for key in ("runtime_options", "bundle", "core_config")
         )
@@ -667,6 +692,13 @@ class RegressionHost:
             raise PermissionError(
                 "formal runtime must retain the original budget/source identity"
             )
+        return budget
+
+    def _runtime(self, data):
+        options, bundle, core = (
+            data[key] for key in ("runtime_options", "bundle", "core_config")
+        )
+        budget = self._runtime_binding(data)
         if self._free:
             self._free.runtime_validator(deepcopy(data), deepcopy(self._manifest))
             return
@@ -746,7 +778,7 @@ class RegressionHost:
                 str(Path(__file__).resolve().parents[1] / relative)
             )
             or relative not in epoch["entrypoints"]
-            for relative in HOST_ENTRIES
+            for relative in self.HOST_ENTRIES
         ):
             raise PermissionError(
                 "actual regression host/helper is outside the registered source epoch"
@@ -788,10 +820,14 @@ class RegressionHost:
             KeyError,
             TypeError,
         ) as error:
-            return {"status": "PENDING", "reason": type(error).__name__, "scope": SCOPE}
+            return {
+                "status": "PENDING",
+                "reason": type(error).__name__,
+                "scope": self.SCOPE,
+            }
         return {
             "status": "verified",
-            "scope": SCOPE,
+            "scope": self.SCOPE,
             "synthetic": self._manifest["synthetic"],
             "bundle_sha256": data["bundle"]["bundle_sha256"],
         }
@@ -807,7 +843,11 @@ class RegressionHost:
                 "offline_contract_test" if self._free else "real_execution",
             )
         except (OSError, ValueError, PermissionError, KeyError, TypeError) as error:
-            return {"status": "PENDING", "reason": type(error).__name__, "scope": SCOPE}
+            return {
+                "status": "PENDING",
+                "reason": type(error).__name__,
+                "scope": self.SCOPE,
+            }
 
     def _admit(self, identity):
         data = self._preflight()
