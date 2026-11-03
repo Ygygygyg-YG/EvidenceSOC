@@ -999,6 +999,55 @@ async def run_remediation_review_container(
     return value
 
 
+def container_service_environment(values: dict) -> dict:
+    """Map the approved local endpoints without changing host read settings."""
+    from urllib.parse import urlsplit, urlunsplit
+
+    from sqlalchemy.engine import make_url
+
+    if set(values) != {"DATABASE_URL", "OPENSEARCH_URL"} or any(
+        not isinstance(value, str) for value in values.values()
+    ):
+        raise PermissionError("exactly two service settings required")
+    database = make_url(values["DATABASE_URL"])
+    search = urlsplit(values["OPENSEARCH_URL"])
+    if database.get_backend_name() != "postgresql":
+        raise PermissionError("PostgreSQL required")
+    if database.host not in {
+        "localhost",
+        "127.0.0.1",
+        "::1",
+        "evidencesoc-postgres-1",
+    } or database.port not in {None, 5432}:
+        raise PermissionError("unapproved database endpoint")
+    if {"host", "port", "hostaddr", "service", "servicefile"}.intersection(
+        database.query
+    ):
+        raise PermissionError("database endpoint override")
+    if not (
+        search.scheme in {"http", "https"}
+        and (
+            search.hostname in {"localhost", "127.0.0.1", "::1"}
+            and search.port == 9201
+            or search.hostname == "evidencesoc-opensearch-1"
+            and search.port == 9200
+        )
+        and search.path in {"", "/"}
+        and not search.query
+        and not search.fragment
+    ):
+        raise PermissionError("unapproved search endpoint")
+    auth = search.netloc.rsplit("@", 1)[0] + "@" if "@" in search.netloc else ""
+    return {
+        "DATABASE_URL": database.set(
+            host="evidencesoc-postgres-1", port=5432
+        ).render_as_string(hide_password=False),
+        "OPENSEARCH_URL": urlunsplit(
+            (search.scheme, auth + "evidencesoc-opensearch-1:9200", "", "", "")
+        ),
+    }
+
+
 async def run_container(spec: dict, agent_dir: Path, options: dict) -> dict:
     from evals.datasets.dedale.common import read_json
     from evals.runners.manifest import file_hash, write_immutable_json
@@ -1228,6 +1277,12 @@ async def run_container(spec: dict, agent_dir: Path, options: dict) -> dict:
             ]
             if key in os.environ
         }
+        if epoch_regression:
+            passed.update(
+                container_service_environment(
+                    {key: passed[key] for key in ("DATABASE_URL", "OPENSEARCH_URL")}
+                )
+            )
         passed.update(
             {
                 "PYTHONPATH": "/app/source:/app/source/services/backend/src:/opt/task13-deps",
