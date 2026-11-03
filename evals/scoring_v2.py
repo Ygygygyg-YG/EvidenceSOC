@@ -305,6 +305,57 @@ def score_bundle(
     )
     if captures and not prepared_pin:
         raise ValueError("human capture requires the original prepared packet")
+    groups, hashes = _assemble_score_groups(
+        bundle_pin, scoring_plan_pins, plans, rows, reviews
+    )
+    verification = native_f8(verification_campaign) if verification_campaign else None
+    if verification and verification["source_commit"] != bundle["source_commit"]:
+        raise ValueError("F8 and formal regression source identities differ")
+    return {
+        "schema_version": 1,
+        "run_id": bundle["campaign_id"] + "-formal176",
+        "metadata": {
+            "source_commit": bundle["source_commit"],
+            "requested_model": rows[0]["request"]["model"]["requested_model"],
+            "published_version": rows[0]["request"]["model"]["published_version"],
+            "planned_n": 176,
+            "formal_complete": False,
+            "score_status": "independent_intermediate",
+            "human_metrics_scope": "new registered sixteen-slot sample only",
+        },
+        "groups": groups,
+        "verification": score_f8(verification) if verification else {},
+        "source_hashes": hashes,
+        "human_review": {
+            "prepared": prepared_pin,
+            "records": reviews,
+            "captures": list(captures),
+            "review_window": ("anytime" if successor else "19:00-00:00 Asia/Shanghai")
+            if prepared
+            else None,
+            "human_review_participation": (
+                prepared["human_review_participation"] if successor else None
+            ),
+            "joint_scope": authority["joint_scope"] if successor else None,
+            "joint_decision": authority["joint_decision"] if successor else None,
+        },
+        "verification_journal_head_sha256": verification.get("journal_head_sha256")
+        if verification
+        else None,
+        "verification_identity": {
+            k: verification[k]
+            for k in ("plan_sha256", "source_commit", "source_sha256", "config_sha256")
+        }
+        if verification
+        else None,
+        "joint_scope": joint_scope_pin,
+        "formal_host": formal_host_pin,
+        "joint_decision": joint_decision_pin,
+    }
+
+
+def _assemble_score_groups(bundle_pin, scoring_plan_pins, plans, rows, reviews):
+    """Shared read-only gold binding; authority remains each entrypoint's duty."""
     groups = {d: {g: [] for g in ("B2", "B3")} for d in ("ait", "dedale")}
     hashes = {"bundle_raw": bundle_pin["sha256"]}
     for dataset, plan in plans.items():
@@ -341,50 +392,110 @@ def score_bundle(
                 "reserved_tool_slots": row["request"]["budget"]["max_tool_calls"],
             }
         )
-    verification = native_f8(verification_campaign) if verification_campaign else None
-    if verification and verification["source_commit"] != bundle["source_commit"]:
-        raise ValueError("F8 and formal regression source identities differ")
+    return _score_groups(groups), hashes
+
+
+def _score_groups(groups):
+    """Pure shared metric assembly with the original formula and denominators."""
+    return {
+        d: {g: score_rows(values) for g, values in gs.items()}
+        for d, gs in groups.items()
+    }
+
+
+def score_regression_only(
+    bundle_pin,
+    output_root,
+    *,
+    scoring_plan_pins,
+    formal_host_pin,
+    prepared_pin=None,
+    captures=(),
+):
+    """Score complete sealed176 offline; E3/F8 remain explicitly deferred.
+
+    Requires an independently pinned native host, original frozen gold/plans and
+    v4 human16 records. Partial actual reviews may be reported, but never confer
+    human completeness or response-plan approval. Synthetic evidence earns only
+    offline contract-test labels. Returned JSON must be independently pinned.
+    """
+    from evals.regression_only_authority import validate_regression_only_scope
+
+    if output_root is None:
+        raise ValueError("explicit external regression output root required")
+    authority = validate_regression_only_scope(
+        formal_host_pin, bundle_pin=bundle_pin, output_root=output_root
+    )
+    bundle, rows = authority["bundle"], authority["rows"]
+    plans = load_original_plans(scoring_plan_pins)
+    prepared = read_pin(prepared_pin) if prepared_pin else None
+    if prepared and prepared.get("schema_version") != "task13-human-review-prepared-v4":
+        raise ValueError("regression-only scoring requires its own human16 packet")
+    if captures and not prepared_pin:
+        raise ValueError("human capture requires the original prepared packet")
+    reviews = (
+        validate_reviews(
+            prepared_pin, captures, rows, regression_only_host_pin=formal_host_pin
+        )
+        if prepared_pin
+        else {}
+    )
+    objective_reasons = {"missing_output", "no_report", "no_factual_claims"}
+    resolved = sum(
+        r["reviewed"] is True or r.get("reason") in objective_reasons
+        for r in reviews.values()
+    )
+    human_complete = len(reviews) == 16 and resolved == 16
+    groups, hashes = _assemble_score_groups(
+        bundle_pin, scoring_plan_pins, plans, rows, reviews
+    )
+    hashes.update(
+        {
+            "formal_host_raw": formal_host_pin["sha256"],
+            **{
+                "host_input:" + key: value["sha256"]
+                for key, value in authority["input_pins"].items()
+            },
+        }
+    )
+    synthetic = authority["synthetic"]
     return {
         "schema_version": 1,
-        "run_id": bundle["campaign_id"] + "-formal176",
+        "artifact_schema": "task13-regression-only-score-v1",
+        "run_id": bundle["campaign_id"] + "-regression-only176",
         "metadata": {
             "source_commit": bundle["source_commit"],
             "requested_model": rows[0]["request"]["model"]["requested_model"],
             "published_version": rows[0]["request"]["model"]["published_version"],
             "planned_n": 176,
             "formal_complete": False,
-            "score_status": "independent_intermediate",
+            "score_status": "offline_contract_test"
+            if synthetic
+            else "independent_intermediate",
+            "mode": "regression_only",
+            "synthetic": synthetic,
+            "scope": "offline_contract_test" if synthetic else "real_execution",
             "human_metrics_scope": "new registered sixteen-slot sample only",
+            "human_metrics_complete": human_complete,
         },
-        "groups": {
-            d: {g: score_rows(values) for g, values in gs.items()}
-            for d, gs in groups.items()
-        },
-        "verification": score_f8(verification) if verification else {},
+        "groups": groups,
+        "verification": {},
+        "verification_identity": None,
+        "verification_journal_head_sha256": None,
+        "deferred": {"E3": "deferred", "F8": "deferred"},
         "source_hashes": hashes,
+        "formal_host": formal_host_pin,
         "human_review": {
             "prepared": prepared_pin,
             "records": reviews,
             "captures": list(captures),
-            "review_window": ("anytime" if successor else "19:00-00:00 Asia/Shanghai")
+            "review_window": "anytime" if prepared else None,
+            "human_review_participation": prepared["human_review_participation"]
             if prepared
             else None,
-            "human_review_participation": (
-                prepared["human_review_participation"] if successor else None
-            ),
-            "joint_scope": authority["joint_scope"] if successor else None,
-            "joint_decision": authority["joint_decision"] if successor else None,
+            "resolved_slots": resolved,
+            "planned_slots": 16,
+            "complete": human_complete,
+            "response_plan_approval_credit": 0,
         },
-        "verification_journal_head_sha256": verification.get("journal_head_sha256")
-        if verification
-        else None,
-        "verification_identity": {
-            k: verification[k]
-            for k in ("plan_sha256", "source_commit", "source_sha256", "config_sha256")
-        }
-        if verification
-        else None,
-        "joint_scope": joint_scope_pin,
-        "formal_host": formal_host_pin,
-        "joint_decision": joint_decision_pin,
     }

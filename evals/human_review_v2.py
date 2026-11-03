@@ -56,6 +56,26 @@ def validate_human_participation(joint_scope_pin, joint_decision_pin):
         or not re.fullmatch("[0-9a-f]{64}", scope["bundle_sha256"])
     ):
         raise ValueError("actual new formal joint scope identity required")
+    policy = _participation_policy(scope)
+    if (
+        not isinstance(decision, dict)
+        or decision.get("schema_version") != "task13-rolling-joint-user-decision-v1"
+        or decision.get("role") != "user"
+        or decision.get("decision") != "approved"
+        or decision.get("scope_packet_sha256") != joint_scope_pin["sha256"]
+        or decision.get("synthetic_control_fixture", False) is not False
+        or decision.get("automatic_approval", False) is not False
+        or any(
+            not isinstance(decision.get(k), str) or not decision[k].strip()
+            for k in ("record_id", "text", "decided_at")
+        )
+    ):
+        raise ValueError("actual joint human16 scope approval required")
+    return deepcopy(policy), _time(decision["decided_at"])
+
+
+def _participation_policy(scope):
+    """Shared exact original registration and retained anytime instruction pins."""
     policy = scope.get("human_review_participation")
     literals = {
         "schema_version": "task13-human16-participation-v1",
@@ -98,21 +118,21 @@ def validate_human_participation(joint_scope_pin, joint_decision_pin):
             raise ValueError(
                 "retained actual-user anytime instruction provenance required"
             )
-    if (
-        not isinstance(decision, dict)
-        or decision.get("schema_version") != "task13-rolling-joint-user-decision-v1"
-        or decision.get("role") != "user"
-        or decision.get("decision") != "approved"
-        or decision.get("scope_packet_sha256") != joint_scope_pin["sha256"]
-        or decision.get("synthetic_control_fixture", False) is not False
-        or decision.get("automatic_approval", False) is not False
-        or any(
-            not isinstance(decision.get(k), str) or not decision[k].strip()
-            for k in ("record_id", "text", "decided_at")
-        )
-    ):
-        raise ValueError("actual joint human16 scope approval required")
-    return deepcopy(policy), _time(decision["decided_at"])
+    return deepcopy(policy)
+
+
+def _regression_only_participation(host_pin, rows):
+    from evals.regression_only_authority import validate_regression_only_scope
+
+    authority = validate_regression_only_scope(host_pin)
+    if rows != authority["rows"]:
+        raise ValueError("human16 rows differ from actual native sealed outputs")
+    decision = authority["scope_decision"]
+    return (
+        authority["human_review_participation"],
+        _time(decision["decided_at"]),
+        authority["synthetic"],
+    )
 
 
 def _authority_pair(joint_scope_pin, joint_decision_pin):
@@ -167,17 +187,31 @@ def review_question(prepared_pin, slot_id):
 
 
 def prepare_reviews(
-    plan_pin, order_pin, rows, *, joint_scope_pin=None, joint_decision_pin=None
+    plan_pin,
+    order_pin,
+    rows,
+    *,
+    joint_scope_pin=None,
+    joint_decision_pin=None,
+    regression_only_host_pin=None,
 ):
+    if regression_only_host_pin is not None and (
+        joint_scope_pin is not None or joint_decision_pin is not None
+    ):
+        raise ValueError("regression-only and joint scope pins are mutually exclusive")
     successor = _authority_pair(joint_scope_pin, joint_decision_pin)
     policy = None
+    synthetic = None
+    if regression_only_host_pin is not None:
+        policy, _, synthetic = _regression_only_participation(
+            regression_only_host_pin, rows
+        )
     if successor:
         policy, _ = validate_human_participation(joint_scope_pin, joint_decision_pin)
-        if (
-            policy["human_plan"] != plan_pin
-            or policy["presentation_order"] != order_pin
-        ):
-            raise ValueError("human16 policy registration pins differ from preparation")
+    if policy is not None and (
+        policy["human_plan"] != plan_pin or policy["presentation_order"] != order_pin
+    ):
+        raise ValueError("human16 policy registration pins differ from preparation")
     if plan_pin["sha256"] != PLAN_SHA256 or order_pin["sha256"] != ORDER_SHA256:
         raise ValueError("original sixteen-slot registration required")
     plan, order = read_pin(plan_pin), read_pin(order_pin)
@@ -233,11 +267,25 @@ def prepare_reviews(
             joint_decision=deepcopy(joint_decision_pin),
             human_review_participation=policy,
         )
+    if regression_only_host_pin is not None:
+        prepared.update(
+            schema_version="task13-human-review-prepared-v4",
+            regression_only_host=deepcopy(regression_only_host_pin),
+            human_review_participation=policy,
+            synthetic=synthetic,
+            scope="offline_contract_test" if synthetic else "real_execution",
+        )
     return prepared
 
 
 def validate_reviews(
-    prepared_pin, captures, rows, *, joint_scope_pin=None, joint_decision_pin=None
+    prepared_pin,
+    captures,
+    rows,
+    *,
+    joint_scope_pin=None,
+    joint_decision_pin=None,
+    regression_only_host_pin=None,
 ):
     """Return scorer dictionaries keyed by NEW regression slot, all sixteen kept.
 
@@ -248,17 +296,39 @@ def validate_reviews(
     This validates retained provenance, not the honesty of a fabricated local file;
     the operator must retain the actual incoming UI records, never author consent.
     """
+    if regression_only_host_pin is not None and (
+        joint_scope_pin is not None or joint_decision_pin is not None
+    ):
+        raise ValueError("regression-only and joint scope pins are mutually exclusive")
     supplied = _authority_pair(joint_scope_pin, joint_decision_pin)
     prepared = read_pin(prepared_pin)
     schema = prepared.get("schema_version")
     successor = schema == "task13-human-review-prepared-v3"
+    regression_only = schema == "task13-human-review-prepared-v4"
     if schema not in {
         "task13-human-review-prepared-v2",
         "task13-human-review-prepared-v3",
+        "task13-human-review-prepared-v4",
     }:
         raise ValueError("unknown human prepared schema")
     authority = {}
     activation = None
+    if regression_only:
+        if (
+            regression_only_host_pin is None
+            or prepared.get("regression_only_host") != regression_only_host_pin
+        ):
+            raise ValueError("regression-only review requires exact external host pin")
+        if supplied:
+            raise ValueError(
+                "regression-only and joint scope pins are mutually exclusive"
+            )
+        _, activation, _ = _regression_only_participation(
+            regression_only_host_pin, rows
+        )
+        authority = {"regression_only_host_pin": regression_only_host_pin}
+    elif regression_only_host_pin is not None:
+        raise ValueError("regression-only host requires its own prepared schema")
     if successor:
         if (
             not supplied
@@ -350,15 +420,15 @@ def validate_reviews(
         ) or (reply.get("title") != title or reply.get("question") != question):
             raise ValueError("reply differs from actual blinded presentation")
         started, ended = _time(start["captured_at"]), _time(reply["captured_at"])
-        if successor and (started < activation or ended < activation):
-            raise ValueError(
-                "human16 successor capture predates actual joint activation"
-            )
+        if (successor or regression_only) and (
+            started < activation or ended < activation
+        ):
+            raise ValueError("human16 capture predates actual scope activation")
         if ended < started or (previous_capture and started < previous_capture):
             raise ValueError("actual captures out of order")
         previous_capture = ended
         local = ended.astimezone(timezone(timedelta(hours=8)))
-        if not successor and local.hour < 19:
+        if not (successor or regression_only) and local.hour < 19:
             raise ValueError(
                 "registered human review window is 19:00-00:00 Asia/Shanghai"
             )
