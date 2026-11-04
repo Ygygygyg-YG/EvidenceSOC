@@ -215,9 +215,9 @@ for (const action of ['approve', 'reject'] as const) {
     await page.getByRole('button', { name: action === 'approve' ? '确认提交批准' : '确认提交拒绝' }).click();
     await expect(page.getByRole('heading', { name: '已记录的审批' })).toBeVisible({ timeout: 60_000 });
     await expect(page.getByRole('complementary', { name: '人工决定' }).getByText(reason, { exact: true })).toBeVisible();
-    if (action === 'approve') await expect(page.getByRole('heading', { name: '验证成功' })).toBeVisible({ timeout: 60_000 });
+    if (action === 'approve') await expect(page.getByRole('heading', { name: '证据不足' })).toBeVisible({ timeout: 60_000 });
     await expect.poll(async () => (await snapshot(request, context.investigation.investigation_id)).status)
-      .toBe(action === 'approve' ? 'completed' : 'rejected');
+      .toBe(action === 'approve' ? 'manual_review' : 'rejected');
     const final = await snapshot(request, context.investigation.investigation_id);
     expect(final.approval).toMatchObject({ decision: action === 'approve' ? 'approved' : 'rejected', reason,
       decided_by: 'demo-reviewer', response_plan_id: context.plan.response_plan_id });
@@ -232,7 +232,13 @@ for (const action of ['approve', 'reject'] as const) {
       expect(final.simulation_execution!.action_results.map((result) => result.action_id).sort())
         .toEqual(context.plan.actions.map((item) => item.action_id).sort());
       expect(final.simulation_execution!.action_results.every((result) => result.outcome === 'success')).toBe(true);
-      expect(final.validation_result).toMatchObject({ outcome: 'success', response_plan_id: context.plan.response_plan_id });
+      expect(final.validation_result).toMatchObject({ outcome: 'insufficient_evidence', response_plan_id: context.plan.response_plan_id });
+      expect(final.status).toBe('manual_review');
+      expect(final.stop_reason).toBe('insufficient_evidence');
+      expect(final.errors).toEqual([]);
+      expect(final.validation_result!.summary).toContain('unverified');
+      expect(final.validation_result!.checks?.every((check) => check.outcome === 'insufficient_evidence')).toBe(true);
+      await expect(page.getByRole('heading', { name: '验证成功', exact: true })).toHaveCount(0);
       expect(final.validation_result!.evidence_ids.length).toBeGreaterThan(0);
       expect(final.validation_result!.checks?.length).toBeGreaterThan(0);
       await expect(page.getByRole('heading', { name: '逐动作模拟结果' })).toBeVisible();

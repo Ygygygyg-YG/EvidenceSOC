@@ -1,9 +1,9 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   Background, BackgroundVariant, Controls, Handle, MarkerType, Position, ReactFlow,
-  type Edge, type Node, type NodeProps,
+  type Edge, type Node, type NodeChange, type NodeProps,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import type { IncidentSummary } from './incidentContract';
@@ -47,16 +47,31 @@ export default function AttackGraph({ steps, graph, selectedStepId, selectStep }
   selectedStepId: string | null;
   selectStep: (id: string) => void;
 }) {
+  const [measurements, setMeasurements] = useState(() => new Map<string, { width: number; height: number }>());
+  const onNodesChange = useCallback((changes: NodeChange<StepNode>[]) => {
+    setMeasurements((current) => {
+      let next = current;
+      for (const change of changes) {
+        if (change.type !== 'dimensions' || !change.dimensions) continue;
+        const { width, height } = change.dimensions;
+        if (next.get(change.id)?.width === width && next.get(change.id)?.height === height) continue;
+        if (next === current) next = new Map(current);
+        next.set(change.id, { width, height });
+      }
+      return next;
+    });
+  }, []);
   const positions = useMemo(() => layoutStepPositions(steps), [steps]);
   const graphNodes = useMemo(() => new Map(graph?.nodes.map((node) => [node.step_id, node]) ?? []), [graph]);
   const nodes = useMemo<StepNode[]>(() => steps.map((step) => ({
     id: step.attack_step_id,
     type: 'attackStep',
+    measured: measurements.get(step.attack_step_id),
     position: positions.get(step.attack_step_id) ?? { x: 0, y: 0 },
     data: { step, graphNode: graphNodes.get(step.attack_step_id), selected: selectedStepId === step.attack_step_id, selectStep },
     draggable: false,
     selectable: true,
-  })), [graphNodes, positions, selectedStepId, selectStep, steps]);
+  })), [graphNodes, measurements, positions, selectedStepId, selectStep, steps]);
   const edges = useMemo<Edge[]>(() => {
     const visible = new Set(steps.map((step) => step.attack_step_id));
     return graph?.edges.filter((edge) => visible.has(edge.source_step_id) && visible.has(edge.target_step_id))
@@ -88,7 +103,7 @@ export default function AttackGraph({ steps, graph, selectedStepId, selectStep }
 
   return (
     <div className={styles.graphCanvas} data-testid="attack-graph">
-      <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} colorMode="dark"
+      <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} nodeTypes={nodeTypes} colorMode="dark"
         fitView fitViewOptions={{ padding: 0.15, maxZoom: 1 }} minZoom={0.3} maxZoom={1.5}
         nodesConnectable={false} nodesDraggable={false}
         panOnDrag zoomOnScroll zoomOnPinch>

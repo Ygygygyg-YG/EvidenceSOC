@@ -35,7 +35,7 @@ async function observe(page: Page, investigationId: string, cursor: string) {
     const observer = { source, opened: false, events: [] as Observed[], resets: [] as unknown[] };
     target.renewalObserver = observer;
     source.onopen = () => { observer.opened = true; };
-    for (const name of ['status', 'approval.required', 'decision.recorded', 'validation.completed', 'investigation.completed']) {
+    for (const name of ['status', 'approval.required', 'decision.recorded', 'validation.completed', 'investigation.completed', 'investigation.failed']) {
       source.addEventListener(name, (event) => {
         const message = event as MessageEvent;
         observer.events.push({ event: name, id: message.lastEventId, data: JSON.parse(message.data) });
@@ -122,10 +122,10 @@ test('真实过期方案续办经原生 SSE 返回新方案，再经页面批准
   await page.getByRole('textbox', { name: '决定理由' }).fill('已核对续办后的新方案及原始证据');
   await page.getByRole('button', { name: '批准方案', exact: true }).click();
   await page.getByRole('button', { name: '确认提交批准', exact: true }).click();
-  await expect(page.getByRole('heading', { name: '验证成功', exact: true })).toBeVisible({ timeout: 60_000 });
-  await expect.poll(async () => (await snapshot()).status).toBe('completed');
+  await expect(page.getByRole('heading', { name: '证据不足', exact: true })).toBeVisible({ timeout: 60_000 });
+  await expect.poll(async () => (await snapshot()).status).toBe('manual_review');
   await expect.poll(() => incidentPage.evaluate(() => (window as ObserverWindow).renewalObserver.events
-    .some((item) => item.event === 'investigation.completed'))).toBe(true);
+    .some((item) => item.event === 'investigation.failed' && item.data.status === 'manual_review'))).toBe(true);
   const resumed = await incidentPage.evaluate(() => (window as ObserverWindow).renewalObserver.events);
   expect(resumed.every((item) => BigInt(item.id) > BigInt(resumeCursor))).toBe(true);
   expect(new Set(resumed.map((item) => item.id)).size).toBe(resumed.length);
@@ -133,9 +133,20 @@ test('真实过期方案续办经原生 SSE 返回新方案，再经页面批准
   await incidentPage.evaluate(() => (window as ObserverWindow).renewalObserver.source.close());
   const final = await snapshot();
   expect(final.approval).toMatchObject({ decision: 'approved', response_plan_id: newId });
-  expect(final.validation_result).toMatchObject({ outcome: 'success', response_plan_id: newId });
+  expect(final.validation_result).toMatchObject({ outcome: 'insufficient_evidence', response_plan_id: newId });
+  expect(final.simulation_execution).toMatchObject({ status: 'completed', response_plan_id: newId, error: null });
+  expect(final.simulation_execution!.action_results.length).toBe(fresh.actions.length);
+  expect(final.simulation_execution!.action_results.every((action) => action.outcome === 'success')).toBe(true);
+  expect(final.status).toBe('manual_review');
+  expect(final.stop_reason).toBe('insufficient_evidence');
+  expect(final.errors).toEqual([]);
+  expect(final.validation_result!.summary).toContain('unverified');
+  expect(final.validation_result!.evidence_ids.length).toBeGreaterThan(0);
+  expect(final.validation_result!.checks!.length).toBeGreaterThan(0);
+  expect(final.validation_result!.checks!.every((check) => check.outcome === 'insufficient_evidence')).toBe(true);
+  await expect(page.getByRole('heading', { name: '验证成功', exact: true })).toHaveCount(0);
   await page.reload();
-  await expect(page.getByRole('heading', { name: '验证成功', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '证据不足', exact: true })).toBeVisible();
   await info.attach('renewal-live-flow.json', { contentType: 'application/json',
     body: JSON.stringify({ runId: env.runId, alertId, investigationId: investigation.investigation_id,
       oldPlanId: oldId, newPlanId: newId, renewalPosts, events, resumeCursor, resumed, snapshot: final }, null, 2) });

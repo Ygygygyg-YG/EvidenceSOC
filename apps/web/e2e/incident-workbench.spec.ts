@@ -218,18 +218,53 @@ test('攻击步骤缺少实体或置信度时显示未提供并保留观察时�
   await expect(step).toContainText('置信度未提供');
 });
 
-test('因果候选保持虚线箭头和待证实语义', async ({ page }) => {
-  await page.route('**/api/v1/investigations/IV-WORKBENCH', (route) => route.fulfill({
-    json: snapshotWithEdge('causal_candidate', 'candidate'),
-  }));
+test('因果候选在新快照后保持虚线箭头和待证实语义', async ({ page }) => {
+  let releaseStream!: () => void;
+  const streamGate = new Promise<void>((resolve) => { releaseStream = resolve; });
+  let snapshotRequests = 0;
+  await page.route('**/api/v1/investigations/IV-WORKBENCH/stream?**', async (route) => {
+    await streamGate;
+    await route.fulfill({ status: 404 });
+  });
+  await page.route('**/api/v1/investigations/IV-WORKBENCH', (route) => {
+    snapshotRequests += 1;
+    const snapshot = snapshotWithEdge('causal_candidate', 'candidate');
+    return route.fulfill({ json: snapshotRequests === 1 ? snapshot : {
+      ...snapshot, revision: '5', stream_cursor: '4', stop_reason: '快照已更新',
+    } });
+  });
   await page.goto('/incidents/IN-WORKBENCH');
   const edge = page.locator('.react-flow__edge');
   await expect(edge).toHaveCount(1);
+  await expect(edge).toBeVisible();
+  await page.getByTestId('attack-graph').evaluate((graph) => {
+    const state = { lost: false };
+    (graph as HTMLElement & { graphContinuity: typeof state }).graphContinuity = state;
+    const observer = new MutationObserver((records) => {
+      for (const record of records) {
+        if (record.type === 'childList') {
+          for (const removed of record.removedNodes) {
+            if (removed instanceof Element && (removed.matches('.react-flow__edge, .react-flow__node') ||
+              removed.querySelector('.react-flow__edge, .react-flow__node'))) state.lost = true;
+          }
+        }
+        if (record.type === 'attributes' && record.target instanceof HTMLElement &&
+          record.target.matches('.react-flow__node') && record.target.style.visibility === 'hidden') state.lost = true;
+      }
+    });
+    observer.observe(graph, { subtree: true, childList: true, attributes: true, attributeFilter: ['style'] });
+  });
+  releaseStream();
+  await expect(page.getByText('停止原因：快照已更新')).toBeVisible();
+  await expect(edge).toHaveCount(1);
+  await expect(edge).toBeVisible();
   await expect(edge).toContainText('因果候选');
   await expect(edge).toContainText('待证实');
   await expect(edge).toHaveAttribute('aria-label', /可能导致.*待证实/);
   await expect(edge.locator('.react-flow__edge-path')).toHaveAttribute('marker-end', /arrowclosed/);
   expect(await edge.locator('.react-flow__edge-path').evaluate((element) => (element as SVGPathElement).style.strokeDasharray)).toBe('6, 4');
+  expect(await page.getByTestId('attack-graph').evaluate((graph) =>
+    (graph as HTMLElement & { graphContinuity: { lost: boolean } }).graphContinuity.lost)).toBe(false);
 });
 
 test('行为关联是无方向点线，不伪称上一步导致下一步', async ({ page }) => {
