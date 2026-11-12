@@ -1,6 +1,6 @@
 {
   "admission_paths": [
-    "D:\\传智杯\\docs\\acceptance\\task12-ait-hashes.json"
+    "evals/configs/admission/task12-ait-hashes.json"
   ],
   "budget_cny": 100.0,
   "call_budget": {

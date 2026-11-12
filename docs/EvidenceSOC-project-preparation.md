@@ -4,17 +4,17 @@
 
 ## 当前状态与维护入口（2026-10-18）
 
-本轮维护在独立工作树 `codex/task12-maintenance` 执行，起始基线为本地 `main` 的 `aafbddc`，代码修复提交为 `5646db4`。OpenSearch 严格响应校验、SSE 续期输出适配及生产验收发现的前端轮询缺陷均已关闭；专项、后端全量、前端检查、正常校准 MCP 隔离及最终生产验收通过，证据见 [维护记录](acceptance/task12-maintenance-2026-10-18.json)。本轮已快进整合到本地 `main`，提交及主目录文件核对见[整合记录](acceptance/task12-maintenance-integration-2026-10-18.json)。下文带日期的旧状态、原任务步骤和原测试数量保留为历史记录，不据旧的未勾选项重复创建已有实现；本轮未执行 Task13 正式模型实验。
+本轮维护在独立工作树 `codex/task12-maintenance` 执行，起始基线为本地 `main` 的 `aafbddc`，代码修复提交为 `5646db4`。OpenSearch 严格响应校验、SSE 续期输出适配及生产验收发现的前端轮询缺陷均已关闭；专项、后端全量、前端检查、正常校准 MCP 隔离及最终生产验收通过，证据见 [维护记录](https://github.com/Ygygygyg-YG/EvidenceSOC/blob/77a3f4c14fbdaac8122d451d0d5de4b402b83126/docs/acceptance/task12-maintenance-2026-10-18.json)。本轮已快进整合到本地 `main`，提交及主目录文件核对见[整合记录](https://github.com/Ygygygyg-YG/EvidenceSOC/blob/77a3f4c14fbdaac8122d451d0d5de4b402b83126/docs/acceptance/task12-maintenance-integration-2026-10-18.json)。下文带日期的旧状态、原任务步骤和原测试数量保留为历史记录，不据旧的未勾选项重复创建已有实现；本轮未执行 Task13 正式模型实验。
 
 | 范围 | 当前状态 | 依据及后续动作 |
 | --- | --- | --- |
-| Task 1～12 功能验收与数据准入 | 历史验收已通过，现存证据已复核 | [10 月 18 日核验汇总](acceptance/task1-12-verification-2026-10-18.json)保留历史绑定；本轮维护另记实际重跑与沿用证据 |
-| Task 12 DEDALE Step 6 | 已冻结 | [冻结记录](acceptance/task12-dedale-freeze-2026-10-17.json)为 `accepted_and_frozen`；`N_D=M_D=66`，28 攻击、38 正常 |
+| Task 1～12 功能验收与数据准入 | 历史验收已通过，现存证据已复核 | [10 月 18 日核验汇总](https://github.com/Ygygygyg-YG/EvidenceSOC/blob/77a3f4c14fbdaac8122d451d0d5de4b402b83126/docs/acceptance/task1-12-verification-2026-10-18.json)保留历史绑定；本轮维护另记实际重跑与沿用证据 |
+| Task 12 DEDALE Step 6 | 已冻结 | [冻结记录](../evals/configs/admission/task12-dedale-freeze-2026-10-17.json)为 `accepted_and_frozen`；`N_D=M_D=66`，28 攻击、38 正常 |
 | 验收后维护 | 三项缺陷已关闭，维护验收通过 | 后端 747 项无跳过、搜索 215 项、SSE 21 项、验收入口 18 项、前端 110 项及生产浏览器 62 项通过；静态门禁、新 live/隔离、输入保留及清理证据闭合 |
 | Task 13 | 基线、适配器及正式实验仍待执行 | 当前正式运行数为 0；工程和 fixture 闭环通过不能证明真实模型效果达标 |
 | Task 14 / Task 15 | 最终安全验收及比赛材料待完成 | 继续按后续任务执行；本次仅补充边界、交接和排期要求 |
 
-当前证据入口依次为核验汇总、冻结记录及 [DEDALE 重建说明](acceptance/task12-dedale-rebuild-2026-10-18.json)。[Task 12 readiness](acceptance/task12-readiness.md)保留 Step 1～5 的历史正文并追加最新入口；其中“Step 6 尚未通过”“main 停在旧提交”等带日期表述不能作为当前状态。DEDALE 数据、标签、选择规则、冻结清单、产物及历史 JSON/JUnit 保持原始内容。
+当前证据入口依次为核验汇总、冻结记录及 [DEDALE 重建说明](https://github.com/Ygygygyg-YG/EvidenceSOC/blob/77a3f4c14fbdaac8122d451d0d5de4b402b83126/docs/acceptance/task12-dedale-rebuild-2026-10-18.json)。[Task 12 readiness](https://github.com/Ygygygyg-YG/EvidenceSOC/blob/77a3f4c14fbdaac8122d451d0d5de4b402b83126/docs/acceptance/task12-readiness.md)保留 Step 1～5 的历史正文并追加最新入口；其中“Step 6 尚未通过”“main 停在旧提交”等带日期表述不能作为当前状态。DEDALE 数据、标签、选择规则、冻结清单、产物及历史 JSON/JUnit 保持原始内容。
 
 管理信息待补充：最终截止日期、剩余任务负责人、每周实际投入时间、正式模型及费用上限。维护记录已列三项缺陷的严重程度、关闭状态与证据，完整责任分工及后续台账维护仍待补充。未补齐并取得试跑数据前，不承诺新的交付日期。
 
@@ -1010,7 +1010,7 @@ uv run --project services/backend pytest services/backend/tests/api/test_live_ac
 
 Expected：环境、持久化、迁移、安全边界、恢复与性能均有同一 Git 版本的可核对结果；已知缺口逐项关闭。三个显式开启的真实服务测试组必须报告实际通过数，不能只看 pytest 退出码或默认 skip。完整 Task 14 安全总验收继续留在 Task 14。
 
-2026-10-15 补验：完整后端 694 passed、0 failed、0 skipped；独立 PostgreSQL/OpenSearch 重启读回及 24 张表迁移前后行数/内容摘要通过。详见 [Step 4 验收记录](acceptance/task12-services.md) 与 [总记录](acceptance/task12-readiness.md)。
+2026-10-15 补验：完整后端 694 passed、0 failed、0 skipped；独立 PostgreSQL/OpenSearch 重启读回及 24 张表迁移前后行数/内容摘要通过。详见 [Step 4 验收记录](https://github.com/Ygygygyg-YG/EvidenceSOC/blob/77a3f4c14fbdaac8122d451d0d5de4b402b83126/docs/acceptance/task12-services.md) 与 [总记录](https://github.com/Ygygygyg-YG/EvidenceSOC/blob/77a3f4c14fbdaac8122d451d0d5de4b402b83126/docs/acceptance/task12-readiness.md)。
 
 - [x] **Step 5: 修复 Task 11 AIT 清单的异路径重建**
 
@@ -1023,7 +1023,7 @@ uv run --project services/backend python -B scripts/ait_task11_audit.py
 
 上述现有命令只核验当前包，不能代替异路径重建。验收记录还须附另一目录的实际重建命令、工作区绝对路径、来源获取/校验日志，以及按案例列出的当前路径与异路径 `agent/manifest.json`、`agent/events.jsonl`、`scoring/manifest.json`、`scoring/gold.jsonl` 的 SHA256 对照。Expected：当前目录和另一绝对路径的全包重建均通过，哈希一致；来源归档哈希、旧/新冻结清单哈希及路径迁移原因写入 Task 12 验收记录。AIT 原始数据不进入 Git，重建所需获取与核验步骤必须可供干净环境执行。
 
-2026-10-15 补验：同一冻结版本 `69c0d1e` 在当前工作树与 `D:\传智杯\.backups\ait-portable-checkout` 各完成全部 22 包真实重建和独立审计；22×4 项必需产物及额外 source-gold、重新生成的选择清单哈希均一致。两个目录各 149 个输入文件已核验。完整命令、旧/新哈希与逐案例对照见 [Step 5 记录](acceptance/task12-ait-portability.md) 和 [SHA256 证据](acceptance/task12-ait-hashes.json)。
+2026-10-15 补验：同一冻结版本 `69c0d1e` 在当前工作树与 `D:\传智杯\.backups\ait-portable-checkout` 各完成全部 22 包真实重建和独立审计；22×4 项必需产物及额外 source-gold、重新生成的选择清单哈希均一致。两个目录各 149 个输入文件已核验。完整命令、旧/新哈希与逐案例对照见 [Step 5 记录](https://github.com/Ygygygyg-YG/EvidenceSOC/blob/77a3f4c14fbdaac8122d451d0d5de4b402b83126/docs/acceptance/task12-ait-portability.md) 和 [SHA256 证据](../evals/configs/admission/task12-ait-hashes.json)。
 
 - [ ] **Step 6: 接入、冻结 DEDALE 并签署 Task 12 关口**
 
@@ -1116,7 +1116,7 @@ Task 12 验收记录逐项列出六步的命令、实际结果、提交 SHA、�
 
 #### 验收后维护清单（2026-10-18，实现与验收分开记录）
 
-维护代码已提交为 `5646db4`。A/B 实现与专项、C 生产验收及 D 新版本证据复验均已完成，详见 [2026-10-18 维护记录](acceptance/task12-maintenance-2026-10-18.json)。历史功能验收和数据准入继续有效；E 的工程交接入口已提供，管理输入仍待补充，不以工程通过自动完成后续任务。
+维护代码已提交为 `5646db4`。A/B 实现与专项、C 生产验收及 D 新版本证据复验均已完成，详见 [2026-10-18 维护记录](https://github.com/Ygygygyg-YG/EvidenceSOC/blob/77a3f4c14fbdaac8122d451d0d5de4b402b83126/docs/acceptance/task12-maintenance-2026-10-18.json)。历史功能验收和数据准入继续有效；E 的工程交接入口已提供，管理输入仍待补充，不以工程通过自动完成后续任务。
 
 - [x] **维护 A：OpenSearch 故障识别与审计（P2，实现与专项完成）**
 
@@ -1136,7 +1136,7 @@ SSE 与响应方案相关专项 21 项通过、无跳过，见 `sse-final.xml`�
 
 - [x] **维护 C：生产构建运行与真实浏览器验收**
 
-已实现 `PLAYWRIGHT_WEB_MODE=dev|production`、受版本控制的 `scripts/task10_browser_acceptance.py` 及真实续期用例，入口契约测试 18 项通过。开发模式保留 `pnpm dev`；生产模式本轮构建成功后再用 `pnpm start`，禁止复用已有 Web 进程或旧构建。入口负责独立数据库/索引/端口、迁移及扩展、样例导入、进程生命周期、失败留证和各项自有资源独立清理；拒绝服务 URL query/fragment 和隐式 dotenv。三个必要环境变量及可执行命令见 [前端 README](../apps/web/README.md)和 [Task 10 操作指南](superpowers/plans/2026-09-27-task10-operation-guide.md)。
+已实现 `PLAYWRIGHT_WEB_MODE=dev|production`、受版本控制的 `scripts/task10_browser_acceptance.py` 及真实续期用例，入口契约测试 18 项通过。开发模式保留 `pnpm dev`；生产模式本轮构建成功后再用 `pnpm start`，禁止复用已有 Web 进程或旧构建。入口负责独立数据库/索引/端口、迁移及扩展、样例导入、进程生命周期、失败留证和各项自有资源独立清理；拒绝服务 URL query/fragment 和隐式 dotenv。三个必要环境变量及可执行命令见 [前端 README](../apps/web/README.md)和 [Task 10 操作指南](https://github.com/Ygygygyg-YG/EvidenceSOC/blob/77a3f4c14fbdaac8122d451d0d5de4b402b83126/docs/superpowers/plans/2026-09-27-task10-operation-guide.md)。
 
 真实用例必需变量缺失或代理/直连后端不一致时失败退出，不以 skip 验收；单 worker、独立案例与幂等键，避免统计读取和写入流程并行干扰。覆盖批准、拒绝、过期续期、SSE 断线恢复及会话/Origin，分别报告模拟接口和真实服务用例。默认访问地址统一 `http://127.0.0.1:3000`；前后端 `FRONTEND_ORIGIN` 与浏览器来源精确一致，不放宽校验来迁就文档。
 
@@ -1201,7 +1201,7 @@ B2 与 B3 使用相同三个工具、查询范围、种子上下文、每轮最�
 | 六类攻击、ATT&CK、来源精度 | 现有逐事件及逐案对应适用掩码为 false | 指标记 `N/A` 并说明无适用金标；描述性预测不能冒充精度/F1，不能将缺失标签当负例 |
 | 阶段 | 独立审查确认 5 个可观察、3 个不可观察阶段；不是完整逐案阶段集合及先后金标 | 单列窗口证据覆盖/可观察性说明；当前逐事件/逐案阶段 F1 和顺序评分记 `N/A`，不能据全局审查自动打开评分掩码 |
 
-上述边界来自 [冻结适用统计与阶段审查摘要](acceptance/task12-dedale-freeze-2026-10-17.json)，不把详细阶段答案复制到文档或 Agent 输入。本轮不要求补标签或修改冻结掩码。未来如单独批准新增逐案阶段金标，须先冻结审查映射、适用集合及分母，并作为数据版本变更重新执行受影响的 Task 12 关口。
+上述边界来自 [冻结适用统计与阶段审查摘要](../evals/configs/admission/task12-dedale-freeze-2026-10-17.json)，不把详细阶段答案复制到文档或 Agent 输入。本轮不要求补标签或修改冻结掩码。未来如单独批准新增逐案阶段金标，须先冻结审查映射、适用集合及分母，并作为数据版本变更重新执行受影响的 Task 12 关口。
 
 攻击类型使用适用的多标签 Macro F1；来源使用有可靠金标的可观察源 IP、入口主机、入口服务准确率；同时计算适用的攻击阶段覆盖 F1、顺序准确率、Evidence Precision@K、引用有效率、ATT&CK F1、Unsupported Claim Rate、延迟、Token 和费用。AIT 保留固定六类的主口径，并公开每类支持数与零支持类处理；DEDALE 严格沿用上表，不将六类、技术或来源预测填入无金标的准确率/F1。可单列正常包上的阳性输出作误报描述，不能看到结果后删去难类。`out_of_taxonomy` 不进入错误的六类金标分母，其攻击判定与证据指标仍按适用性统计。
 

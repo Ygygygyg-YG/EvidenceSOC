@@ -12,6 +12,8 @@ from evals.adapters.artifacts import (
 from evals.contracts import GROUPS, ControllerRunSpec, WorkerRunSpec, canonical_hash
 from evals.datasets.dedale.common import read_json, safe_file
 from evals.freeze import (
+    LEGACY_PROTOCOL_PATH,
+    PROTOCOL_PATH,
     accepted_isolation_receipt,
     validate_committed_sources,
     validate_freeze_file_coverage,
@@ -230,7 +232,7 @@ def validate_execution_gates(
     if (
         not files
         or "services/backend/uv.lock" not in files
-        or "docs/evaluations/protocol.md" not in files
+        or not {PROTOCOL_PATH, LEGACY_PROTOCOL_PATH}.intersection(files)
     ):
         raise ValueError("freeze must bind implementation, protocol and lock files")
     validate_freeze_file_coverage(freeze, repository=ROOT)

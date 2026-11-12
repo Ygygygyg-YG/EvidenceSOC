@@ -109,6 +109,33 @@ def test_unfrozen_controls_are_deterministic_and_use_actual_accepted_inputs():
             manifest.validate_execution_gates(plan, allow_final_test=True)
 
 
+def test_unfrozen_controls_bind_relocated_protocol_and_admissions(tmp_path):
+    module = freezer()
+    protocol = "evals/protocol.md"
+    admissions = {
+        "ait": "evals/configs/admission/task12-ait-hashes.json",
+        "dedale": "evals/configs/admission/task12-dedale-freeze-2026-10-17.json",
+    }
+    for name in [
+        protocol,
+        *admissions.values(),
+        ".backups/task12-readiness/data/manifests/ait-task11-test-selection.json",
+        "data/dedale/priority-cases-v4/selection.json",
+    ]:
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"{}")
+
+    freeze, controllers = module.build_unfrozen_artifacts(
+        tmp_path, "a" * 40, "task13-campaign"
+    )
+
+    assert freeze["bindings"]["protocol"] == freeze["files"][protocol]
+    for dataset, admission in admissions.items():
+        assert controllers[dataset]["admission_paths"] == [str(tmp_path / admission)]
+    module.validate_freeze_file_coverage(freeze, repository=tmp_path)
+
+
 def test_generated_control_artifacts_cannot_enter_the_source_freeze(tmp_path):
     module = freezer()
     for name in [

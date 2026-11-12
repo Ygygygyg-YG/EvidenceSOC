@@ -15,6 +15,9 @@ from pathlib import Path
 
 from evals.contracts import ControllerRunSpec, canonical_hash
 
+PROTOCOL_PATH = "evals/protocol.md"
+LEGACY_PROTOCOL_PATH = "docs/evaluations/protocol.md"
+
 SOURCE_PATHS = (
     "services/backend/src",
     "services/backend/tests",
@@ -22,7 +25,7 @@ SOURCE_PATHS = (
     "services/backend/uv.lock",
     "evals",
     "scripts",
-    "docs/evaluations/protocol.md",
+    LEGACY_PROTOCOL_PATH,
 )
 GENERATED_FREEZE = "evals/configs/freeze_manifest.json"
 
@@ -131,12 +134,12 @@ def build_unfrozen_artifacts(
         "ait": (
             ".backups/task12-readiness/data/ait/cases/test",
             ".backups/task12-readiness/data/manifests/ait-task11-test-selection.json",
-            "docs/acceptance/task12-ait-hashes.json",
+            "evals/configs/admission/task12-ait-hashes.json",
         ),
         "dedale": (
             "data/dedale/priority-cases-v4/test",
             "data/dedale/priority-cases-v4/selection.json",
-            "docs/acceptance/task12-dedale-freeze-2026-10-17.json",
+            "evals/configs/admission/task12-dedale-freeze-2026-10-17.json",
         ),
     }
     for dataset, (cases, selection, admission) in inputs.items():
@@ -161,7 +164,7 @@ def build_unfrozen_artifacts(
         "gates": dict.fromkeys(["G1", "G2", "G3", "G4", "G5"], "pending"),
         "files": files,
         "bindings": {
-            "protocol": files.get("docs/evaluations/protocol.md"),
+            "protocol": files.get(PROTOCOL_PATH, files.get(LEGACY_PROTOCOL_PATH)),
             "dependencies": files.get("services/backend/uv.lock"),
             "knowledge": None,
             "model": canonical_hash(controllers["ait"]["model"]),

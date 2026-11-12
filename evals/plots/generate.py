@@ -194,7 +194,7 @@ def generate_bundle(score_path, output_root, *, font_path=None):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--scores", required=True, action="append", help="Repeat for separately frozen AIT and DEDALE summaries")
-    parser.add_argument("--output-root", default="docs/evaluations/figures")
+    parser.add_argument("--output-root", default="data/task13/figures")
     parser.add_argument("--font-path")
     args = parser.parse_args()
     source = args.scores[0] if len(args.scores) == 1 else args.scores

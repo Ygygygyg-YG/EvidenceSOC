@@ -1,6 +1,6 @@
 {
   "admission_paths": [
-    "D:\\传智杯\\docs\\acceptance\\task12-dedale-freeze-2026-10-17.json"
+    "evals/configs/admission/task12-dedale-freeze-2026-10-17.json"
   ],
   "budget_cny": 100.0,
   "call_budget": {

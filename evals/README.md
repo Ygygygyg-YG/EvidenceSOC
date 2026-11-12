@@ -8,13 +8,13 @@ Task13 的协议、控制器、隔离 worker、独立评分、人审导入和图
 
 | 内容 | 入口 |
 |---|---|
-| 预注册矩阵、指标、预算和 G1–G7 | [protocol.md](../docs/evaluations/protocol.md) |
+| 预注册矩阵、指标、预算和 G1–G7 | [protocol.md](https://github.com/Ygygygyg-YG/EvidenceSOC/blob/77a3f4c14fbdaac8122d451d0d5de4b402b83126/docs/evaluations/protocol.md) |
 | 真实输入配置、生成冻结草案、完整开发命令 | [configs/README.md](configs/README.md) |
-| worker 隔离、不可变尝试、重跑与运行证据 | [运行器说明](../docs/evaluations/task13-runner-implementation.md) |
-| 图、诊断和能力边界 | [后端说明](../docs/evaluations/task13-backend-implementation.md) |
-| 人工抽样、盲包、64 个复核槽位与导入约束 | [人工复核说明](../docs/evaluations/task13-human-review.md)、[review.py](review.py) |
+| worker 隔离、不可变尝试、重跑与运行证据 | [运行器说明](https://github.com/Ygygygyg-YG/EvidenceSOC/blob/77a3f4c14fbdaac8122d451d0d5de4b402b83126/docs/evaluations/task13-runner-implementation.md) |
+| 图、诊断和能力边界 | [后端说明](https://github.com/Ygygygyg-YG/EvidenceSOC/blob/77a3f4c14fbdaac8122d451d0d5de4b402b83126/docs/evaluations/task13-backend-implementation.md) |
+| 人工抽样、盲包、64 个复核槽位与导入约束 | [人工复核说明](https://github.com/Ygygygyg-YG/EvidenceSOC/blob/77a3f4c14fbdaac8122d451d0d5de4b402b83126/docs/evaluations/task13-human-review.md)、[review.py](review.py) |
 | F8 审批、过期计划续期、独立成对实验 | [verification.py](verification.py)、[verification_worker.py](adapters/verification_worker.py) |
-| 指标分母、缺失值与图表解释 | [指标与图表说明](../docs/evaluations/task13-metrics-implementation.md)、[plots/generate.py](plots/generate.py) |
+| 指标分母、缺失值与图表解释 | [指标与图表说明](https://github.com/Ygygygyg-YG/EvidenceSOC/blob/77a3f4c14fbdaac8122d451d0d5de4b402b83126/docs/evaluations/task13-metrics-implementation.md)、[plots/generate.py](plots/generate.py) |
 
 AIT 使用已接受的 `.backups/task12-readiness/data/ait/cases/test` 中 22 个中性案例；DEDALE 使用 `data/dedale/priority-cases-v4/test` 中 66 个案例。两者各跑八组，分别报告，不合并成一个总分。原 Task12 数据和验收记录保持不变。
 
@@ -69,7 +69,7 @@ F8 使用 `build_verification_plan` / `run_verification_plan`，保留全部 264
 
 ## Task13 v2 整改补充
 
-补充活动为 `task13-repair-202610-v2`，见 [补充协议](../docs/evaluations/task13-remediation-protocol.md) 和 [进展报告](../docs/evaluations/task13-remediation-report.md)。原活动、原 704 行及审批终态保持原位；以上 v1 正式运行命令不用于派发 v2。
+补充活动为 `task13-repair-202610-v2`，见 [补充协议](https://github.com/Ygygygyg-YG/EvidenceSOC/blob/77a3f4c14fbdaac8122d451d0d5de4b402b83126/docs/evaluations/task13-remediation-protocol.md) 和 [进展报告](https://github.com/Ygygygyg-YG/EvidenceSOC/blob/77a3f4c14fbdaac8122d451d0d5de4b402b83126/docs/evaluations/task13-remediation-report.md)。原活动、原 704 行及审批终态保持原位；以上 v1 正式运行命令不用于派发 v2。
 
 `evals.remediation.prepare_bundle` 将独立登记投影成36项开发分析或176行B2/B3配对请求；`execute_bundle` 要求逐次验证实际出站确认、冻结源码/配置、R1/R2及预算的可信 admission verifier。登记或 `executable=false` 字段均不构成授权。派发标记先持久化，状态未知不自动重放，已完成槽不择优重跑。注入的离线 worker 只生成 `offline_contract_test` 范围结果。
 
