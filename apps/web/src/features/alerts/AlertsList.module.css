@@ -1,10 +1,11 @@
 .page { min-width: 0; }
-.pageHeader { margin-bottom: 24px; }
-.pageHeader h1 { margin: 0 0 6px; color: var(--soc-text); font-size: 24px; font-weight: 650; line-height: 1.35; }
-.pageHeader p { margin: 0; color: var(--soc-text-secondary); }
+.pageHeader { margin-bottom: 24px; padding-bottom: 24px; border-bottom: 1px solid var(--soc-border); }
+.pageHeader::before { display: block; width: 36px; height: 2px; margin-bottom: 18px; background: var(--soc-primary); content: ''; }
+.pageHeader h1 { margin: 0 0 8px; color: var(--soc-text); font-size: 28px; font-weight: 650; line-height: 1.4; letter-spacing: .01em; }
+.pageHeader p { max-width: 80ch; margin: 0; color: var(--soc-text-secondary); line-height: 1.7; }
 .panel { min-width: 0; background: var(--soc-surface); border: 1px solid var(--soc-border); border-radius: 8px; }
-.filters { display: flex; flex-wrap: wrap; gap: 16px; padding: 20px 20px 12px; }
-.filter { display: flex; flex-direction: column; gap: 6px; min-width: 0; width: 180px; color: var(--soc-text-secondary); }
+.filters { display: flex; flex-wrap: wrap; gap: 20px; padding: 24px 24px 16px; }
+.filter { display: flex; flex-direction: column; gap: 8px; min-width: 0; width: 180px; color: var(--soc-text-secondary); font-size: 12px; }
 .filter:last-child { width: 140px; }
 .filter > :last-child { width: 100%; }
 .queryFilter { width: 220px; }
@@ -34,7 +35,7 @@
 .trace code { font-size: 13px; overflow-wrap: anywhere; }
 .desktopTable { min-width: 0; overflow-x: auto; }
 .table { width: 100%; min-width: 760px; border-collapse: collapse; table-layout: fixed; }
-.table th { padding: 12px 16px; color: var(--soc-text-secondary); background: var(--soc-elevated); font-weight: 500; text-align: left; border-block: 1px solid var(--soc-border); }
+.table th { padding: 13px 16px; color: var(--soc-text-secondary); background: var(--soc-elevated); font-size: 12px; font-weight: 500; letter-spacing: .02em; text-align: left; border-block: 1px solid var(--soc-border); }
 .table td { padding: 14px 16px; color: var(--soc-text-secondary); vertical-align: top; border-bottom: 1px solid var(--soc-border); overflow-wrap: anywhere; }
 .table tbody tr:last-child td { border-bottom: 0; }
 .table tbody tr:hover { background: var(--soc-elevated); }
@@ -52,8 +53,10 @@
 .pageButtons { display: flex; flex-wrap: wrap; gap: 8px; }
 
 @media (width < 768px) {
+  .pageHeader { padding-bottom: 20px; }
+  .pageHeader h1 { font-size: 24px; }
   .desktopTable { display: none; }
-  .filters { padding-inline: 16px; gap: 12px; }
+  .filters { padding: 20px 16px 12px; gap: 12px; }
   .filter, .filter:last-child { width: calc(50% - 6px); }
   .queryFilter, .timeFilter { width: 100%; }
   .rangeActions { width: 100%; }

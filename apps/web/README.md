@@ -53,6 +53,12 @@ pnpm --dir apps/web typecheck
 pnpm --dir apps/web test
 ```
 
+开场、动效和图谱的视觉专项使用内置的只读合成样例。从仓库根目录运行以下命令，截图和失败追踪由 Playwright 保存在测试输出目录。
+
+```powershell
+pnpm --dir apps/web test:e2e --config playwright.visual.config.ts
+```
+
 完整浏览器回归包含模拟接口及真实后端用例。统一使用已实现的 [验收脚本](../../scripts/task10_browser_acceptance.py)，在独立 checkout/worktree 中执行，避免与日常开发共享 `.next`。先通过安全的进程环境提供以下三个变量；不要把凭据写进命令行、文档或报告：
 
 | 必需变量 | 准备要求 |

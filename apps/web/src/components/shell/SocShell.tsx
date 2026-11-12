@@ -5,8 +5,10 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { Drawer } from 'antd';
-import { Bell, LayoutDashboard, Menu, Search, Shield, ShieldCheck, X } from 'lucide-react';
+import { Bell, LayoutDashboard, Menu, Pause, Play, RotateCcw, Search, Shield, ShieldCheck, X } from 'lucide-react';
 import { loadDashboard, loadSourceHealth } from '@/features/dashboard/dashboardContract';
+import OpeningExperience from '@/components/opening/OpeningExperience';
+import ParticleBackground from './ParticleBackground';
 import styles from './SocShell.module.css';
 
 const navigationItems = [
@@ -19,6 +21,9 @@ const navigationItems = [
 export default function SocShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [motionPaused, setMotionPaused] = useState(false);
+  const [introOpen, setIntroOpen] = useState(pathname === '/');
+  const [introReplayToken, setIntroReplayToken] = useState(0);
   const menuButton = useRef<HTMLButtonElement>(null);
   const closeMenuButton = useRef<HTMLButtonElement>(null);
   const mainContent = useRef<HTMLElement>(null);
@@ -44,6 +49,9 @@ export default function SocShell({ children }: { children: ReactNode }) {
 
   return (
     <div className={styles.shell} data-testid="soc-shell">
+      <ParticleBackground paused={motionPaused || introOpen} />
+      <OpeningExperience replayToken={introReplayToken} motionPaused={motionPaused}
+        autoOpen={pathname === '/'} onOpenChange={setIntroOpen} />
       <a className={styles.skipLink} href="#soc-main">跳转到主内容</a>
       <header className={styles.topbar}>
         <div className={styles.brandGroup}>
@@ -69,25 +77,52 @@ export default function SocShell({ children }: { children: ReactNode }) {
             <span>EvidenceSOC</span>
           </Link>
         </div>
-        <div className={styles.statusGroup} aria-label="连接与数据源状态">
-          <span className={styles.status}><span className={styles.statusDot} aria-hidden="true" />
-            {dashboardQuery.isError ? '统计连接不可用' : dashboardQuery.data ? '统计接口已连接' : '连接状态未确认'}</span>
-          <span className={styles.status}><span className={styles.statusDot} aria-hidden="true" />
-            {healthQuery.isError ? '数据源健康不可用' : health?.postgresql_status === 'ok' && health.opensearch_status === 'ok' ? '已核实数据源正常' :
-              health?.postgresql_status === 'ok' ? '数据源健康部分未知' : '源健康未知'}</span>
-          {dashboardQuery.data && <span className={styles.status}>
-            {dashboardQuery.data.execution_mode === 'rules' ? '规则演示' : '模型调查'}
-          </span>}
+        <div className={styles.headerUtilities}>
+          <div className={styles.statusGroup} aria-label="连接与数据源状态">
+            <span className={styles.status} data-status={dashboardQuery.isError ? 'error' : dashboardQuery.data ? 'connected' : 'unknown'}>
+              <span className={styles.statusDot} aria-hidden="true" />
+              {dashboardQuery.isError ? '统计连接不可用' : dashboardQuery.data ? '统计接口已连接' : '连接状态未确认'}
+            </span>
+            <span className={styles.status} data-status={healthQuery.isError ? 'error' :
+              health?.postgresql_status === 'ok' && health.opensearch_status === 'ok' ? 'connected' :
+                health?.postgresql_status === 'ok' ? 'partial' : 'unknown'}>
+              <span className={styles.statusDot} aria-hidden="true" />
+              {healthQuery.isError ? '数据源健康不可用' : health?.postgresql_status === 'ok' && health.opensearch_status === 'ok' ? '已核实数据源正常' :
+                health?.postgresql_status === 'ok' ? '数据源健康部分未知' : '源健康未知'}
+            </span>
+            {dashboardQuery.data && <span className={`${styles.status} ${styles.executionMode}`}>
+              {dashboardQuery.data.execution_mode === 'rules' ? '规则演示' : '模型调查'}
+            </span>}
+          </div>
+          <button type="button" className={`${styles.motionButton} ${styles.replayButton}`}
+            aria-label="重播开场" title="重播开场" aria-controls="soc-opening-experience"
+            onClick={() => setIntroReplayToken((value) => value + 1)}>
+            <RotateCcw size={15} aria-hidden="true" />
+            <span className={styles.replayLabel}>重播开场</span>
+          </button>
+          <button type="button" className={styles.motionButton}
+            aria-label={motionPaused ? '恢复背景动效' : '暂停背景动效'}
+            title={motionPaused ? '恢复背景动效' : '暂停背景动效'}
+            aria-controls="soc-background-particles" aria-describedby="soc-motion-description"
+            onClick={() => setMotionPaused((value) => !value)}>
+            {motionPaused ? <Play size={15} aria-hidden="true" /> : <Pause size={15} aria-hidden="true" />}
+            <span className={styles.motionLabel}>{motionPaused ? '恢复动效' : '暂停动效'}</span>
+          </button>
+          <span id="soc-motion-description" className={styles.srOnly}>仅控制背景装饰动效；系统减少动态设置优先。</span>
         </div>
       </header>
 
       <nav className={styles.rail} aria-label="主导航">
+        <span className={styles.navCaption}>工作空间</span>
         {navigationItems.map(({ href, label, icon: Icon }) => (
           <Link key={href} href={href} className={styles.railLink}
             aria-label={label} title={label} aria-current={isActive(href) ? 'page' : undefined}>
             <Icon size={20} aria-hidden="true" />
+            <span>{label}</span>
+            <span className={styles.navArrow} aria-hidden="true">→</span>
           </Link>
         ))}
+        <div className={styles.railFooter}><span>证据驱动</span><p>安全调查与模拟响应</p></div>
       </nav>
 
       <main ref={mainContent} id="soc-main" className={styles.main} tabIndex={-1}>{children}</main>
@@ -117,7 +152,7 @@ export default function SocShell({ children }: { children: ReactNode }) {
           section: { background: 'var(--soc-surface)', color: 'var(--soc-text)', boxShadow: 'none' },
           header: { borderBottom: '1px solid var(--soc-border)', padding: '12px 16px' },
           body: { padding: 16 },
-          mask: { backgroundColor: 'rgba(11, 18, 32, 0.72)', backdropFilter: 'none' },
+          mask: { backgroundColor: 'rgba(2, 3, 4, 0.76)', backdropFilter: 'none' },
         }}
       >
         <nav id="soc-navigation-menu" className={styles.drawerNavigation} aria-label="完整导航">

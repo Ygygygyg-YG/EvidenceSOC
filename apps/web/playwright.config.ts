@@ -15,6 +15,7 @@ if (isolatedBackend && process.env.BACKEND_URL !== isolatedBackend) {
 
 export default defineConfig({
   testDir: './e2e',
+  testIgnore: ['**/ui-p2.spec.ts', '**/ui-p3.spec.ts', '**/ui-p4.spec.ts'],
   workers: 1,
   fullyParallel: false,
   retries: 0,

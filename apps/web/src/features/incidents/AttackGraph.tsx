@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState, type CSSProperties } from 'react';
 import {
   Background, BackgroundVariant, Controls, Handle, MarkerType, Position, ReactFlow,
   type Edge, type Node, type NodeChange, type NodeProps,
@@ -8,9 +8,17 @@ import {
 import '@xyflow/react/dist/style.css';
 import type { IncidentSummary } from './incidentContract';
 import type { AttackGraphData } from './investigationSnapshotContract';
-import { layoutStepPositions } from './graphLayout';
+import { GRAPH_NODE_HEIGHT, GRAPH_NODE_WIDTH, layoutStepPositions } from './graphLayout';
 import { StepMetadata, stepDetails } from './attackStepDetails';
-import styles from './IncidentDetail.module.css';
+import StepSphere from './StepSphere';
+import styles from './AttackGraph.module.css';
+
+const nodeStyle = {
+  width: GRAPH_NODE_WIDTH,
+  height: GRAPH_NODE_HEIGHT,
+  '--graph-node-width': `${GRAPH_NODE_WIDTH}px`,
+  '--graph-node-height': `${GRAPH_NODE_HEIGHT}px`,
+} as CSSProperties;
 
 type AttackStep = IncidentSummary['attack_steps'][number];
 type StepNode = Node<{
@@ -23,17 +31,21 @@ type StepNode = Node<{
 function StepCard({ data }: NodeProps<StepNode>) {
   const { step, graphNode, selected, selectStep } = data;
   const details = stepDetails(step, graphNode);
+  const supportStatus = graphNode?.support_status ?? 'unknown';
   return (
-    <button type="button" className={styles.graphStep} aria-pressed={selected}
-      data-support-status={graphNode?.support_status ?? 'unknown'}
+    <button type="button" className={styles.step} style={nodeStyle} aria-pressed={selected}
+      data-support-status={supportStatus} data-step-id={step.attack_step_id} data-node-kind="sphere"
       aria-label={`第 ${step.sequence} 步 ${step.description}`}
       onClick={() => selectStep(step.attack_step_id)}>
       <Handle type="target" position={Position.Left} isConnectable={false} style={{ opacity: 0 }} />
-      <span className={styles.graphStepTop}><span>第 {step.sequence} 步</span><span title={details.phase}>{details.phase}</span></span>
-      <strong>{step.description}</strong>
-      <StepMetadata step={step} node={graphNode} />
-      <span className={styles.graphStepMeta} title={details.techniques}>{details.techniques} · {step.evidence_ids.length} 条证据引用</span>
-      <span className={styles.graphStepHint}>{details.support}</span>
+      <span className={styles.phase}><span>第 {step.sequence} 步</span><span title={details.phase}>{details.phase}</span></span>
+      <span className={styles.sphereWrap} aria-hidden="true">
+        <StepSphere phase={details.phase} supportStatus={supportStatus} selected={selected} />
+      </span>
+      <strong className={styles.title}>{step.description}</strong>
+      <span className={styles.metadata}><StepMetadata step={step} node={graphNode} /></span>
+      <span className={styles.techniques} title={details.techniques}>{details.techniques} · {step.evidence_ids.length} 条证据引用</span>
+      <span className={styles.support}>{details.support}</span>
       <Handle type="source" position={Position.Right} isConnectable={false} style={{ opacity: 0 }} />
     </button>
   );
@@ -69,6 +81,7 @@ export default function AttackGraph({ steps, graph, selectedStepId, selectStep }
     measured: measurements.get(step.attack_step_id),
     position: positions.get(step.attack_step_id) ?? { x: 0, y: 0 },
     data: { step, graphNode: graphNodes.get(step.attack_step_id), selected: selectedStepId === step.attack_step_id, selectStep },
+    style: { width: GRAPH_NODE_WIDTH, height: GRAPH_NODE_HEIGHT },
     draggable: false,
     selectable: true,
   })), [graphNodes, measurements, positions, selectedStepId, selectStep, steps]);
@@ -102,7 +115,7 @@ export default function AttackGraph({ steps, graph, selectedStepId, selectStep }
   }, [graph, steps]);
 
   return (
-    <div className={styles.graphCanvas} data-testid="attack-graph">
+    <div className={styles.canvas} data-testid="attack-graph">
       <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} nodeTypes={nodeTypes} colorMode="dark"
         fitView fitViewOptions={{ padding: 0.15, maxZoom: 1 }} minZoom={0.3} maxZoom={1.5}
         nodesConnectable={false} nodesDraggable={false}

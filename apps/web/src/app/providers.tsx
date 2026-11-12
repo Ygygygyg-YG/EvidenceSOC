@@ -28,6 +28,7 @@ export default function Providers({ children }: { children: ReactNode }) {
             colorBgContainer: t.surface,
             colorBgElevated: t.elevated,
             colorText: t.text,
+            colorTextLightSolid: t.canvas,
             colorTextSecondary: t.textSecondary,
             colorTextTertiary: t.textMuted,
             colorBorder: t.controlBorder,

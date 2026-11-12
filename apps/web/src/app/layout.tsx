@@ -20,6 +20,11 @@ const variables = {
   '--soc-border': t.border,
   '--soc-control-border': t.controlBorder,
   '--soc-primary': t.primary,
+  '--soc-primary-hover': t.primaryHover,
+  '--soc-primary-active': t.primaryActive,
+  '--soc-error': t.error,
+  '--soc-warning': t.warning,
+  '--soc-success': t.success,
 } as CSSProperties;
 
 export default function RootLayout({ children }: { children: ReactNode }) {

@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { Button, Select } from 'antd';
-import { Activity, AlertCircle, Bell, Database, LoaderCircle } from 'lucide-react';
+import { Activity, AlertCircle, ArrowUpRight, Bell, Database, LoaderCircle, Search, ShieldCheck } from 'lucide-react';
 import { buildAlertsQuery, severityLabels, statusLabels } from '../alerts/alertsContract';
 import { dashboardAlertHref, dashboardIncidentHref, DashboardRequestError, loadDashboard, loadSourceHealth, readDashboardWindow,
   type DashboardData, type DashboardWindow, type SourceHealthData } from './dashboardContract';
@@ -40,11 +40,18 @@ function Trend({ data }: { data: DashboardData }) {
   const totalLine = values.map((bucket, index) => `${x(index)},${y(bucket.total)}`).join(' ');
   const highLine = values.map((bucket, index) => `${x(index)},${y(bucket.high_risk)}`).join(' ');
   return <>
-    <p className={styles.chartSummary}>窗口内共 {data.metrics.alerts_in_window} 条告警；高危及严重告警 {values.reduce((sum, item) => sum + item.high_risk, 0)} 条。</p>
-    <div className={styles.chartLegend}><span className={styles.legendTotal}>总告警</span><span className={styles.legendHigh}>高危及严重</span></div>
+    <div className={styles.chartInfo}>
+      <p className={styles.chartSummary}>窗口内共 {data.metrics.alerts_in_window} 条告警；高危及严重告警 {values.reduce((sum, item) => sum + item.high_risk, 0)} 条。</p>
+      <div className={styles.chartLegend}><span className={styles.legendTotal}>总告警</span><span className={styles.legendHigh}>高危及严重</span></div>
+    </div>
     <Link href={dashboardAlertHref(data)} aria-label="查看窗口告警列表" className={styles.chartLink}><svg className={styles.trendSvg} role="img" aria-label="窗口内告警趋势：总告警和高危及严重告警" viewBox={`-16 -8 ${width + 32} ${height + 24}`} preserveAspectRatio="none">
+      <g aria-hidden="true" className={styles.chartGrid}>
+        <line x1="0" y1="24" x2={width} y2="24" />
+        <line x1="0" y1={(height + 24) / 2} x2={width} y2={(height + 24) / 2} />
+      </g>
       <line x1="0" y1={height} x2={width} y2={height} className={styles.axis} />
       {values.length > 0 && <>
+        {values.length > 1 && <polygon points={`0,${height} ${totalLine} ${width},${height}`} className={styles.totalArea} aria-hidden="true" />}
         <polyline points={totalLine} className={styles.totalLine} />
         <polyline points={highLine} className={styles.highLine} />
       </>}
@@ -62,7 +69,7 @@ function Trend({ data }: { data: DashboardData }) {
 function StatusDistribution({ data }: { data: DashboardData }) {
   const rows = data.incident_status_distribution;
   const maximum = Math.max(1, ...rows.map((row) => row.count));
-  return rows.length ? <ul className={styles.statusBars}>{rows.map((row) => <li key={row.status}>
+  return rows.length ? <ul className={styles.statusBars}>{rows.map((row) => <li key={row.status} data-status={row.status}>
     <div><Link href={dashboardIncidentHref(data, { status: row.status })}>{statusLabels[row.status]}</Link><strong>{row.count}</strong></div>
     <span className={styles.barTrack}><span style={{ width: `${row.count / maximum * 100}%` }} /></span>
   </li>)}</ul> : <div className={styles.emptyState}><Activity size={24} aria-hidden="true" /><p>窗口内没有调查记录。</p></div>;
@@ -72,8 +79,8 @@ function Health({ health }: { health: SourceHealthData }) {
   return <div className={styles.healthBody}>
     <p>健康状态来自当前可核实的后端信息；未知不代表正常。检查时间（UTC+8）：<Time value={health.checked_at} /></p>
     <dl className={styles.healthGrid}>
-      <div><dt>PostgreSQL</dt><dd>{health.postgresql_status === 'ok' ? '连接正常' : health.postgresql_status ?? '未知'}</dd></div>
-      <div><dt>OpenSearch</dt><dd>{health.opensearch_status === 'ok' ? '连接正常' : health.opensearch_status ?? '未知'}</dd></div>
+      <div><dt>PostgreSQL</dt><dd data-health-status={health.postgresql_status ?? 'unknown'}>{health.postgresql_status === 'ok' ? '连接正常' : health.postgresql_status ?? '未知'}</dd></div>
+      <div><dt>OpenSearch</dt><dd data-health-status={health.opensearch_status ?? 'unknown'}>{health.opensearch_status === 'ok' ? '连接正常' : health.opensearch_status ?? '未知'}</dd></div>
       <div><dt>日志源数量</dt><dd>{health.sources.length}</dd></div>
       <div><dt>索引延迟</dt><dd>未获得</dd></div>
     </dl>
@@ -100,7 +107,7 @@ export default function DashboardOverview() {
 
   return <div className={styles.page}>
     <header className={styles.pageHeader}>
-      <div><h1>运营总览</h1><p>真实统计按所选窗口聚合，当前待审批与运行中状态截至窗口结束时计算。</p></div>
+      <div><p className={styles.eyebrow} aria-hidden="true">SECURITY OPERATIONS / OVERVIEW</p><h1>运营总览</h1><p>真实统计按所选窗口聚合，当前待审批与运行中状态截至窗口结束时计算。</p></div>
       <div className={styles.windowActions}><Select<DashboardWindow> aria-label="统计时间窗口" virtual={false}
         value={window} options={windows} onChange={(next) => router.push(`/?window=${next}`, { scroll: false })} />
         <Button autoInsertSpace={false} loading={query.isFetching} onClick={() => { void query.refetch(); }}>刷新</Button></div>
@@ -116,10 +123,10 @@ export default function DashboardOverview() {
         <p className={styles.windowCaption}>运行模式：{data.execution_mode === 'rules' ? '规则演示' : '模型调查'}。统计窗口（UTC+8）：<Time value={data.time_from} /> 至 <Time value={data.time_to} />；生成于 <Time value={data.generated_at} />。进入列表后可继续核对明细。</p>
         <div className={styles.dashboard}>
           <dl className={styles.metricGrid} data-testid="overview-metrics">
-            <div className={styles.metric}><dt>窗口内告警</dt><dd className={styles.metricValue}>{data.metrics.alerts_in_window}</dd><dd className={styles.metricNote}><Link href={alertListHref}>查看告警列表</Link></dd></div>
-            <div className={styles.metric}><dt>窗口内高危调查</dt><dd className={styles.metricValue}>{data.metrics.high_risk_incidents}</dd><dd className={styles.metricNote}><Link href={dashboardIncidentHref(data, { risk: 'high' })}>查看调查列表</Link></dd></div>
-            <div className={styles.metric}><dt>当前运行中调查</dt><dd className={styles.metricValue}>{data.metrics.running_investigations}</dd><dd className={styles.metricNote}>全量现态 · <Link href="/incidents">查看调查列表</Link></dd></div>
-            <div className={styles.metric}><dt>当前待审批方案</dt><dd className={styles.metricValue}>{data.metrics.pending_response_plans}</dd><dd className={styles.metricNote}><Link href="/responses?decision_state=pending">查看响应队列</Link></dd></div>
+            <div className={styles.metric}><dt>窗口内告警<Bell size={16} aria-hidden="true" /></dt><dd className={styles.metricValue}>{data.metrics.alerts_in_window}</dd><dd className={styles.metricNote}><Link href={alertListHref}>查看告警列表<ArrowUpRight size={13} aria-hidden="true" /></Link></dd></div>
+            <div className={styles.metric}><dt>窗口内高危调查<Search size={16} aria-hidden="true" /></dt><dd className={styles.metricValue}>{data.metrics.high_risk_incidents}</dd><dd className={styles.metricNote}><Link href={dashboardIncidentHref(data, { risk: 'high' })}>查看调查列表<ArrowUpRight size={13} aria-hidden="true" /></Link></dd></div>
+            <div className={styles.metric}><dt>当前运行中调查<Activity size={16} aria-hidden="true" /></dt><dd className={styles.metricValue}>{data.metrics.running_investigations}</dd><dd className={styles.metricNote}>全量现态 · <Link href="/incidents">查看调查列表<ArrowUpRight size={13} aria-hidden="true" /></Link></dd></div>
+            <div className={styles.metric}><dt>当前待审批方案<ShieldCheck size={16} aria-hidden="true" /></dt><dd className={styles.metricValue}>{data.metrics.pending_response_plans}</dd><dd className={styles.metricNote}><Link href="/responses?decision_state=pending">查看响应队列<ArrowUpRight size={13} aria-hidden="true" /></Link></dd></div>
           </dl>
           <div className={styles.rowGrid}>
             <section className={`${styles.panel} ${styles.wide}`} aria-labelledby="alert-trend-title">
@@ -133,10 +140,10 @@ export default function DashboardOverview() {
           </div>
           <div className={styles.rowGrid}>
             <section className={`${styles.panel} ${styles.wide}`} aria-labelledby="recent-alerts-title">
-              <header className={styles.panelHeader}><h2 id="recent-alerts-title"><Bell size={18} aria-hidden="true" />最近告警</h2><Link href={alertListHref}>查看全部</Link></header>
+              <header className={styles.panelHeader}><h2 id="recent-alerts-title"><Bell size={18} aria-hidden="true" />最近告警</h2><Link href={alertListHref}>查看全部<ArrowUpRight size={13} aria-hidden="true" /></Link></header>
               {data.recent_alerts.length ? <ul className={styles.recentList}>{data.recent_alerts.map((alert) => <li key={alert.alert_id}>
                 <Link href={`/alerts/${encodeURIComponent(alert.alert_id)}?from=${encodeURIComponent(alertListQuery)}`}>{alert.title}</Link>
-                <span>{severityLabels[alert.severity]} · {statusLabels[alert.status]}</span><Time value={alert.created_at} />
+                <span className={styles.alertState}><span className={styles.severity} data-severity={alert.severity}>{severityLabels[alert.severity]}</span> · {statusLabels[alert.status]}</span><Time value={alert.created_at} />
               </li>)}</ul> : <div className={styles.emptyState}><Bell size={24} aria-hidden="true" /><p>窗口内没有告警。</p></div>}
             </section>
             <section className={`${styles.panel} ${styles.narrow}`} aria-labelledby="recent-activity-title">
