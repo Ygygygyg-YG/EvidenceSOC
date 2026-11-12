@@ -96,7 +96,10 @@ test('证据按服务端总数分页，能继续加载快照之外的证据', as
   });
   await page.setViewportSize({ width: 1920, height: 1000 });
   await page.goto('/incidents/IN-WORKBENCH');
-  const inspector = page.getByRole('region', { name: '证据检查器' });
+  await expect(page.getByText('分页证据 20')).toHaveCount(0);
+  await page.getByRole('button', { name: '打开证据概览，共 21 条' }).click();
+  const drawer = page.getByRole('dialog', { name: '证据检查器' });
+  const inspector = drawer.getByRole('region', { name: '证据检查器' });
   await expect(inspector.getByRole('button', { name: /分页证据 20/ })).toBeVisible();
   await expect(inspector.getByText('尾页新增证据')).toHaveCount(0);
   await expect(page.getByText('21 条', { exact: true })).toBeVisible();
@@ -119,7 +122,8 @@ test('证据分页失败时只标记快照范围，重试后恢复服务端总�
   });
   await page.setViewportSize({ width: 1920, height: 1000 });
   await page.goto('/incidents/IN-WORKBENCH');
-  const inspector = page.getByRole('region', { name: '证据检查器' });
+  await page.getByRole('button', { name: '打开证据概览，共 2 条' }).click();
+  const inspector = page.getByRole('dialog', { name: '证据检查器' }).getByRole('region', { name: '证据检查器' });
   await expect(inspector.getByRole('alert')).toContainText('仅显示当前案件快照');
   await expect(inspector.getByRole('alert')).toContainText('TRACE-PAGE-1');
   await expect(page.getByText('当前快照 2 条（总数未核实）')).toBeVisible();
@@ -142,15 +146,16 @@ test('宽屏图谱选中步骤后只列出它引用的真实证据，并显示�
   await page.setViewportSize({ width: 1920, height: 1000 });
   await page.goto('/incidents/IN-WORKBENCH');
   await expect(page.getByRole('region', { name: '攻击链' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: '证据检查器' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '证据检查器' })).toHaveCount(0);
   const columns = await page.getByTestId('workbench-grid').evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(' ').map(Number.parseFloat));
-  expect(columns).toHaveLength(3);
-  expect(columns[1] / columns[0]).toBeGreaterThan(1.8);
-  expect(columns[1] / columns[0]).toBeLessThan(2.2);
+  expect(columns).toHaveLength(2);
+  expect(columns[1] / columns[0]).toBeGreaterThan(3);
   await expect(page.getByRole('button', { name: /第 2 步.*可疑请求被规则捕获/ })).toBeVisible();
   await expect(page.locator('.react-flow__edge')).toHaveCount(0);
   await page.getByRole('button', { name: /第 2 步.*可疑请求被规则捕获/ }).click();
-  const inspector = page.getByRole('region', { name: '证据检查器' });
+  const evidenceDrawer = page.getByRole('dialog', { name: '证据检查器' });
+  await expect(evidenceDrawer).toBeVisible();
+  const inspector = evidenceDrawer.getByRole('region', { name: '证据检查器' });
   await expect(inspector.getByText('规则命中记录')).toBeVisible();
   await expect(inspector.getByText('入口请求日志')).toHaveCount(0);
   await inspector.getByRole('button', { name: /规则命中记录/ }).click();
@@ -199,6 +204,7 @@ test('攻击节点和阶段列表展示步骤自己的实体时间与置信度�
   await expect(inspector).toContainText('step-host / step-service');
   await expect(inspector).toContainText('计算依据未提供');
   await expect(inspector).not.toContainText('edge-01');
+  await page.getByRole('dialog', { name: '证据检查器' }).getByRole('button', { name: '关闭' }).click();
   await page.getByRole('button', { name: '阶段列表' }).click();
   await expect(step).toContainText('step-host / step-service');
   await expect(step).toContainText('步骤输出置信度 63%');
@@ -287,19 +293,32 @@ test('服务端无法计算哈希时显示不可用，不伪造一致结论', as
   await expect(inspector).not.toContainText('本次校验通过');
 });
 
-test('阶段列表与图谱使用同一步骤和证据引用，六角色只展示真实运行时间', async ({ page }) => {
+test('阶段证据与六角色运行记录分别使用侧边抽屉且只展示真实字段', async ({ page }) => {
   await page.goto('/incidents/IN-WORKBENCH');
   await page.getByRole('button', { name: '阶段列表' }).click();
   await page.getByRole('button', { name: /第 2 步.*可疑请求被规则捕获/ }).click();
-  await expect(page.getByRole('region', { name: '证据检查器' })).toContainText('规则命中记录');
+  const evidenceDrawer = page.getByRole('dialog', { name: '证据检查器' });
+  await expect(evidenceDrawer.getByRole('region', { name: '证据检查器' })).toContainText('规则命中记录');
+  await evidenceDrawer.getByRole('button', { name: '关闭' }).click();
+
   const progress = page.getByRole('region', { name: '六角色进度' });
   await expect(progress).toContainText('分诊');
   await expect(progress).toContainText('证据收集');
   await expect(progress).toContainText('等待批准后执行');
-  await expect(progress).toContainText('RUN-1');
-  await expect(progress).toContainText('RUN-2');
-  await expect(progress).toContainText('2026/09/21');
-  await expect(progress).not.toContainText('RUN-3');
+  await expect(progress).not.toContainText('RUN-1');
+  await expect(progress).not.toContainText('RUN-2');
+
+  await progress.getByRole('button', { name: '查看分诊运行记录（1）' }).click();
+  const runDrawer = page.getByRole('dialog', { name: '运行记录' });
+  await expect(runDrawer.getByRole('region', { name: '分诊运行记录' })).toContainText('RUN-1');
+  await expect(runDrawer).toContainText('2026/09/21 18:20:24');
+  await expect(runDrawer).not.toContainText('RUN-2');
+  await runDrawer.getByRole('button', { name: '关闭' }).click();
+
+  await progress.getByRole('button', { name: '查看证据收集运行记录（1）' }).click();
+  await expect(runDrawer.getByRole('region', { name: '证据收集运行记录' })).toContainText('RUN-2');
+  await expect(runDrawer).toContainText('EV-01K5TESTTESTTESTTESTTESTTESU');
+  await expect(runDrawer).not.toContainText('RUN-3');
 });
 
 test('窄屏点击阶段步骤从右侧打开证据抽屉，关闭后仍保持选中步骤', async ({ page }) => {
@@ -314,4 +333,12 @@ test('窄屏点击阶段步骤从右侧打开证据抽屉，关闭后仍保持�
   await drawer.getByRole('button', { name: '关闭' }).click();
   await expect(drawer).toBeHidden();
   await expect(page.getByRole('button', { name: /第 2 步.*可疑请求被规则捕获/ })).toHaveAttribute('aria-pressed', 'true');
+
+  const runTrigger = page.getByRole('button', { name: '查看分诊运行记录（1）' });
+  await runTrigger.click();
+  const runDrawer = page.getByRole('dialog', { name: '运行记录' });
+  await expect(runDrawer).toContainText('RUN-1');
+  await runDrawer.getByRole('button', { name: '关闭' }).click();
+  await expect(runDrawer).toBeHidden();
+  await expect(runTrigger).toBeFocused();
 });

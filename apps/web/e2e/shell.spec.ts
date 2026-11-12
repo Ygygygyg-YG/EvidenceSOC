@@ -1,5 +1,12 @@
 import { expect, test, type Page } from '@playwright/test';
 
+async function enterWorkspace(page: Page) {
+  const opening = page.getByTestId('opening-experience');
+  await expect(opening).toBeVisible();
+  await opening.getByRole('button', { name: '跳过开场', exact: true }).click();
+  await expect(opening).toHaveCount(0);
+}
+
 async function expectNoHorizontalOverflow(page: Page) {
   const sizes = await page.evaluate(() => ({
     viewport: document.documentElement.clientWidth,
@@ -20,6 +27,7 @@ for (const viewport of [
   test(`运营总览在 ${viewport.width}px 下没有横向溢出`, async ({ page }) => {
     await page.setViewportSize(viewport);
     await page.goto('/');
+    await enterWorkspace(page);
     await expect(page.getByRole('heading', { name: '运营总览', level: 1 })).toBeVisible();
     await expect(page.getByRole('banner').getByRole('link', { name: 'EvidenceSOC 首页' })).toBeVisible();
     await expect(page.getByTestId('overview-metrics').getByText('窗口内告警')).toBeVisible();
@@ -31,6 +39,7 @@ for (const viewport of [
 test('桌面导航可进入四个工作区并保留外壳', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/');
+  await enterWorkspace(page);
   const navigation = page.getByRole('navigation', { name: '主导航', exact: true });
   const shell = page.getByTestId('soc-shell');
   await expect(navigation).toBeVisible();
@@ -56,6 +65,7 @@ test('桌面导航可进入四个工作区并保留外壳', async ({ page }) => 
 test('窄屏导航支持键盘、焦点归还和路由切换', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/');
+  await enterWorkspace(page);
   const menuButton = page.getByRole('button', { name: '打开导航菜单', exact: true });
   const dialog = page.getByRole('dialog', { name: '工作区导航', exact: true });
   await expect(page.locator('nav[aria-label="主导航"]')).toBeHidden();

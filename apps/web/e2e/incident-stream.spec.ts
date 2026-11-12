@@ -206,12 +206,17 @@ test('事件到达后刷新案件快照，断线重放时不重复证据', async
     }
   });
   await page.goto('/incidents/IN-STREAM');
-  await expect(page.getByText('重连后仍只有一条证据')).toBeVisible();
+  const evidenceOverview = page.getByRole('button', { name: '打开证据概览，共 1 条' });
+  await expect(evidenceOverview).toBeVisible();
+  await evidenceOverview.click();
+  const evidenceDrawer = page.getByRole('dialog', { name: '证据检查器' });
+  await expect(evidenceDrawer.getByText('重连后仍只有一条证据')).toBeVisible();
   await expect.poll(() => connections).toBeGreaterThanOrEqual(2);
   expect(cursors[0]).toBe('0');
   expect(cursors[1]).toBe('0');
   expect(snapshotReads).toBeGreaterThanOrEqual(2);
-  await expect(page.getByRole('button', { name: /重连后仍只有一条证据/ })).toHaveCount(1);
+  await expect(evidenceDrawer.getByRole('button', { name: /重连后仍只有一条证据/ })).toHaveCount(1);
+  await evidenceDrawer.getByRole('button', { name: '关闭' }).click();
   await expect(page.getByText('已完成')).toBeVisible();
   await page.waitForTimeout(1250);
   expect(connections).toBe(2);

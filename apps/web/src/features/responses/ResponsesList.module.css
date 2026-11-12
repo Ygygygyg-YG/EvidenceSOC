@@ -1,11 +1,13 @@
 .page { min-width: 0; }
-.header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
-.header h1 { margin: 0 0 6px; color: var(--soc-text); font-size: 24px; line-height: 1.35; }
-.header p { margin: 0; color: var(--soc-text-secondary); }
-.simulation { flex: none; padding: 7px 11px; border: 1px solid var(--soc-primary); border-radius: 999px; color: var(--soc-primary); font-size: 13px; font-weight: 600; }
+.header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 24px; padding-top: 20px; padding-bottom: 24px; border-bottom: 1px solid var(--soc-border); }
+.header > div { position: relative; min-width: 0; }
+.header > div::before { position: absolute; top: -20px; width: 36px; height: 2px; background: var(--soc-primary); content: ''; }
+.header h1 { margin: 0 0 8px; color: var(--soc-text); font-size: 28px; font-weight: 650; line-height: 1.4; letter-spacing: .01em; }
+.header p { max-width: 80ch; margin: 0; color: var(--soc-text-secondary); line-height: 1.7; }
+.simulation { flex: none; padding: 6px 10px; border: 1px solid color-mix(in srgb, var(--soc-primary) 40%, transparent); border-radius: 5px; color: var(--soc-primary); background: color-mix(in srgb, var(--soc-primary) 7%, transparent); font-size: 12px; font-weight: 600; }
 .panel { min-width: 0; overflow: hidden; background: var(--soc-surface); border: 1px solid var(--soc-border); border-radius: 8px; }
-.filters { display: flex; flex-wrap: wrap; gap: 16px; padding: 20px; border-bottom: 1px solid var(--soc-border); }
-.filter { display: flex; flex-direction: column; gap: 6px; width: 180px; color: var(--soc-text-secondary); }
+.filters { display: flex; flex-wrap: wrap; gap: 20px; padding: 24px; border-bottom: 1px solid var(--soc-border); }
+.filter { display: flex; flex-direction: column; gap: 8px; width: 180px; min-width: 0; color: var(--soc-text-secondary); font-size: 12px; }
 .filter > :last-child { width: 100%; }
 .context { margin: 0; padding: 10px 20px; color: var(--soc-text-secondary); font-size: 13px; background: var(--soc-elevated); }
 .summary { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 16px 20px; }
@@ -23,6 +25,8 @@
 .table th { padding: 12px 16px; color: var(--soc-text-secondary); font-weight: 500; text-align: left; background: var(--soc-elevated); border-block: 1px solid var(--soc-border); }
 .table td { padding: 14px 16px; color: var(--soc-text-secondary); border-bottom: 1px solid var(--soc-border); vertical-align: top; overflow-wrap: anywhere; }
 .table tbody tr:last-child td { border-bottom: 0; }
+.table tbody tr:hover { background: var(--soc-elevated); }
+.table a:focus-visible, .cards a:focus-visible { outline: 2px solid var(--soc-primary); outline-offset: 3px; border-radius: 2px; }
 .table a, .cards a { color: var(--soc-text); text-decoration: none; }
 .table a:hover, .cards a:hover { color: var(--soc-primary); text-decoration: underline; text-underline-offset: 3px; }
 .subline { display: block; margin-top: 5px; color: var(--soc-text-muted); font-size: 13px; overflow-wrap: anywhere; }
@@ -34,11 +38,13 @@
 .pagination { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 16px 20px; border-top: 1px solid var(--soc-border); color: var(--soc-text-secondary); }
 .pagination > div { display: flex; gap: 8px; }
 @media (width < 768px) {
-  .header { flex-wrap: wrap; }
+  .header { flex-wrap: wrap; padding-bottom: 20px; }
+  .header h1 { font-size: 24px; }
   .tableScroller { display: none; }
+  .filters { padding-block: 20px; gap: 12px; }
   .filters, .summary, .pagination { padding-inline: 16px; }
   .context { padding-inline: 16px; }
-  .filter { width: calc(50% - 8px); }
+  .filter { width: calc(50% - 6px); }
   .cards { display: grid; gap: 12px; margin: 0; padding: 0 16px 16px; list-style: none; }
   .cards li { min-width: 0; padding: 16px; background: var(--soc-elevated); border: 1px solid var(--soc-border); border-radius: 8px; overflow-wrap: anywhere; }
   .cards li > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; }

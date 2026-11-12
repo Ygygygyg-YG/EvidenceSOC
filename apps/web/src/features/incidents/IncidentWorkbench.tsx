@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { Button, Drawer } from 'antd';
@@ -13,6 +13,7 @@ import { EvidenceDetailRequestError, loadEvidenceDetail } from './evidenceDetail
 import { EvidencePageRequestError, loadEvidencePage } from './evidencePageContract';
 import { loadDemoSession, startDemoSession } from '../responses/sessionContract';
 import { StepMetadata, StepTime, stepDetails, type GraphStep } from './attackStepDetails';
+import StepSphere from './StepSphere';
 import styles from './IncidentDetail.module.css';
 
 const AttackGraph = dynamic(() => import('./AttackGraph'), { ssr: false,
@@ -53,9 +54,9 @@ const runLabels: Record<AgentRun['status'], string> = {
   pending: '待运行', running: '运行中', completed: '已完成', failed: '失败',
 };
 
-function ContextPanel({ incident, evidenceItems, evidenceTotal, compactEvidence, showEvidence }: {
+function ContextPanel({ incident, evidenceItems, evidenceTotal, showEvidenceOverview }: {
   incident: IncidentSummary; evidenceItems: EvidenceItem[]; evidenceTotal: number | null;
-  compactEvidence: boolean; showEvidence: (id: string) => void;
+  showEvidenceOverview: (trigger: HTMLButtonElement) => void;
 }) {
   const primary = incident.alerts[0];
   return (
@@ -78,9 +79,12 @@ function ContextPanel({ incident, evidenceItems, evidenceTotal, compactEvidence,
       </dl>
       {incident.fallback_used && <p className={styles.note}>本次调查使用了规则回退结果。</p>}
       {incident.stop_reason && <p className={styles.note}>停止原因：{incident.stop_reason}</p>}
-      {compactEvidence && evidenceItems.length > 0 && <div className={styles.compactEvidence}>
+      {evidenceItems.length > 0 && <div className={styles.compactEvidence}>
         <h3>证据概览</h3>
-        {evidenceItems.map((item) => <button key={item.evidence_id} type="button" onClick={() => showEvidence(item.evidence_id)}>{item.summary}</button>)}
+        <button type="button" onClick={(event) => showEvidenceOverview(event.currentTarget)} aria-label={`打开证据概览，共 ${evidenceTotal ?? evidenceItems.length} 条`}>
+          <span>{evidenceTotal === null ? `查看当前 ${evidenceItems.length} 条证据` : `查看全部 ${evidenceTotal} 条证据`}</span>
+          <ArrowUpRight size={15} aria-hidden="true" />
+        </button>
       </div>}
       {incident.response_plan && <div className={styles.responseSummary}>
         <h3>响应摘要</h3><p>{incident.response_plan.summary}</p>
@@ -101,9 +105,12 @@ function StageList({ steps, graphNodes, selectedStepId, selectStep }: {
     const details = stepDetails(step, node);
     return <li key={step.attack_step_id}>
     <button type="button" aria-pressed={selectedStepId === step.attack_step_id}
-      data-support-status={node?.support_status ?? 'unknown'}
+      data-support-status={node?.support_status ?? 'unknown'} data-step-id={step.attack_step_id} data-node-kind="stage"
       aria-label={`第 ${step.sequence} 步 ${step.description}`} onClick={() => selectStep(step.attack_step_id)}>
-      <span className={styles.stageNumber}>{String(step.sequence).padStart(2, '0')}</span>
+      <span className={styles.stageMarker} aria-hidden="true">
+        <StepSphere phase={details.phase} supportStatus={node?.support_status ?? 'unknown'} selected={selectedStepId === step.attack_step_id} compact />
+        <span className={styles.stageNumber}>{String(step.sequence).padStart(2, '0')}</span>
+      </span>
       <span className={styles.stageBody}><strong>{step.description}</strong>
         <small>{details.phase} · {details.techniques} · {step.evidence_ids.length} 条证据引用</small>
         <StepMetadata step={step} node={node} /><small>{details.support}</small>
@@ -237,7 +244,27 @@ function EvidenceInspector({ incident, evidenceItems, evidenceTotal, evidencePag
   </section>;
 }
 
-function AgentProgress({ incident }: { incident: IncidentSummary }) {
+function RunInspector({ roleLabel, runs }: { roleLabel: string; runs: AgentRun[] }) {
+  return <section className={styles.runInspector} role="region" aria-label={`${roleLabel}运行记录`}>
+    <div className={styles.sectionHeading}><h2>{roleLabel}运行记录</h2><span>{runs.length} 条</span></div>
+    <div className={styles.runInspectorBody}>
+      <p className={styles.inspectorContext}>仅展示后端返回的真实运行时间、状态与证据引用。</p>
+      <ol className={styles.runRecordList}>{runs.map((run) => <li key={run.run_id} className={styles.runRecord}>
+        <strong className={styles.identifier}>{run.run_id}</strong><span className={styles.runRecordStatus}>{runLabels[run.status]}</span>
+        <dl className={styles.runFacts}>
+          <div><dt>角色</dt><dd>{run.agent_name}</dd></div>
+          <div><dt>开始时间（UTC+8）</dt><dd>{formatTime(run.started_at)}</dd></div>
+          <div><dt>结束时间（UTC+8）</dt><dd>{formatTime(run.finished_at)}</dd></div>
+          <div><dt>证据引用</dt><dd>{run.evidence_ids.length ? run.evidence_ids.join('、') : '无'}</dd></div>
+        </dl>
+      </li>)}</ol>
+    </div>
+  </section>;
+}
+
+function AgentProgress({ incident, showRuns }: {
+  incident: IncidentSummary; showRuns: (roleLabel: string, runs: AgentRun[], trigger: HTMLButtonElement) => void;
+}) {
   return <section className={`${styles.panel} ${styles.progressPanel}`} role="region" aria-label="六角色进度">
     <div className={styles.sectionHeading}><h2>六角色进度</h2><span>{incident.runs.length} 条真实运行记录</span></div>
     <div className={styles.progressScroll}><ol className={styles.progressList}>{roleSteps.map((role) => {
@@ -250,13 +277,8 @@ function AgentProgress({ incident }: { incident: IncidentSummary }) {
         {current && <span className={styles.roleKey}>{current.agent_name}</span>}
         <span className={styles.roleStatus}>{current ? runLabels[current.status] : waitingForApproval ? '等待批准后执行' : '未开始'}</span>
         {current && <><span className={styles.roleTime}>{current.finished_at ? `完成：${formatTime(current.finished_at)}` : `开始：${formatTime(current.started_at)}`}</span>
-          <details className={styles.runDetails}><summary>查看运行记录（{runs.length}）</summary>
-            {runs.map((run) => <div key={run.run_id} className={styles.runRecord}>
-              <strong className={styles.identifier}>{run.run_id}</strong><span>{runLabels[run.status]}</span>
-              <span>开始：{formatTime(run.started_at)}</span><span>结束：{formatTime(run.finished_at)}</span>
-              <span>证据引用：{run.evidence_ids.length ? run.evidence_ids.join('、') : '无'}</span>
-            </div>)}
-          </details></>}
+          <button type="button" className={styles.runTrigger} aria-label={`查看${role.label}运行记录（${runs.length}）`}
+            onClick={(event) => showRuns(role.label, runs, event.currentTarget)}>查看运行记录（{runs.length}） <ArrowUpRight size={13} aria-hidden="true" /></button></>}
       </li>;
     })}</ol></div>
     {incident.runs.some((run) => !roleSteps.some((role) => role.key === run.agent_name)) &&
@@ -267,12 +289,14 @@ function AgentProgress({ incident }: { incident: IncidentSummary }) {
 export default function IncidentWorkbench({ incident, attackGraph }: {
   incident: IncidentSummary; attackGraph?: AttackGraphData;
 }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [width, setWidth] = useState<number | null>(null);
   const [chosenView, setChosenView] = useState<'graph' | 'list' | null>(null);
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
   const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | null>(null);
-  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerContent, setDrawerContent] = useState<
+    { kind: 'evidence' } | { kind: 'runs'; roleLabel: string; runs: AgentRun[] } | null
+  >(null);
+  const drawerReturnFocus = useRef<HTMLElement | null>(null);
+  const drawerFocusTimer = useRef<number | null>(null);
   const [layoutRevision, setLayoutRevision] = useState(0);
   const [phase, setPhase] = useState('all');
   const evidencePageQuery = useInfiniteQuery({
@@ -293,16 +317,8 @@ export default function IncidentWorkbench({ incident, attackGraph }: {
   };
   const loadMoreEvidence = () => { void evidencePageQuery.fetchNextPage(); };
 
-  useEffect(() => {
-    const element = containerRef.current;
-    if (!element) return;
-    const resize = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width));
-    resize.observe(element);
-    return () => resize.disconnect();
-  }, []);
   const mobile = useSyncExternalStore(subscribeMobile, getMobile, () => false);
   const view = chosenView ?? (mobile ? 'list' : 'graph');
-  const useDrawer = width !== null && width < 1500;
   const selectedStep = incident.attack_steps.find((step) => step.attack_step_id === selectedStepId);
   const graphNodes = useMemo(() => new Map(attackGraph?.nodes.map((node) => [node.step_id, node]) ?? []), [attackGraph]);
   const selectedGraphNode = selectedStepId ? graphNodes.get(selectedStepId) : undefined;
@@ -310,20 +326,39 @@ export default function IncidentWorkbench({ incident, attackGraph }: {
   const visibleSteps = useMemo(() => incident.attack_steps.filter((step) => phase === 'all' || (step.phase ?? '阶段未提供') === phase)
     .sort((a, b) => a.sequence - b.sequence || a.attack_step_id.localeCompare(b.attack_step_id)), [incident.attack_steps, phase]);
   const selectStep = useCallback((id: string) => {
+    if (drawerFocusTimer.current !== null) window.clearTimeout(drawerFocusTimer.current);
+    drawerReturnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setSelectedStepId(id);
     setSelectedEvidenceId(null);
-    if (useDrawer) setDrawerOpen(true);
-  }, [useDrawer]);
-  const showEvidence = useCallback((id: string) => {
+    setDrawerContent({ kind: 'evidence' });
+  }, []);
+  const showEvidenceOverview = useCallback((trigger: HTMLButtonElement) => {
+    if (drawerFocusTimer.current !== null) window.clearTimeout(drawerFocusTimer.current);
+    drawerReturnFocus.current = trigger;
     setSelectedStepId(null);
-    setSelectedEvidenceId(id);
-    if (useDrawer) setDrawerOpen(true);
-  }, [useDrawer]);
+    setSelectedEvidenceId(null);
+    setDrawerContent({ kind: 'evidence' });
+  }, []);
+  const showRuns = useCallback((roleLabel: string, runs: AgentRun[], trigger: HTMLButtonElement) => {
+    if (drawerFocusTimer.current !== null) window.clearTimeout(drawerFocusTimer.current);
+    drawerReturnFocus.current = trigger;
+    setDrawerContent({ kind: 'runs', roleLabel, runs });
+  }, []);
+  const closeDrawer = useCallback(() => {
+    const target = drawerReturnFocus.current;
+    drawerReturnFocus.current = null;
+    setDrawerContent(null);
+    if (drawerFocusTimer.current !== null) window.clearTimeout(drawerFocusTimer.current);
+    drawerFocusTimer.current = window.setTimeout(() => {
+      drawerFocusTimer.current = null;
+      if (target?.isConnected) target.focus();
+    }, 360);
+  }, []);
 
-  return <div ref={containerRef} className={styles.workbench}>
+  return <div className={styles.workbench}>
     <div className={styles.workbenchGrid} data-testid="workbench-grid">
       <aside className={styles.contextColumn}><ContextPanel incident={incident} evidenceItems={evidenceItems}
-        evidenceTotal={evidenceTotal} compactEvidence={useDrawer} showEvidence={showEvidence} /></aside>
+        evidenceTotal={evidenceTotal} showEvidenceOverview={showEvidenceOverview} /></aside>
       <div className={styles.primaryColumn}>
         <section className={`${styles.panel} ${styles.attackPanel}`} role="region" aria-label="攻击链">
           <div className={styles.sectionHeading}><h2>攻击链</h2><span>{incident.attack_steps.length} 步</span></div>
@@ -350,22 +385,19 @@ export default function IncidentWorkbench({ incident, attackGraph }: {
             </div>}
           </> : <p className={styles.empty}>尚无重构出的攻击步骤。</p>}
         </section>
-        <AgentProgress incident={incident} />
+        <AgentProgress incident={incident} showRuns={showRuns} />
       </div>
-      {!useDrawer && <aside className={styles.inspectorColumn}><EvidenceInspector incident={incident}
-        evidenceItems={evidenceItems} evidenceTotal={evidenceTotal} evidencePageError={evidencePageError}
-        hasMoreEvidence={Boolean(evidencePageQuery.hasNextPage)} loadingMoreEvidence={evidencePageQuery.isFetchingNextPage}
-        retryEvidencePage={retryEvidencePage} loadMoreEvidence={loadMoreEvidence} selectedStep={selectedStep} selectedGraphNode={selectedGraphNode}
-        selectedEvidenceId={selectedEvidenceId} selectEvidence={setSelectedEvidenceId} /></aside>}
     </div>
-    <Drawer title="证据检查器" placement="right" size="min(440px, 100vw)" open={useDrawer && drawerOpen}
-      closeIcon={null} extra={<Button autoInsertSpace={false} onClick={() => setDrawerOpen(false)}>关闭</Button>}
-      onClose={() => setDrawerOpen(false)} destroyOnHidden>
-      <EvidenceInspector incident={incident} evidenceItems={evidenceItems} evidenceTotal={evidenceTotal}
+    <Drawer title={drawerContent?.kind === 'runs' ? '运行记录' : '证据检查器'} placement="right" size="min(480px, 100vw)"
+      open={drawerContent !== null} closeIcon={null}
+      extra={<Button autoInsertSpace={false} onClick={closeDrawer}>关闭</Button>}
+      onClose={closeDrawer} destroyOnHidden>
+      {drawerContent?.kind === 'evidence' && <EvidenceInspector incident={incident} evidenceItems={evidenceItems} evidenceTotal={evidenceTotal}
         evidencePageError={evidencePageError} hasMoreEvidence={Boolean(evidencePageQuery.hasNextPage)}
         loadingMoreEvidence={evidencePageQuery.isFetchingNextPage} retryEvidencePage={retryEvidencePage}
         loadMoreEvidence={loadMoreEvidence} selectedStep={selectedStep} selectedGraphNode={selectedGraphNode} selectedEvidenceId={selectedEvidenceId}
-        selectEvidence={setSelectedEvidenceId} />
+        selectEvidence={setSelectedEvidenceId} />}
+      {drawerContent?.kind === 'runs' && <RunInspector roleLabel={drawerContent.roleLabel} runs={drawerContent.runs} />}
     </Drawer>
   </div>;
 }

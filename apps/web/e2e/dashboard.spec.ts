@@ -1,5 +1,12 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { dashboardSchema } from '../src/features/dashboard/dashboardContract';
+
+async function enterWorkspace(page: Page) {
+  const opening = page.getByTestId('opening-experience');
+  await expect(opening).toBeVisible();
+  await opening.getByRole('button', { name: '跳过开场', exact: true }).click();
+  await expect(opening).toHaveCount(0);
+}
 
 const sample = dashboardSchema.parse({
   window: '7d', execution_mode: 'rules', time_from: '2026-09-24T00:00:00Z', time_to: '2026-10-01T00:00:00Z',
@@ -24,6 +31,7 @@ test('首页展示真实后端聚合值，与同源 API 一致', async ({ page, 
   expect(response.ok()).toBe(true);
   const actual = dashboardSchema.parse(await response.json());
   await page.goto('/?window=24h');
+  await enterWorkspace(page);
   const metrics = page.getByTestId('overview-metrics');
   await expect(metrics.getByText('窗口内告警').locator('..').locator('dd').first()).toHaveText(String(actual.metrics.alerts_in_window));
   await expect(metrics.getByText('当前待审批方案').locator('..').locator('dd').first()).toHaveText(String(actual.metrics.pending_response_plans));
@@ -34,6 +42,7 @@ test('窗口图表、状态下钻和未知健康按后端数据展示，窄屏�
   await page.route('**/api/v1/data-sources/health', async (route) => route.fulfill({ json: sample.source_health }));
   await page.setViewportSize({ width: 390, height: 840 });
   await page.goto('/?window=7d');
+  await enterWorkspace(page);
   await expect(page.getByRole('heading', { name: '运营总览', level: 1 })).toBeVisible();
   await expect(page.getByRole('img', { name: /窗口内告警趋势/ })).toBeVisible();
   await expect(page.getByRole('link', { name: '查看告警列表' })).toHaveAttribute('href',
@@ -68,6 +77,7 @@ test('点击窗口内高危调查，列表请求沿用服务端时间边界和�
     return route.fulfill({ json: { items: [], total: 0, page: Number(query.get('page')), page_size: Number(query.get('page_size')) } });
   });
   await page.goto('/?window=7d');
+  await enterWorkspace(page);
   await page.getByText('窗口内高危调查').locator('..').getByRole('link', { name: '查看调查列表' }).click();
   await expect(page.getByRole('heading', { name: '调查列表', level: 1 })).toBeVisible();
   await expect(page.getByTestId('incidents-total')).toHaveText('共 0 条案件');
@@ -79,6 +89,7 @@ test('统计服务错误显示 trace，不把未知数据伪装为 0', async ({ 
     status: 503, json: { error: { code: 'DASHBOARD_UNAVAILABLE', message: '统计服务不可用', trace_id: 'TRACE-dashboard-down' } },
   }));
   await page.goto('/');
+  await enterWorkspace(page);
   await expect(page.getByRole('alert').filter({ hasText: 'TRACE-dashboard-down' })).toBeVisible();
   await expect(page.getByTestId('overview-metrics')).toHaveCount(0);
 });
