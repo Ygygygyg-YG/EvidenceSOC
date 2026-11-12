@@ -536,3 +536,40 @@ async def test_restart_during_approval_record_save_recovers_submitted_decision()
     assert (
         sum(event["event"] == "simulation.completed" for event in result["events"]) == 1
     )
+
+
+@pytest.mark.asyncio
+async def test_demo_rejects_approval_version_that_does_not_match_checkpoint():
+    class DemoServices(MemoryServices):
+        async def load_incident(self, incident_id):
+            incident = await super().load_incident(incident_id)
+            incident["alerts"][0]["alert_id"] = "AL-SQLI-DEMO-" + "a" * 32 + "-FIXTURE"
+            return incident
+
+    class DemoSimulator:
+        applied = False
+
+        async def authorize(self, incident_id, alerts):
+            return "b" * 32
+
+        async def apply(self, state, action):
+            self.applied = True
+            return True
+
+    services = DemoServices()
+    services.demo_simulator = DemoSimulator()
+    flow = workflow(services)
+    pending = await flow.run_investigation("IN-demo")
+    assert pending["status"] == "awaiting_approval"
+    with pytest.raises(ValueError, match="version"):
+        async for _ in flow.stream_approval(
+            "IN-demo",
+            response_plan_id=pending["response_plan"]["response_plan_id"],
+            plan_version="0" * 64,
+            decision="approved",
+            reason="wrong checkpoint version",
+            decided_by="reviewer",
+        ):
+            pass
+    assert (await flow.get_state("IN-demo"))["status"] == "awaiting_approval"
+    assert not services.demo_simulator.applied

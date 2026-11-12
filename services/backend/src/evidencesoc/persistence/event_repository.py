@@ -18,6 +18,7 @@ from evidencesoc.domain.models import (
     SecurityEvent,
     Severity,
 )
+from evidencesoc.domain.response_action import SIMULATED_CONTROL_SOURCE
 from evidencesoc.execution import check_execution
 from evidencesoc.persistence.json_encoding import restore_json, safe_json
 from evidencesoc.persistence.tables import (
@@ -178,7 +179,8 @@ class EventRepository:
             .where(
                 SecurityEventTable.index_status.in_(
                     (EventIndexStatus.PENDING.value, EventIndexStatus.FAILED.value)
-                )
+                ),
+                SecurityEventTable.source != SIMULATED_CONTROL_SOURCE,
             )
             .order_by(SecurityEventTable.ingested_at, SecurityEventTable.event_id)
             .limit(limit)

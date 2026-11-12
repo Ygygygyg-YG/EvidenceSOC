@@ -24,7 +24,7 @@ from evidencesoc.domain.models import (
     PlanRollbackStep,
     PlanValidationCheck,
 )
-from evidencesoc.domain.response_action import SimulatedAction
+from evidencesoc.domain.response_action import SIMULATED_CONTROL_SOURCE, SimulatedAction
 from evidencesoc.ids import new_ulid
 from evidencesoc.ingestion.normalize import calculate_content_sha256
 from evidencesoc.persistence.json_encoding import restore_json, safe_json
@@ -434,7 +434,8 @@ class ApiStore:
             existing_events = set(
                 session.scalars(
                     select(SecurityEventTable.event_id).where(
-                        SecurityEventTable.event_id.in_(event_ids)
+                        SecurityEventTable.event_id.in_(event_ids),
+                        SecurityEventTable.source != SIMULATED_CONTROL_SOURCE,
                     )
                 )
             )

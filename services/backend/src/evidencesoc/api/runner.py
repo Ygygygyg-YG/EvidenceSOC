@@ -5,6 +5,7 @@ from typing import Any
 
 import structlog
 
+from evidencesoc.agents.demo_sqli import DemoModeMismatchError
 from evidencesoc.agents.graph import TERMINAL_STATES
 from evidencesoc.api.errors import ApiError
 from evidencesoc.logging import redact
@@ -31,6 +32,7 @@ class InvestigationRunner:
         self.workflow = workflow
         self.tasks: dict[str, asyncio.Task] = {}
         self.rerun: set[str] = set()
+        self.deferred_demo_jobs: set[str] = set()
         self.closed = False
 
     async def call(self, name: str, *args, **kwargs):
@@ -97,7 +99,10 @@ class InvestigationRunner:
 
     async def recover(self):
         for metadata in await self.call("list_recoverable"):
-            active = self.tasks.get(metadata["investigation_id"])
+            identifier = metadata["investigation_id"]
+            if identifier in self.deferred_demo_jobs:
+                continue
+            active = self.tasks.get(identifier)
             if active is not None and not active.done():
                 continue
             if (
@@ -214,6 +219,11 @@ class InvestigationRunner:
     async def run_once(self, identifier):
         metadata = await self.call("get_investigation", identifier)
         try:
+            demo = getattr(
+                getattr(self.workflow, "services", None), "demo_registration", None
+            )
+            if demo is not None:
+                await demo.authorize_start(None, metadata["incident_id"])
             command = metadata["state"].get("pending_decision")
             renewal = metadata["state"].get("pending_renewal")
             state = await self.workflow.get_state(metadata["incident_id"])
@@ -250,6 +260,9 @@ class InvestigationRunner:
                 await self.translate(metadata, event)
             state = await self.workflow.get_state(metadata["incident_id"])
             await self.finish(metadata, state)
+        except DemoModeMismatchError:
+            # A backend restarted in the registered mode can resume this checkpoint.
+            self.deferred_demo_jobs.add(identifier)
         except asyncio.CancelledError:
             raise  # Startup resumes the last durable checkpoint.
         except Exception as error:  # noqa: BLE001 -- provider details must never escape
@@ -292,3 +305,4 @@ class InvestigationRunner:
         await asyncio.gather(*tasks, return_exceptions=True)
         self.tasks.clear()
         self.rerun.clear()
+        self.deferred_demo_jobs.clear()

@@ -199,6 +199,8 @@ def test_list_indexable_returns_pending_and_failed_events() -> None:
         "IN (__[POSTCOMPILE_index_status_1])" in str(compiled)
     )
     assert compiled.params["index_status_1"] == ["pending", "failed"]
+    assert "security_events.source !=" in str(compiled)
+    assert compiled.params["source_1"] == "simulated-control-observation"
 
 
 def test_mark_indexed_updates_status_and_clears_the_previous_error() -> None:

@@ -33,9 +33,13 @@ test('可直接打开案件 URL，展示真实案件、告警、证据、步骤�
   await expect(page.getByText('IN-E2E123', { exact: true })).toBeVisible();
   await expect(page.getByText('IV-E2E123', { exact: true })).toBeVisible();
   await expect(page.getByText('SQL 注入测试告警')).toBeVisible();
-  await expect(page.getByText('请求包含异常 SQL 参数')).toBeVisible();
   await expect(page.getByText('外部应用遭到尝试访问')).toBeVisible();
-  await expect(page.getByText('triage')).toBeVisible();
+  await page.getByRole('button', { name: '打开证据概览，共 1 条' }).click();
+  const evidence = page.getByRole('dialog', { name: '证据检查器' });
+  await expect(evidence).toContainText('请求包含异常 SQL 参数');
+  await evidence.getByRole('button', { name: '关闭' }).click();
+  await page.getByRole('button', { name: '查看分诊运行记录（1）' }).click();
+  await expect(page.getByRole('dialog', { name: '运行记录' })).toContainText('RUN-E2E123');
   expect(requestedPath).toBe('/api/v1/incidents/IN-E2E123');
   await page.reload();
   await expect(page.getByText('SQL 注入测试告警')).toBeVisible();

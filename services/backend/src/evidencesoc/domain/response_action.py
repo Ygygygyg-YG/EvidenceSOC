@@ -15,6 +15,8 @@ from evidencesoc.domain.event_search_policy import (
     validate_event_search,
 )
 
+SIMULATED_CONTROL_SOURCE = "simulated-control-observation"
+
 SIMULATED_ACTIONS = frozenset(
     {"block_ip_simulated", "isolate_host_simulated", "disable_account_simulated"}
 )

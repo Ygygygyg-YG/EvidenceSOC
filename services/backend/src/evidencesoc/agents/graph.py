@@ -189,6 +189,10 @@ def _persisted_plan_version(plan: dict[str, Any]) -> str:
     ).hexdigest()
 
 
+def _has_sqli_demo_alert(state) -> bool:
+    return any(is_demo_alert(alert["alert_id"]) for alert in state.get("alerts", []))
+
+
 def _analysis_route(state):
     if state.get("status") in {"failed", "manual_review"}:
         return "review" if state["status"] == "manual_review" else END
@@ -519,9 +523,7 @@ def build_graph(
         await services.save_result({**state, "simulation_execution": running})
         simulation = []
         action_results = []
-        is_registered_demo = any(
-            is_demo_alert(alert["alert_id"]) for alert in state.get("alerts", [])
-        )
+        is_registered_demo = _has_sqli_demo_alert(state)
         for index, action in enumerate(actions):
             action_started = datetime.now(UTC)
             applied = True
@@ -530,6 +532,8 @@ def build_graph(
                     demo_simulator is not None
                     and bool(state.get("verification_namespace"))
                     and len(actions) == 1
+                    and execution["plan_version"]
+                    == _persisted_plan_version(state["response_plan"])
                     and await demo_simulator.apply(state, action)
                 )
             outcome = "success" if applied else "failure"
@@ -807,6 +811,18 @@ class InvestigationWorkflow:
         snapshot = await self.graph.aget_state(self._config(incident_id))
         return dict(snapshot.values)
 
+    async def matches_pending_plan_version(
+        self, incident_id: str, response_plan_id: str, plan_version: str
+    ) -> bool:
+        state = await self.get_state(incident_id)
+        plan = state.get("response_plan")
+        return (
+            state.get("status") == "awaiting_approval"
+            and isinstance(plan, dict)
+            and plan.get("response_plan_id") == response_plan_id
+            and _persisted_plan_version(plan) == plan_version
+        )
+
     async def run_investigation(self, incident_id: str) -> dict[str, Any]:
         async for _ in self.stream_events(incident_id):
             pass
@@ -1002,6 +1018,15 @@ class InvestigationWorkflow:
             plan = snapshot.values["response_plan"]
             if response_plan_id != plan["response_plan_id"]:
                 raise ValueError("approval belongs to a different response plan")
+            if (
+                record.decision == "approved"
+                and _has_sqli_demo_alert(snapshot.values)
+                and plan_version is not None
+                and plan_version != _persisted_plan_version(plan)
+            ):
+                raise ValueError(
+                    "demo approval plan version does not match the checkpoint"
+                )
             cursor = after_event_id
             for event in snapshot.values.get("events", []):
                 if event["event_id"] > cursor:

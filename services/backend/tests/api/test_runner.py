@@ -1,6 +1,9 @@
 import asyncio
+from contextlib import nullcontext
+from types import SimpleNamespace
 
 import pytest
+from evidencesoc.agents.demo_sqli import SqlInjectionDemo
 from evidencesoc.api.runner import InvestigationRunner
 
 
@@ -104,3 +107,36 @@ async def test_decision_arriving_as_job_finishes_is_scheduled_again():
         await asyncio.sleep(0.005)
     assert len(calls) == 2
     await runner.close()
+
+
+@pytest.mark.asyncio
+async def test_demo_recovery_waits_for_enabled_mode(tmp_path):
+    store = Store()
+    store.metadata["status"] = "collecting"
+    store.metadata["state"] = {"status": "collecting"}
+    alert = SimpleNamespace(alert_id="AL-SQLI-DEMO-" + "a" * 32 + "-FIXTURE")
+
+    def sessions():
+        return nullcontext(SimpleNamespace(get=lambda *_: alert))
+
+    class Workflow:
+        services = SimpleNamespace(
+            demo_registration=SqlInjectionDemo(tmp_path, None, sessions)
+        )
+        resumed = False
+
+        async def get_state(self, incident_id):
+            return {"status": "completed", "events": []}
+
+        async def stream_events(self, incident_id, **kwargs):
+            self.resumed = True
+            if False:
+                yield
+
+    workflow = Workflow()
+    runner = InvestigationRunner(store, workflow)
+    assert await runner.run_once("IV-test")
+    assert not workflow.resumed
+    assert store.metadata["status"] == "collecting"
+    assert not store.events
+    assert runner.deferred_demo_jobs == {"IV-test"}

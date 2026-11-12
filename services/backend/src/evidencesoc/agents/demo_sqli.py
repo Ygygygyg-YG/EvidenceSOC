@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from evidencesoc.agents.verification import EffectObservation
 from evidencesoc.domain.models import EvidenceItem, ResponsePlan
-from evidencesoc.domain.response_action import SimulatedAction
+from evidencesoc.domain.response_action import SIMULATED_CONTROL_SOURCE, SimulatedAction
 from evidencesoc.ids import new_ulid
 from evidencesoc.ingestion.normalize import calculate_content_sha256
 from evidencesoc.persistence.event_repository import EvidenceRepository
@@ -28,11 +28,14 @@ from evidencesoc.persistence.tables import (
 
 _ALERT = re.compile(r"AL-SQLI-DEMO-([0-9a-f]{32})-(FIXTURE|DEEPSEEK|REJECT)")
 _TARGET = "203.0.113.42"
-_SOURCE = "simulated-control-observation"
 
 
 class DemoRegistrationError(ValueError):
     """A reserved demo alert does not match its local registration."""
+
+
+class DemoModeMismatchError(DemoRegistrationError):
+    """This backend mode cannot run the registered alert."""
 
 
 def is_demo_alert(alert_id: str) -> bool:
@@ -56,17 +59,19 @@ class SqlInjectionDemo:
 
     async def authorize_start(
         self, alert_id: str | None, incident_id: str | None
-    ) -> None:
+    ) -> str | None:
         if alert_id is None or is_demo_alert(alert_id):
-            await asyncio.to_thread(self._authorize_start, alert_id, incident_id)
+            return await asyncio.to_thread(self._authorize_start, alert_id, incident_id)
+        return None
 
-    def _authorize_start(self, alert_id: str | None, incident_id: str | None) -> None:
+    def _authorize_start(
+        self, alert_id: str | None, incident_id: str | None
+    ) -> str | None:
         with self.sessions() as session:
             if alert_id is None:
                 incident = session.get(IncidentTable, incident_id)
                 alert_id = incident.alert_id if incident is not None else None
-            if alert_id is not None:
-                self._registered_alert(session, alert_id)
+            return self._registered_alert(session, alert_id) if alert_id else None
 
     def _registered_namespace(self, incident_id: str, alert_id: str) -> str:
         with self.sessions() as session:
@@ -83,7 +88,7 @@ class SqlInjectionDemo:
         if match is None:
             return None
         if self.mode is None:
-            raise DemoRegistrationError("请启用 SQL 注入演示配置。")
+            raise DemoModeMismatchError("请启用 SQL 注入演示配置。")
         run_id, variant = match.groups()
         try:
             registration = json.loads(
@@ -111,7 +116,7 @@ class SqlInjectionDemo:
                 "demo registration is missing or invalid"
             ) from error
         if self.mode != expected_mode:
-            raise DemoRegistrationError(
+            raise DemoModeMismatchError(
                 f"此演示告警需要后端运行在 {expected_mode} 模式。"
             )
         alert = session.get(AlertTable, alert_id)
@@ -190,7 +195,7 @@ class SqlInjectionDemo:
                 session.add(
                     SecurityEventTable(
                         event_id=event_id,
-                        source=_SOURCE,
+                        source=SIMULATED_CONTROL_SOURCE,
                         external_id=event_id,
                         deduplication_key=f"id:{event_id}",
                         observed_at=observed_at,
@@ -205,7 +210,7 @@ class SqlInjectionDemo:
                     EvidenceItem(
                         evidence_id="EV-" + new_ulid(),
                         event_id=event_id,
-                        source=_SOURCE,
+                        source=SIMULATED_CONTROL_SOURCE,
                         observed_at=observed_at,
                         query={"action_id": scope["action_id"], "phase": phase},
                         summary=f"本地模拟封禁{'前' if phase == 'before' else '后'}的控制状态",
@@ -236,7 +241,7 @@ class SqlInjectionDemo:
             event, item = row
             raw = event.raw
             if (
-                event.source != _SOURCE
+                event.source != SIMULATED_CONTROL_SOURCE
                 or raw.get("phase") != phase
                 or raw.get("simulation_only") is not True
                 or any(raw.get(key) != value for key, value in scope.items())

@@ -47,14 +47,20 @@ async def decide(
         raise ApiError(422, "INVALID_REQUEST", "Idempotency key must not be blank.")
     actor_id = require_demo_reviewer(request)
     runner = get_runner(request)
-    demo = getattr(getattr(runner.workflow, "services", None), "demo_registration", None)
+    demo = getattr(
+        getattr(runner.workflow, "services", None), "demo_registration", None
+    )
     if demo is not None and decision == "approved":
         plan = await runner.call("get_response_plan_detail", plan_id)
         if plan["decision_state"] == "pending":
             try:
-                await demo.authorize_start(None, plan["incident_id"])
+                registered = await demo.authorize_start(None, plan["incident_id"])
             except DemoRegistrationError as error:
                 raise ApiError(409, "DEMO_REGISTRATION_INVALID", str(error)) from None
+            if registered and not await runner.workflow.matches_pending_plan_version(
+                plan["incident_id"], plan_id, body.plan_version
+            ):
+                raise ApiError(409, "CONFLICT", "Response plan version is stale.")
     result = await runner.call(
         "record_decision_idempotent",
         plan_id,
