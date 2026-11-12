@@ -20,6 +20,7 @@ from evidencesoc.agents.capabilities import (
     current_capabilities,
 )
 from evidencesoc.agents.collection import BoundedCollector
+from evidencesoc.agents.demo_sqli import SqlInjectionDemo
 from evidencesoc.agents.diagnosis import Diagnosis
 from evidencesoc.agents.fallback import matching_target
 from evidencesoc.agents.models import SimulatedAction
@@ -89,6 +90,16 @@ class PostgresWorkflowServices:
         self.planner_model: Any | None = None
         self.capabilities = capabilities
         self.verification_observer = verification_observer
+        self.demo_registration = SqlInjectionDemo(
+            settings.demo_sqli_directory,
+            settings.llm_mode if settings.demo_sqli_enabled else None,
+            session_factory,
+        )
+        self.demo_simulator = None
+        if settings.demo_sqli_enabled:
+            self.demo_simulator = self.demo_registration
+            if self.verification_observer is None:
+                self.verification_observer = self.demo_simulator.observe
         self.model_timeout = model_timeout
 
     async def aclose(self) -> None:

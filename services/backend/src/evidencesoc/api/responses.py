@@ -2,6 +2,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Header, Query, Request, Response
 
+from evidencesoc.agents.demo_sqli import DemoRegistrationError
 from evidencesoc.api.demo_session import require_demo_reviewer
 from evidencesoc.api.dependencies import get_runner
 from evidencesoc.api.errors import ApiError
@@ -46,6 +47,14 @@ async def decide(
         raise ApiError(422, "INVALID_REQUEST", "Idempotency key must not be blank.")
     actor_id = require_demo_reviewer(request)
     runner = get_runner(request)
+    demo = getattr(getattr(runner.workflow, "services", None), "demo_registration", None)
+    if demo is not None and decision == "approved":
+        plan = await runner.call("get_response_plan_detail", plan_id)
+        if plan["decision_state"] == "pending":
+            try:
+                await demo.authorize_start(None, plan["incident_id"])
+            except DemoRegistrationError as error:
+                raise ApiError(409, "DEMO_REGISTRATION_INVALID", str(error)) from None
     result = await runner.call(
         "record_decision_idempotent",
         plan_id,

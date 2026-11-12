@@ -4,7 +4,7 @@ import asyncio
 import hashlib
 import json
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Any
@@ -16,6 +16,7 @@ from psycopg import Connection
 
 from evidencesoc.agents.capabilities import capability_scope
 from evidencesoc.agents.checkpoint import open_checkpointer, psycopg_url
+from evidencesoc.agents.demo_sqli import DemoRegistrationError, is_demo_alert
 from evidencesoc.agents.fallback import matching_target
 from evidencesoc.agents.models import SimulatedAction
 from evidencesoc.agents.nodes import NodeHandlers
@@ -227,6 +228,7 @@ def build_graph(
     planning_admission=None,
 ):
     builder = StateGraph(InvestigationState)
+    demo_simulator = getattr(services, "demo_simulator", None)
 
     def wrap(role):
         async def execute(state):
@@ -290,6 +292,16 @@ def build_graph(
                         }
                     else:
                         delta = await getattr(nodes, role)({**state, "_run_id": run_id})
+                if (
+                    role == "triage"
+                    and demo_simulator is not None
+                    and capabilities is None
+                ):
+                    namespace = await demo_simulator.authorize(
+                        state["incident_id"], delta.get("alerts", [])
+                    )
+                    if namespace is not None:
+                        delta["verification_namespace"] = namespace
                 _validate_output(state, delta)
                 if (
                     role == "respond"
@@ -327,6 +339,8 @@ def build_graph(
                 code = (
                     "UNSUPPORTED_CITATION"
                     if isinstance(error, CitationViolation)
+                    else "DEMO_REGISTRATION_INVALID"
+                    if isinstance(error, DemoRegistrationError)
                     else "NODE_FAILED"
                 )
                 delta = {
@@ -505,30 +519,46 @@ def build_graph(
         await services.save_result({**state, "simulation_execution": running})
         simulation = []
         action_results = []
+        is_registered_demo = any(
+            is_demo_alert(alert["alert_id"]) for alert in state.get("alerts", [])
+        )
         for index, action in enumerate(actions):
             action_started = datetime.now(UTC)
+            applied = True
+            if is_registered_demo:
+                applied = (
+                    demo_simulator is not None
+                    and bool(state.get("verification_namespace"))
+                    and len(actions) == 1
+                    and await demo_simulator.apply(state, action)
+                )
+            outcome = "success" if applied else "failure"
             simulation.append(
                 {
                     **action.model_dump(mode="json"),
                     "execution_id": f"{plan.response_plan_id}:{index}",
                     "simulated": True,
                     "status": "simulated",
-                    "outcome": "success",
+                    "outcome": outcome,
                 }
             )
             action_results.append(
                 {
                     "action_id": action.action_id,
-                    "outcome": "success",
-                    "description": action.preview,
+                    "outcome": outcome,
+                    "description": action.preview
+                    if applied
+                    else "Demo control was not applied.",
                     "started_at": action_started.isoformat(),
                     "finished_at": datetime.now(UTC).isoformat(),
                 }
             )
+        failed = any(result["outcome"] == "failure" for result in action_results)
         completed = SimulationExecution.model_validate(
             {
                 **running,
-                "status": "completed",
+                "status": "failed" if failed else "completed",
+                "error": "DEMO_CONTROL_NOT_APPLIED" if failed else None,
                 "finished_at": datetime.now(UTC).isoformat(),
                 "action_results": action_results,
             }
@@ -1013,9 +1043,21 @@ async def open_workflow(settings: Settings | None = None):
     settings = settings or get_settings()
     services = PostgresWorkflowServices(settings)
     try:
-        async with open_checkpointer(settings.database_url) as saver:
+        async with AsyncExitStack() as stack:
+            saver = await stack.enter_async_context(
+                open_checkpointer(settings.database_url)
+            )
+            model_options = {}
+            if settings.demo_sqli_enabled and settings.llm_mode == "deepseek":
+                from evidencesoc.agents.demo_budget import create_demo_model_client
+
+                model_options["http_async_client"] = await stack.enter_async_context(
+                    create_demo_model_client(
+                        settings.demo_sqli_directory / "model-budget.sqlite3"
+                    )
+                )
             model = (
-                DeepSeekStructuredModel(settings)
+                DeepSeekStructuredModel(settings, **model_options)
                 if settings.llm_mode == "deepseek"
                 else None
             )

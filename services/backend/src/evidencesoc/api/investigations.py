@@ -2,6 +2,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Header, Query, Request, Response
 
+from evidencesoc.agents.demo_sqli import DemoRegistrationError, is_demo_alert
 from evidencesoc.api.alerts import _time_bound
 from evidencesoc.api.demo_session import require_demo_session
 from evidencesoc.api.dependencies import get_runner
@@ -39,6 +40,14 @@ async def create_investigation(
             "Requested investigation mode does not match the configured backend mode.",
         )
     runner = get_runner(request)
+    demo = getattr(getattr(runner.workflow, "services", None), "demo_registration", None)
+    if demo is not None:
+        try:
+            await demo.authorize_start(body.alert_id, body.incident_id)
+        except DemoRegistrationError as error:
+            raise ApiError(409, "DEMO_REGISTRATION_INVALID", str(error)) from None
+    elif body.alert_id is not None and is_demo_alert(body.alert_id):
+        raise ApiError(409, "DEMO_REGISTRATION_INVALID", "请启用 SQL 注入演示配置。")
     metadata, created = await runner.call(
         "create_investigation", **body.model_dump(), idempotency_key=idempotency_key
     )

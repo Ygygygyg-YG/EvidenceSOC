@@ -139,6 +139,32 @@ async def approve(flow, incident_id="IN-demo", decision="approved"):
 
 
 @pytest.mark.asyncio
+async def test_registered_demo_cannot_simulate_after_restart_with_demo_disabled():
+    class DemoServices(MemoryServices):
+        async def load_incident(self, incident_id):
+            loaded = await super().load_incident(incident_id)
+            loaded["alerts"][0]["alert_id"] = "AL-SQLI-DEMO-" + "a" * 32 + "-FIXTURE"
+            return loaded
+
+    class DemoSimulator:
+        async def authorize(self, incident_id, alerts):
+            return "b" * 32
+
+    services = DemoServices()
+    services.demo_simulator = DemoSimulator()
+    saver = InMemorySaver()
+    initial = await workflow(services, saver).run_investigation("IN-demo")
+    assert initial["status"] == "awaiting_approval"
+    assert initial["verification_namespace"] == "b" * 32
+
+    services.demo_simulator = None
+    final = await approve(workflow(services, saver))
+    assert final["simulation_execution"]["status"] == "failed"
+    assert final["simulation_execution"]["action_results"][0]["outcome"] == "failure"
+    assert final["validation_result"]["outcome"] == "failure"
+
+
+@pytest.mark.asyncio
 async def test_fixture_pauses_before_actions_and_finishes_six_roles_after_approval():
     services = MemoryServices()
     flow = workflow(services)

@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
-from pydantic import SecretStr, field_validator
+from pydantic import SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -35,7 +35,20 @@ class Settings(BaseSettings):
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-flash"
     demo_session_enabled: bool = False
+    demo_sqli_enabled: bool = False
+    demo_sqli_directory: Path = REPOSITORY_ROOT / ".tmp" / "sqli-demo"
     frontend_origin: str = "http://127.0.0.1:3000"
+
+    @field_validator("demo_sqli_directory")
+    @classmethod
+    def absolute_demo_directory(cls, value: Path) -> Path:
+        return value if value.is_absolute() else REPOSITORY_ROOT / value
+
+    @model_validator(mode="after")
+    def require_local_demo_session(self):
+        if self.demo_sqli_enabled and not self.demo_session_enabled:
+            raise ValueError("SQL injection demo requires the local demo session")
+        return self
 
     @field_validator("frontend_origin")
     @classmethod

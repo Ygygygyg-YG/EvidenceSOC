@@ -6,14 +6,13 @@ import asyncio
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Literal
 
-from pydantic import ValidationError
-
 from evidencesoc.agents.capabilities import InvestigationCapabilities
 from evidencesoc.agents.collect_policy import (
     SEARCH_ARGUMENTS,
     CollectionDecision,
     validate_collection_call,
 )
+from evidencesoc.agents.model import DeepSeekStructuredModel, record_model_attempt
 from evidencesoc.ids import new_ulid
 from evidencesoc.tools.ledger import (
     AttemptLimitExceeded,
@@ -386,7 +385,10 @@ class BoundedCollector:
             },
         }
         code = "MODEL_UNAVAILABLE"
-        for _ in range(3):
+        deepseek_adapter = isinstance(self.model, DeepSeekStructuredModel)
+        if deepseek_adapter:
+            context["_evaluation_context"] = self.capabilities is not None
+        for attempt in range(1, 4):
             self.model_attempts += 1
             try:
                 output = await asyncio.wait_for(
@@ -394,19 +396,26 @@ class BoundedCollector:
                     timeout=self.model_timeout,
                 )
                 return CollectionDecision.model_validate(output)
-            except TimeoutError:
-                code = "MODEL_TIMEOUT"
-            except (ValidationError, ValueError):
-                code = "MODEL_INVALID_OUTPUT"
-            except Exception:  # noqa: BLE001 - model failures use bounded rule fallback.
-                code = "MODEL_UNAVAILABLE"
-            self.observations.append(
-                {
+            except Exception as error:  # noqa: BLE001 - model failures use bounded rule fallback.
+                if isinstance(error, TimeoutError):
+                    code = "MODEL_TIMEOUT"
+                elif isinstance(error, ValueError):
+                    code = "MODEL_INVALID_OUTPUT"
+                else:
+                    code = "MODEL_UNAVAILABLE"
+                observation = {
                     "status": "planner_retry",
                     "attempt": self.model_attempts,
                     "error_code": code,
                 }
-            )
+                if deepseek_adapter and self.capabilities is None:
+                    diagnostic = record_model_attempt(
+                        "collect", attempt, code, CollectionDecision, error
+                    )
+                    observation["diagnostic"] = diagnostic
+                    if code == "MODEL_INVALID_OUTPUT":
+                        context["_model_repair"] = diagnostic
+                self.observations.append(observation)
         self.fallback_used = True
         self.observations.append({"status": "planner_fallback", "error_code": code})
         return self._rule()

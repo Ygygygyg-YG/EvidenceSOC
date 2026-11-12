@@ -754,6 +754,8 @@ async def test_validation_computes_effect_from_separate_cited_observations(
 
     result = await handlers(ObservedServices()).validate(current)
     assert result["validation_result"]["outcome"] == expected
+    assert set(result["validation_result"]["checks"][0]["evidence_ids"]) == {EV, EV2}
+    assert set(result["validation_result"]["evidence_ids"]) == {EV, EV2}
 
 
 @pytest.mark.asyncio
@@ -860,6 +862,84 @@ async def test_valid_structured_model_keeps_cloud_result_without_fallback() -> N
     assert model.calls == 1
     assert result["fallback_used"] is False
     assert result["errors"] == []
+
+
+@pytest.mark.asyncio
+async def test_registered_live_demo_scopes_model_persistence_ids_to_the_incident() -> (
+    None
+):
+    module = importlib.import_module("evidencesoc.agents.nodes")
+    capabilities = importlib.import_module("evidencesoc.agents.capabilities")
+
+    class ReusedIdentifiers:
+        async def structured(self, role, schema, current):
+            result = getattr(module.fallback, role)(current).model_dump(mode="json")
+            if role == "reconstruct":
+                result["attack_steps"][0]["attack_step_id"] = "AS-provider-reused"
+            if role == "respond":
+                result["response_plan"]["response_plan_id"] = "RP-provider-reused"
+            return schema.model_validate(result)
+
+    settings = Settings(
+        _env_file=None,
+        llm_mode="deepseek",
+        demo_session_enabled=True,
+        demo_sqli_enabled=True,
+    )
+    nodes = module.NodeHandlers(Services(), settings, model=ReusedIdentifiers())
+    current = state(verification_namespace="registered-demo")
+    current.update(await nodes.analyze(current))
+    current["diagnosis"] = {
+        "verdict": "attack",
+        "taxonomy_status": "out_of_taxonomy",
+        "evidence_ids": [EV],
+    }
+
+    steps, plan = await nodes.reconstruct(current), await nodes.respond(current)
+    other = {**current, "incident_id": "IN-2"}
+    other_steps, other_plan = await nodes.reconstruct(other), await nodes.respond(other)
+    step_id = steps["attack_steps"][0]["attack_step_id"]
+    plan_id = plan["response_plan"]["response_plan_id"]
+
+    assert step_id not in {
+        "AS-provider-reused",
+        other_steps["attack_steps"][0]["attack_step_id"],
+    }
+    assert plan_id not in {
+        "RP-provider-reused",
+        other_plan["response_plan"]["response_plan_id"],
+    }
+    assert steps["diagnosis"]["stage_instances"][0]["instance_id"] == step_id
+    assert steps["attack_steps"][0]["evidence_ids"] == [EV]
+    assert plan["response_plan"]["actions"][0]["evidence_ids"] == [EV]
+    assert (await nodes.reconstruct(current))["attack_steps"][0][
+        "attack_step_id"
+    ] == step_id
+    assert (await nodes.respond(current))["response_plan"][
+        "response_plan_id"
+    ] == plan_id
+
+    evaluation = module.NodeHandlers(
+        Services(),
+        settings,
+        model=ReusedIdentifiers(),
+        capabilities=capabilities.InvestigationCapabilities(),
+    )
+    assert (await evaluation.reconstruct(current))["attack_steps"][0][
+        "attack_step_id"
+    ] == "AS-provider-reused"
+    assert (await evaluation.respond(current))[
+        "response_reason"
+    ] == "invalid_diagnosis_snapshot"
+    graph_module = importlib.import_module("evidencesoc.agents.graph")
+    reconstructed = {**current, **steps}
+    sealed = {
+        **reconstructed,
+        **graph_module._seal_diagnosis(reconstructed, "reconstruct"),
+    }
+    assert (await evaluation.respond(sealed))["response_plan"][
+        "response_plan_id"
+    ] == "RP-provider-reused"
 
 
 def test_reconstruction_schema_rejects_duplicate_sequences() -> None:

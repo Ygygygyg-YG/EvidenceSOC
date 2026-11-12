@@ -13,6 +13,11 @@ from pydantic import BaseModel, ValidationError
 from evidencesoc.agents import fallback
 from evidencesoc.agents.capabilities import InvestigationCapabilities
 from evidencesoc.agents.diagnosis import Diagnosis
+from evidencesoc.agents.model import (
+    DeepSeekStructuredModel,
+    record_model_attempt,
+    retrieved_techniques,
+)
 from evidencesoc.agents.models import (
     AnalysisOutput,
     ReconstructionOutput,
@@ -145,11 +150,7 @@ def validate_output_citations(output: BaseModel, state: dict[str, Any]) -> None:
             EvidenceItem.model_validate(item).observed_at for item in items
         }:
             raise ValueError("first observed time does not match cited evidence")
-    available_techniques = {
-        item.get("technique_id")
-        for item in state.get("knowledge", [])
-        if item.get("knowledge_chunk_id") and item.get("source_uri")
-    }
+    available_techniques = retrieved_techniques(state)
     if (
         isinstance(output, AnalysisOutput)
         and output.classification is not None
@@ -200,6 +201,14 @@ class NodeHandlers:
         self.model_timeout = model_timeout
         self.capabilities = capabilities
 
+    def _is_registered_live_demo(self, state: dict[str, Any]) -> bool:
+        return (
+            self.capabilities is None
+            and self.settings.llm_mode == "deepseek"
+            and self.settings.demo_sqli_enabled
+            and bool(state.get("verification_namespace"))
+        )
+
     async def _structured(
         self,
         role: str,
@@ -216,8 +225,6 @@ class NodeHandlers:
             return result, True, errors
         if self.model is None:
             try:
-                from evidencesoc.agents.model import DeepSeekStructuredModel
-
                 self.model = DeepSeekStructuredModel(self.settings)
             except Exception:  # noqa: BLE001 - Provider boundary must sanitize errors.
                 errors.append({"role": role, "code": "MODEL_UNAVAILABLE"})
@@ -227,6 +234,9 @@ class NodeHandlers:
         code = "MODEL_UNAVAILABLE"
         model_call_id = new_ulid()
         attempt_categories: list[str] = []
+        diagnostics: list[dict[str, Any]] = []
+        repair = None
+        deepseek_adapter = isinstance(self.model, DeepSeekStructuredModel)
         for attempt in range(1, 4):
             draft = None
             failure_stage = "model_call"
@@ -235,6 +245,9 @@ class NodeHandlers:
             try:
                 model_state = deepcopy(state)
                 model_state["_model_call_id"] = model_call_id
+                if deepseek_adapter:
+                    model_state["_evaluation_context"] = self.capabilities is not None
+                    model_state["_model_repair"] = repair
                 model_state["evidence"] = [
                     {**item, "raw": fallback.observed_raw(item)}
                     for item in state.get("evidence", [])
@@ -272,19 +285,25 @@ class NodeHandlers:
                         }
                     )
                 return result, bool(state.get("fallback_used")), errors
-            except TimeoutError:
-                code = "MODEL_TIMEOUT"
-                category = "transport"
-            except (ValueError, ValidationError):
-                code = "MODEL_INVALID_OUTPUT"
-                category = "schema"
             except Exception as error:  # noqa: BLE001 - Provider boundary must sanitize errors.
-                code = "MODEL_UNAVAILABLE"
-                category = (
-                    "transport"
-                    if isinstance(error, httpx.TransportError)
-                    else "application"
-                )
+                if isinstance(error, TimeoutError):
+                    code, category = "MODEL_TIMEOUT", "transport"
+                elif isinstance(error, ValueError):
+                    code, category = "MODEL_INVALID_OUTPUT", "schema"
+                else:
+                    code = "MODEL_UNAVAILABLE"
+                    category = (
+                        "transport"
+                        if isinstance(error, httpx.TransportError)
+                        else "application"
+                    )
+                if deepseek_adapter and self.capabilities is None:
+                    diagnostic = record_model_attempt(
+                        role, attempt, code, schema, error
+                    )
+                    diagnostics.append(diagnostic)
+                    if category == "schema":
+                        repair = diagnostic
             if response_attempts is not None:
                 record = {
                     "attempt": attempt,
@@ -313,6 +332,8 @@ class NodeHandlers:
                 "transport",
             )
             terminal_error["attempt_categories"] = attempt_categories
+        if diagnostics:
+            terminal_error["attempts"] = diagnostics
         errors.append(terminal_error)
         result = rule(state)
         validate_output_citations(result, state)
@@ -407,6 +428,15 @@ class NodeHandlers:
         output, used, errors = await self._structured(
             "reconstruct", ReconstructionOutput, state, fallback.reconstruct
         )
+        output = ReconstructionOutput.model_validate(output)
+        if self._is_registered_live_demo(state):
+            steps = []
+            for step in output.attack_steps:
+                digest = sha256(
+                    f"{state['incident_id']}|{step.sequence}".encode()
+                ).hexdigest()[:24]
+                steps.append(step.model_copy(update={"attack_step_id": f"AS-{digest}"}))
+            output = ReconstructionOutput(attack_steps=steps)
         diagnosis_delta = {}
         if state.get("diagnosis") is not None:
             diagnosis = Diagnosis.model_validate(state["diagnosis"])
@@ -545,8 +575,10 @@ class NodeHandlers:
             no_plan_reason = None
         data["no_plan_reason"] = no_plan_reason
         generation = state.get("plan_generation", 0)
-        if data["response_plan"] and generation:
-            source_id = state["renewed_from_plan_id"]
+        if data["response_plan"] and (
+            generation or self._is_registered_live_demo(state)
+        ):
+            source_id = state["renewed_from_plan_id"] if generation else "initial"
             digest = sha256(
                 f"{state['incident_id']}|{source_id}|{generation}".encode()
             ).hexdigest()[:24]
@@ -751,6 +783,8 @@ class NodeHandlers:
                             and before.namespace == state.get("verification_namespace")
                             and before.action_id == actions[index].action_id
                             and before.target == actions[index].target
+                            and (after.namespace, after.action_id, after.target)
+                            == (before.namespace, before.action_id, before.target)
                             and set(before.evidence_ids) <= allowed_before
                             and set(after.evidence_ids) <= set(cited)
                         ):
@@ -759,6 +793,10 @@ class NodeHandlers:
                                     actions[index].action, before, after
                                 )
                             )
+                            if self.capabilities is None:
+                                cited = list(
+                                    dict.fromkeys([*cited, *before.evidence_ids])
+                                )
                     except (ValidationError, ValueError, TypeError, AttributeError):
                         pass
                     explanation = (
@@ -809,7 +847,18 @@ class NodeHandlers:
             outcome=outcome,
             summary=summary,
             checked_at=datetime.now(UTC),
-            evidence_ids=[item["evidence_id"] for item in fresh],
+            evidence_ids=list(
+                dict.fromkeys(
+                    [
+                        *(item["evidence_id"] for item in fresh),
+                        *(
+                            evidence_id
+                            for check in checks
+                            for evidence_id in check["evidence_ids"]
+                        ),
+                    ]
+                )
+            ),
             time_from=time_from,
             time_to=time_to,
             checks=[ValidationCheckResult.model_validate(check) for check in checks],
